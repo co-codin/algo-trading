@@ -15,6 +15,10 @@ import type {
 } from "./types";
 
 type StatusType = "" | "busy" | "error";
+type SelectOption = {
+  label: string;
+  value: string | number;
+};
 
 const routeModes: Record<string, Mode> = {
   "/": "backtest",
@@ -42,6 +46,36 @@ const tabs: { mode: Mode; label: string }[] = [
   { mode: "runs", label: "Runs" },
   { mode: "lab", label: "Strategy Lab" },
 ];
+
+const liveSymbolOptions = [
+  { value: "BTCUSDT", label: "BTCUSDT" },
+  { value: "ETHUSDT", label: "ETHUSDT" },
+  { value: "SOLUSDT", label: "SOLUSDT" },
+  { value: "BNBUSDT", label: "BNBUSDT" },
+  { value: "XRPUSDT", label: "XRPUSDT" },
+  { value: "DOGEUSDT", label: "DOGEUSDT" },
+  { value: "ADAUSDT", label: "ADAUSDT" },
+  { value: "AVAXUSDT", label: "AVAXUSDT" },
+] satisfies SelectOption[];
+
+const liveIntervalOptions = [
+  { value: "1m", label: "1m" },
+  { value: "3m", label: "3m" },
+  { value: "5m", label: "5m" },
+  { value: "15m", label: "15m" },
+  { value: "30m", label: "30m" },
+  { value: "1h", label: "1h" },
+  { value: "4h", label: "4h" },
+  { value: "1d", label: "1d" },
+] satisfies SelectOption[];
+
+const liveCandleOptions = [
+  { value: 80, label: "80" },
+  { value: 180, label: "180" },
+  { value: 300, label: "300" },
+  { value: 500, label: "500" },
+  { value: 1000, label: "1000" },
+] satisfies SelectOption[];
 
 const settings = reactive<Record<string, string>>({
   symbols: "BTCUSDT",
@@ -102,7 +136,7 @@ const labStatus = ref("Ready");
 const labStatusType = ref<StatusType>("");
 const liveSymbol = ref("BTCUSDT");
 const liveInterval = ref("1m");
-const liveLimit = ref("180");
+const liveLimit = ref<string | number>(180);
 const liveRefresh = ref("10");
 const showSignals = ref(true);
 const showPaper = ref(true);
@@ -466,9 +500,42 @@ function errorMessage(error: unknown): string {
         <div class="status" :class="liveStatusType ? `is-${liveStatusType}` : ''">{{ liveStatus }}</div>
       </div>
       <div class="live-controls">
-        <label><span>Symbol</span><input v-model="liveSymbol" autocomplete="off"></label>
-        <label><span>Interval</span><input v-model="liveInterval" autocomplete="off"></label>
-        <label><span>Candles</span><input v-model="liveLimit" type="number" min="30" max="1000"></label>
+        <label>
+          <span>Symbol</span>
+          <select v-model="liveSymbol">
+            <option
+              v-for="option in liveSymbolOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label>
+          <span>Interval</span>
+          <select v-model="liveInterval">
+            <option
+              v-for="option in liveIntervalOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label>
+          <span>Candles</span>
+          <select v-model="liveLimit">
+            <option
+              v-for="option in liveCandleOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
         <label><span>Refresh Sec</span><input v-model="liveRefresh" type="number" min="2" max="300"></label>
         <label class="toggle-row"><input v-model="showSignals" type="checkbox"><span>Strategy markers</span></label>
         <label class="toggle-row"><input v-model="showPaper" type="checkbox"><span>Paper markers</span></label>

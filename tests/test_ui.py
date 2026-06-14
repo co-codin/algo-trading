@@ -54,6 +54,24 @@ def trending_candles() -> list[Candle]:
 
 
 class UiTests(unittest.TestCase):
+    def test_live_market_controls_are_selectable(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("const liveSymbolOptions = [", source)
+        self.assertIn("const liveIntervalOptions = [", source)
+        self.assertIn("const liveCandleOptions = [", source)
+        self.assertIn('<select v-model="liveSymbol"', source)
+        self.assertIn('<select v-model="liveInterval"', source)
+        self.assertIn('<select v-model="liveLimit"', source)
+        self.assertIn('value: "BTCUSDT"', source)
+        self.assertIn('value: "ETHUSDT"', source)
+        self.assertIn('value: "1m"', source)
+        self.assertIn('value: "1h"', source)
+        self.assertIn("value: 180", source)
+        self.assertIn("value: 500", source)
+
     def test_frontend_routes_allow_direct_view_urls(self):
         self.assertTrue(is_frontend_route("/"))
         self.assertTrue(is_frontend_route("/backtest"))
