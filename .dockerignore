@@ -1,0 +1,10 @@
+.git
+.mypy_cache
+.pytest_cache
+__pycache__
+*.py[cod]
+*.log
+.venv
+venv
+runs
+docs/superpowers

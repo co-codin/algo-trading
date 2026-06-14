@@ -22,6 +22,30 @@ Then open `http://127.0.0.1:8765`. The UI binds to localhost by default, uses re
 
 The UI includes a `Live` tab for public Binance candle charts. It overlays EMA/RSI long and short signal markers plus simulated paper entry/exit markers from local `runs/paper/` output.
 
+## Docker And Make
+
+Run all local checks:
+
+```bash
+make check
+```
+
+Build and run the UI in Docker:
+
+```bash
+make docker-run
+```
+
+Then open `http://127.0.0.1:8765`. If that port is already in use, run `make docker-run PORT=8766` and open `http://127.0.0.1:8766`.
+
+Run with Docker Compose:
+
+```bash
+make compose-up
+```
+
+Both Docker paths mount local `runs/` into the container so backtest and paper-trading outputs persist on the host.
+
 List the most-traded Binance USDT crypto pairs by current 24h quote volume:
 
 ```bash

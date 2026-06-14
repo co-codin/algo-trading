@@ -1,0 +1,11 @@
+services:
+  algo-trading:
+    build:
+      context: .
+    image: binance-algo-trading:local
+    ports:
+      - "127.0.0.1:${PORT:-8765}:8765"
+    volumes:
+      - ./runs:/app/runs
+    environment:
+      PYTHONUNBUFFERED: "1"
