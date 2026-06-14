@@ -14,7 +14,8 @@ Version 1 includes:
 - Historical backtesting for BTCUSDT candles.
 - Live paper trading using current Binance market data.
 - One starter strategy: EMA crossover with an RSI filter.
-- Long-only spot simulation.
+- Long and short simulated positions.
+- Synthetic short accounting for backtests and paper trading; shorts do not imply real margin, futures, borrowing, or exchange order support.
 - Configurable starting balance, candle interval, fees, slippage, position sizing, stop-loss, take-profit, and trailing stop.
 - Local trade logs, equity curve output, and summary metrics.
 - A CLI for running backtests and paper trading sessions.
@@ -25,14 +26,14 @@ Version 1 will not:
 
 - Accept Binance API keys.
 - Place real Binance orders.
-- Trade futures, margin, shorts, or leverage.
+- Trade real futures, margin, borrowed assets, or leverage.
 - Run a production daemon.
 - Optimize parameters automatically.
 - Promise profitability.
 
 ## Safety Boundary
 
-The application must be structurally unable to execute real trades in v1. Market access is read-only. The data adapter may use Binance public market data through the available Binance MCP path or a public REST fallback, but no component may call authenticated trading endpoints.
+The application must be structurally unable to execute real trades in v1. Market access is read-only. The data adapter may use Binance public market data through the available Binance MCP path or a public REST fallback, but no component may call authenticated trading endpoints. Short positions are simulation-only ledger entries and must not require margin, futures, borrowing, leverage, or exchange credentials.
 
 ## Recommended Strategy
 
@@ -41,7 +42,9 @@ The starter strategy is an EMA crossover with an RSI filter:
 - Compute a fast EMA and slow EMA from candle close prices.
 - Compute RSI over the configured lookback window.
 - Enter long when the fast EMA crosses above the slow EMA and RSI is below the configured overbought threshold.
-- Exit when the fast EMA crosses below the slow EMA, stop-loss is hit, take-profit is hit, or trailing stop is hit.
+- Enter short when the fast EMA crosses below the slow EMA and RSI is above the configured oversold threshold.
+- Exit a long when the fast EMA crosses below the slow EMA, stop-loss is hit, take-profit is hit, or trailing stop is hit.
+- Exit a short when the fast EMA crosses above the slow EMA, stop-loss is hit, take-profit is hit, or trailing stop is hit.
 - Ignore new entries while already in a position.
 
 This strategy is simple enough to test and reason about, but less naive than a raw moving-average crossover.
@@ -53,7 +56,7 @@ The project will be split into small modules:
 - `data`: reads Binance symbols, prices, and candles through a read-only market-data client.
 - `indicators`: calculates EMA and RSI from candle data.
 - `strategy`: converts candles and indicators into entry and exit signals.
-- `risk`: applies position sizing, fees, slippage, stop-loss, take-profit, and trailing-stop rules.
+- `risk`: applies position side, position sizing, fees, slippage, stop-loss, take-profit, and trailing-stop rules.
 - `backtest`: simulates historical execution over downloaded candles.
 - `paper`: runs the same strategy over live polling data and records simulated fills.
 - `storage`: writes trade logs, equity curves, and run summaries to local files.
@@ -69,7 +72,7 @@ Backtest flow:
 2. Data client loads historical candles.
 3. Indicator module calculates EMA and RSI series.
 4. Strategy emits entry and exit intents.
-5. Risk and simulator modules produce simulated fills.
+5. Risk and simulator modules produce simulated long or short fills.
 6. Storage writes trades, equity curve, and a summary report.
 
 Paper flow:
@@ -90,10 +93,12 @@ Defaults should be conservative:
 - Fee rate: `0.001`
 - Slippage rate: `0.0005`
 - Position size: fixed fraction of available cash
+- Allowed sides: `both`, with `long-only` and `short-only` available for focused tests
 - Fast EMA: `12`
 - Slow EMA: `26`
 - RSI period: `14`
 - RSI overbought threshold: `70`
+- RSI oversold threshold: `30`
 - Stop-loss: configurable percentage
 - Take-profit: configurable percentage
 - Trailing stop: configurable percentage or disabled
@@ -115,6 +120,8 @@ Each run should include:
 
 The summary should include total return, final balance, max drawdown, number of trades, win rate, average win, average loss, profit factor, fee total, and slippage estimate.
 
+Trade logs should include the position side, entry reason, exit reason, entry price, exit price, quantity, realized PnL, fees, and slippage estimate.
+
 ## Error Handling
 
 The CLI should fail clearly when:
@@ -132,9 +139,9 @@ Paper trading should keep local simulated account state consistent. If polling f
 Initial tests should cover:
 
 - EMA and RSI calculations on known small datasets.
-- Signal generation for crossover and non-crossover cases.
+- Signal generation for long crossover, short crossover, and non-crossover cases.
 - Risk rules for stop-loss, take-profit, trailing stop, fees, and slippage.
-- Backtest accounting: cash, position quantity, fills, equity, and drawdown.
+- Backtest accounting: cash, position side, position quantity, fills, long PnL, short PnL, equity, and drawdown.
 - Paper mode using a fake market-data client so no network is required.
 - CLI smoke tests for backtest and paper commands with deterministic fixtures.
 
@@ -144,7 +151,7 @@ Version 1 is complete when:
 
 - A user can run a BTCUSDT backtest from the CLI and receive reproducible output files.
 - A user can run a paper-trading loop that records simulated trades and equity snapshots.
+- Long and short simulated trades are both supported by shared strategy and risk logic.
 - Backtest and paper modes share the same strategy and risk logic.
 - Tests pass for indicators, strategy, risk, simulator accounting, and CLI smoke behavior.
 - No code path can place a real Binance order.
-
