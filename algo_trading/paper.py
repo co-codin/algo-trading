@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from sys import stderr
 
 from algo_trading.data import MarketDataClient
 from algo_trading.models import Candle, StrategyConfig
@@ -24,14 +25,24 @@ def run_paper_session(
     if limit <= 0:
         raise ValueError("limit must be positive")
 
-    latest_candles: list[Candle] = []
+    candles_by_time: dict[int, Candle] = {}
     for iteration in range(iterations):
-        candles = client.get_klines(config.symbol, config.interval, limit)
+        try:
+            candles = client.get_klines(config.symbol, config.interval, limit)
+        except Exception as exc:
+            print(f"paper poll failed: {exc}", file=stderr)
+            candles = []
         if not candles:
-            raise ValueError("market-data client returned no candles")
-        latest_candles = candles
+            print("paper poll returned no candles; preserving current state", file=stderr)
+        for candle in candles:
+            candles_by_time[candle.open_time] = candle
         if poll_seconds > 0 and iteration < iterations - 1:
             time.sleep(poll_seconds)
 
-    result = run_backtest(latest_candles, config)
+    if not candles_by_time:
+        raise ValueError("market-data client returned no usable candles")
+    collected_candles = [
+        candles_by_time[open_time] for open_time in sorted(candles_by_time)
+    ]
+    result = run_backtest(collected_candles, config)
     return write_run_outputs("paper", config, result, output_root)
