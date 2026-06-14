@@ -6,6 +6,7 @@ from pathlib import Path
 from algo_trading.models import Candle
 from algo_trading.ui import (
     is_frontend_route,
+    is_vite_asset_route,
     load_run_details,
     list_runs,
     live_chart_payload,
@@ -67,6 +68,12 @@ class UiTests(unittest.TestCase):
         self.assertFalse(is_frontend_route("/api/runs"))
         self.assertFalse(is_frontend_route("/styles.css"))
         self.assertFalse(is_frontend_route("/unknown"))
+
+    def test_vite_asset_routes_are_restricted_to_assets_directory(self):
+        self.assertTrue(is_vite_asset_route("/assets/index.js"))
+        self.assertTrue(is_vite_asset_route("/assets/index.css"))
+        self.assertFalse(is_vite_asset_route("/api/runs"))
+        self.assertFalse(is_vite_asset_route("/assets/../index.html"))
 
     def test_top_symbols_payload_filters_and_ranks(self):
         payload = top_symbols_payload(FakeClient(), top=2)

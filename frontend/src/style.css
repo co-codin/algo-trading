@@ -42,11 +42,6 @@ button {
   cursor: pointer;
 }
 
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.62;
-}
-
 .topbar {
   display: flex;
   align-items: center;
@@ -81,6 +76,7 @@ button:disabled {
   display: flex;
   gap: 8px;
   padding: 12px 24px 0;
+  overflow-x: auto;
 }
 
 .tab {
@@ -103,9 +99,13 @@ main {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+}
+
+.lab-layout {
+  grid-template-columns: minmax(320px, 460px) minmax(0, 1fr);
 }
 
 .panel {
@@ -113,11 +113,6 @@ main {
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
-}
-
-.settings,
-.output,
-.runs-panel {
   padding: 16px;
 }
 
@@ -132,6 +127,12 @@ main {
 .panel-heading h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.panel-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .primary {
@@ -228,11 +229,6 @@ button:focus {
   color: var(--warning);
 }
 
-.result-grid {
-  display: grid;
-  gap: 12px;
-}
-
 .metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -241,7 +237,8 @@ button:focus {
 
 .metric,
 .run-row,
-.detail-section {
+.detail-section,
+.empty {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #fbfcfc;
@@ -251,8 +248,8 @@ button:focus {
 .metric b {
   display: block;
   margin-bottom: 5px;
-  font-size: 12px;
   color: var(--muted);
+  font-size: 12px;
   text-transform: uppercase;
 }
 
@@ -261,31 +258,12 @@ button:focus {
   font-weight: 700;
 }
 
-.run-row {
+.output,
+.runs-list,
+.run-detail {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-}
-
-.run-row h3 {
-  margin: 0 0 4px;
-  font-size: 15px;
-}
-
-.run-row p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.runs-panel {
-  display: none;
-}
-
-.live-panel {
-  display: none;
-  padding: 16px;
+  gap: 12px;
+  align-content: start;
 }
 
 .live-controls {
@@ -342,6 +320,12 @@ button:focus {
   gap: 6px;
 }
 
+.chart-legend a {
+  color: var(--primary-dark);
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .legend-dot {
   display: inline-block;
   width: 10px;
@@ -365,36 +349,9 @@ button:focus {
   background: #6d5cae;
 }
 
-.live-chart {
-  min-height: 420px;
-  overflow: hidden;
-}
-
-.live-chart svg {
-  display: block;
-  width: 100%;
-  height: 420px;
-}
-
-.chart-grid {
-  stroke: #e4e9e7;
-  stroke-width: 1;
-}
-
-.price-line {
-  fill: none;
-  stroke: var(--primary);
-  stroke-width: 2.5;
-}
-
-.chart-axis {
-  fill: var(--muted);
-  font-size: 12px;
-}
-
-.marker-label {
-  fill: #303634;
-  font-size: 11px;
+.tv-chart {
+  height: 460px;
+  min-height: 460px;
 }
 
 .runs-layout {
@@ -403,11 +360,23 @@ button:focus {
   gap: 14px;
 }
 
-.runs-list,
-.run-detail {
+.run-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-  align-content: start;
+  align-items: center;
+}
+
+.run-row h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.run-row p,
+.detail-section p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 table {
@@ -430,35 +399,12 @@ th {
 }
 
 .empty {
-  border: 1px dashed var(--line);
-  border-radius: 7px;
+  border-style: dashed;
   color: var(--muted);
-  padding: 18px;
   text-align: center;
 }
 
-body[data-mode="paper"] .backtest-only,
-body[data-mode="backtest"] .paper-only {
-  display: none;
-}
-
-body[data-mode="runs"] #run-workspace {
-  display: none;
-}
-
-body[data-mode="runs"] .runs-panel {
-  display: block;
-}
-
-body[data-mode="live"] #run-workspace {
-  display: none;
-}
-
-body[data-mode="live"] .live-panel {
-  display: block;
-}
-
-@media (max-width: 920px) {
+@media (max-width: 1060px) {
   .topbar,
   .workspace,
   .runs-layout,
@@ -470,22 +416,14 @@ body[data-mode="live"] .live-panel {
   .topbar {
     display: grid;
   }
-
-  .workspace {
-    display: grid;
-  }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 620px) {
   .tabs,
   main,
   .topbar {
     padding-left: 14px;
     padding-right: 14px;
-  }
-
-  .tabs {
-    overflow-x: auto;
   }
 
   .symbols-row,

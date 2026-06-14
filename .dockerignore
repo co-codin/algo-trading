@@ -6,5 +6,7 @@ __pycache__
 *.log
 .venv
 venv
+node_modules
 runs
 docs/superpowers
+algo_trading/web/dist

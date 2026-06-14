@@ -20,7 +20,25 @@ python3 -m algo_trading.ui --port 8765
 
 Then open `http://127.0.0.1:8765`. The UI binds to localhost by default, uses read-only public market data, and cannot place real orders.
 
-The UI includes a `Live` tab for public Binance candle charts. It overlays EMA/RSI long and short signal markers plus simulated paper entry/exit markers from local `runs/paper/` output.
+The frontend is a Vue 3 control panel with direct URLs:
+
+- `http://127.0.0.1:8765/backtest`
+- `http://127.0.0.1:8765/paper`
+- `http://127.0.0.1:8765/live`
+- `http://127.0.0.1:8765/chart`
+- `http://127.0.0.1:8765/runs`
+- `http://127.0.0.1:8765/lab`
+
+The `Live` / `Chart` view uses TradingView Lightweight Charts for public Binance candles. It overlays strategy long/short markers plus simulated paper entry/exit markers from local `runs/paper/` output.
+
+The `Strategy Lab` view ranks strategy and preset combinations across selected symbols using simulated backtests. Treat this as research support, not a profit guarantee.
+
+Build the Vue frontend manually when changing frontend source:
+
+```bash
+npm ci
+npm run frontend:build
+```
 
 The UI strategy dropdown supports:
 
@@ -29,6 +47,11 @@ The UI strategy dropdown supports:
 - `bollinger-reversion`: mean reversion after a Bollinger band reclaim/reject.
 - `donchian-breakout`: breakout above or below the previous Donchian channel.
 - `rsi-reversal`: RSI leaving overbought or oversold zones.
+- `supertrend`: ATR SuperTrend-style trend flip.
+- `vwap-reversion`: rolling VWAP reclaim/reject mean reversion.
+- `stoch-rsi-reversal`: stochastic RSI leaving extreme levels.
+- `ema-ribbon`: EMA ribbon alignment trend following.
+- `momentum-scalping`: short-term momentum with RSI and MACD confirmation.
 
 Presets are `custom`, `conservative`, `balanced`, and `aggressive`. Presets replace the related risk and indicator values with deterministic settings that are written into each run's `config.json`.
 

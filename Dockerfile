@@ -1,3 +1,12 @@
+FROM node:22-slim AS frontend
+
+WORKDIR /app
+
+COPY package.json package-lock.json tsconfig.json tsconfig.app.json vite.config.ts ./
+COPY frontend ./frontend
+
+RUN npm ci && npm run frontend:build
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -10,6 +19,7 @@ RUN addgroup --system app && adduser --system --ingroup app app
 COPY pyproject.toml README.md ./
 COPY algo_trading ./algo_trading
 COPY tests ./tests
+COPY --from=frontend /app/algo_trading/web/dist ./algo_trading/web/dist
 
 RUN mkdir -p /app/runs && chown -R app:app /app
 

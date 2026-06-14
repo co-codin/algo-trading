@@ -1,4 +1,5 @@
 PYTHON ?= python3
+NPM ?= npm
 IMAGE ?= binance-algo-trading:local
 PORT ?= 8765
 SMOKE_PORT ?= 8766
@@ -7,12 +8,13 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test typecheck compile js-check check docker-build docker-run docker-smoke compose-up compose-down clean
+.PHONY: help test typecheck compile frontend-install frontend-build frontend-check js-check check docker-build docker-run docker-smoke compose-up compose-down clean
 
 help:
 	@printf '%s\n' \
 		'Targets:' \
-		'  make check          Run unit tests, mypy, compileall, and JS syntax check' \
+		'  make check          Run unit tests, mypy, compileall, and Vue build check' \
+		'  make frontend-build Build the Vue frontend into algo_trading/web/dist' \
 		'  make docker-build   Build the local Docker image' \
 		'  make docker-run     Run the UI container on PORT=8765 by default' \
 		'  make docker-smoke   Build and smoke-test the UI container on SMOKE_PORT=8766' \
@@ -29,10 +31,18 @@ typecheck:
 compile:
 	$(PYTHON) -m compileall -q algo_trading tests
 
-js-check:
-	node --check algo_trading/web/app.js
+frontend-install:
+	$(NPM) ci
 
-check: test typecheck compile js-check
+frontend-build:
+	$(NPM) run frontend:build
+
+frontend-check:
+	$(NPM) run frontend:check
+
+js-check: frontend-check
+
+check: test typecheck compile frontend-check
 
 docker-build:
 	docker build -t $(IMAGE) .
@@ -47,6 +57,8 @@ docker-smoke: docker-build
 	trap 'docker rm -f $$container >/dev/null' EXIT; \
 	for attempt in 1 2 3 4 5 6 7 8 9 10; do \
 		if curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/api/runs" >/dev/null 2>&1; then \
+			curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/live" >/dev/null; \
+			curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/lab" >/dev/null; \
 			curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/api/live-chart?symbol=BTCUSDT&interval=1m&limit=40" >/dev/null; \
 			echo "docker smoke passed on http://127.0.0.1:$(SMOKE_PORT)"; \
 			exit 0; \
@@ -65,4 +77,4 @@ compose-down:
 
 clean:
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
-	rm -rf .mypy_cache .pytest_cache
+	rm -rf .mypy_cache .pytest_cache node_modules/.tmp

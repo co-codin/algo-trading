@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import mimetypes
 import sys
 import time
 import urllib.parse
@@ -36,6 +37,7 @@ from algo_trading.strategy import (
 from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
 WEB_ROOT = Path(__file__).with_name("web")
+WEB_DIST_ROOT = WEB_ROOT / "dist"
 FRONTEND_ROUTES = frozenset(
     {
         "",
@@ -54,6 +56,11 @@ FRONTEND_ROUTES = frozenset(
 
 def is_frontend_route(path: str) -> bool:
     return path in FRONTEND_ROUTES
+
+
+def is_vite_asset_route(path: str) -> bool:
+    normalized = Path(urllib.parse.unquote(path)).as_posix()
+    return normalized.startswith("/assets/") and "/../" not in normalized
 
 
 def top_symbols_payload(client: MarketDataClient, top: int = 10) -> dict[str, Any]:
@@ -402,13 +409,12 @@ def create_handler(
 
         def _handle_get(self, parsed: urllib.parse.ParseResult) -> None:
             if is_frontend_route(parsed.path):
-                self._send_file(WEB_ROOT / "index.html", "text/html; charset=utf-8")
+                self._send_file(WEB_DIST_ROOT / "index.html", "text/html; charset=utf-8")
                 return
-            if parsed.path == "/styles.css":
-                self._send_file(WEB_ROOT / "styles.css", "text/css; charset=utf-8")
-                return
-            if parsed.path == "/app.js":
-                self._send_file(WEB_ROOT / "app.js", "text/javascript; charset=utf-8")
+            if is_vite_asset_route(parsed.path):
+                asset_path = WEB_DIST_ROOT / parsed.path.lstrip("/")
+                content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
+                self._send_file(asset_path, content_type)
                 return
             if parsed.path == "/api/symbols":
                 query = urllib.parse.parse_qs(parsed.query)
