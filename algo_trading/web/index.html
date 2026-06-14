@@ -18,6 +18,7 @@
     <nav class="tabs" aria-label="Modes">
       <button class="tab is-active" type="button" data-mode-tab="backtest">Backtest</button>
       <button class="tab" type="button" data-mode-tab="paper">Paper</button>
+      <button class="tab" type="button" data-mode-tab="live">Live</button>
       <button class="tab" type="button" data-mode-tab="runs">Runs</button>
     </nav>
 
@@ -134,6 +135,51 @@
           </div>
           <div id="result" class="result-grid"></div>
         </section>
+      </section>
+
+      <section class="panel live-panel" id="live-panel">
+        <div class="panel-heading">
+          <h2>Live Market</h2>
+          <div class="status" id="live-status">Ready</div>
+        </div>
+
+        <div class="live-controls">
+          <label>
+            <span>Symbol</span>
+            <input id="live-symbol" value="BTCUSDT" autocomplete="off">
+          </label>
+          <label>
+            <span>Interval</span>
+            <input id="live-interval" value="1m" autocomplete="off">
+          </label>
+          <label>
+            <span>Candles</span>
+            <input id="live-limit" type="number" min="30" max="1000" value="180">
+          </label>
+          <label>
+            <span>Refresh Sec</span>
+            <input id="live-refresh" type="number" min="2" max="300" value="10">
+          </label>
+          <label class="toggle-row">
+            <input id="show-signals" type="checkbox" checked>
+            <span>Strategy markers</span>
+          </label>
+          <label class="toggle-row">
+            <input id="show-paper" type="checkbox" checked>
+            <span>Paper markers</span>
+          </label>
+          <button class="primary" id="refresh-live" type="button">Refresh Chart</button>
+        </div>
+
+        <div class="chart-shell">
+          <div class="chart-legend">
+            <span><i class="legend-dot long"></i>Long signal</span>
+            <span><i class="legend-dot short"></i>Short signal</span>
+            <span><i class="legend-dot paper-entry"></i>Paper entry</span>
+            <span><i class="legend-dot paper-exit"></i>Paper exit</span>
+          </div>
+          <div id="live-chart" class="live-chart" aria-live="polite"></div>
+        </div>
       </section>
 
       <section class="panel runs-panel" id="runs-panel">

@@ -283,6 +283,120 @@ button:focus {
   display: none;
 }
 
+.live-panel {
+  display: none;
+  padding: 16px;
+}
+
+.live-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr)) repeat(2, auto) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  padding: 0 10px;
+}
+
+.toggle-row input {
+  width: auto;
+  min-height: 0;
+}
+
+.toggle-row span {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.chart-shell {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  padding: 12px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.legend-dot.long {
+  background: #2f8f5b;
+}
+
+.legend-dot.short {
+  background: var(--accent);
+}
+
+.legend-dot.paper-entry {
+  background: #246aa8;
+}
+
+.legend-dot.paper-exit {
+  background: #6d5cae;
+}
+
+.live-chart {
+  min-height: 420px;
+  overflow: hidden;
+}
+
+.live-chart svg {
+  display: block;
+  width: 100%;
+  height: 420px;
+}
+
+.chart-grid {
+  stroke: #e4e9e7;
+  stroke-width: 1;
+}
+
+.price-line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2.5;
+}
+
+.chart-axis {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
+.marker-label {
+  fill: #303634;
+  font-size: 11px;
+}
+
 .runs-layout {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
@@ -336,11 +450,20 @@ body[data-mode="runs"] .runs-panel {
   display: block;
 }
 
+body[data-mode="live"] #run-workspace {
+  display: none;
+}
+
+body[data-mode="live"] .live-panel {
+  display: block;
+}
+
 @media (max-width: 920px) {
   .topbar,
   .workspace,
   .runs-layout,
-  .metric-row {
+  .metric-row,
+  .live-controls {
     grid-template-columns: 1fr;
   }
 

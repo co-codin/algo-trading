@@ -20,6 +20,8 @@ python3 -m algo_trading.ui --port 8765
 
 Then open `http://127.0.0.1:8765`. The UI binds to localhost by default, uses read-only public market data, and cannot place real orders.
 
+The UI includes a `Live` tab for public Binance candle charts. It overlays EMA/RSI long and short signal markers plus simulated paper entry/exit markers from local `runs/paper/` output.
+
 List the most-traded Binance USDT crypto pairs by current 24h quote volume:
 
 ```bash

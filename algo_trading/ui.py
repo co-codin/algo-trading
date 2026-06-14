@@ -16,10 +16,12 @@ from algo_trading.data import (
     MarketDataClient,
     TransientMarketDataError,
 )
+from algo_trading.indicators import ema, rsi
 from algo_trading.models import AllowedSide, Candle, StrategyConfig
 from algo_trading.paper import run_paper_session
 from algo_trading.simulator import run_backtest
 from algo_trading.storage import write_run_outputs
+from algo_trading.strategy import signal_for_index
 from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
 WEB_ROOT = Path(__file__).with_name("web")
@@ -105,6 +107,93 @@ def run_paper_payload(
         "mode": "paper",
         "runs": [_run_payload("paper", run_dir, output_path, summary)],
     }
+
+
+def live_chart_payload(
+    payload: dict[str, Any],
+    client: MarketDataClient | None = None,
+    output_root: str | Path = "runs",
+) -> dict[str, Any]:
+    market_client = client or BinanceMarketDataClient()
+    symbol = str(payload.get("symbol") or "BTCUSDT").upper()
+    limit = _int_value(payload, "limit", 180)
+    config = _strategy_config_from_payload(payload, symbol=symbol, default_interval="1m")
+    candles = market_client.get_klines(config.symbol, config.interval, limit)
+    if not candles:
+        raise ValueError("market-data client returned no candles")
+    start_time = candles[0].open_time
+    end_time = candles[-1].open_time
+    return {
+        "ok": True,
+        "symbol": config.symbol,
+        "interval": config.interval,
+        "candles": [_candle_payload(candle) for candle in candles],
+        "signals": _strategy_signal_markers(candles, config),
+        "paper_markers": paper_trade_markers(
+            config.symbol,
+            start_time,
+            end_time,
+            output_root,
+        ),
+    }
+
+
+def paper_trade_markers(
+    symbol: str,
+    start_time: int,
+    end_time: int,
+    output_root: str | Path = "runs",
+) -> list[dict[str, Any]]:
+    root = Path(output_root)
+    paper_root = root / "paper"
+    if not paper_root.exists():
+        return []
+
+    markers: list[dict[str, Any]] = []
+    for run_dir in paper_root.iterdir():
+        if not run_dir.is_dir():
+            continue
+        config_path = run_dir / "config.json"
+        if config_path.exists():
+            try:
+                config = _read_json(config_path)
+            except (OSError, json.JSONDecodeError, ValueError):
+                continue
+            if str(config.get("symbol", "")).upper() != symbol.upper():
+                continue
+
+        for row in _read_csv_rows(run_dir / "trades.csv", 10_000):
+            try:
+                side = str(row["side"]).lower()
+                entry_time = int(row["entry_time"])
+                exit_time = int(row["exit_time"])
+                entry_price = float(row["entry_price"])
+                exit_price = float(row["exit_price"])
+                entry_reason = str(row.get("entry_reason", ""))
+                exit_reason = str(row.get("exit_reason", ""))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if side not in {"long", "short"}:
+                continue
+            if start_time <= entry_time <= end_time:
+                markers.append(
+                    {
+                        "time": entry_time,
+                        "price": entry_price,
+                        "type": f"paper_entry_{side}",
+                        "reason": entry_reason,
+                    }
+                )
+            if start_time <= exit_time <= end_time:
+                markers.append(
+                    {
+                        "time": exit_time,
+                        "price": exit_price,
+                        "type": f"paper_exit_{side}",
+                        "reason": exit_reason,
+                    }
+                )
+    return sorted(markers, key=lambda item: (int(item["time"]), str(item["type"])))
 
 
 def list_runs(output_root: str | Path = "runs", limit: int = 20) -> list[dict[str, Any]]:
@@ -209,6 +298,16 @@ def create_handler(
             if parsed.path == "/api/runs":
                 self._send_json({"ok": True, "runs": list_runs(output_path)})
                 return
+            if parsed.path == "/api/live-chart":
+                query = urllib.parse.parse_qs(parsed.query)
+                self._send_json(
+                    live_chart_payload(
+                        _query_payload(query),
+                        client_factory(),
+                        output_path,
+                    )
+                )
+                return
             if parsed.path == "/api/run":
                 query = urllib.parse.parse_qs(parsed.query)
                 run_path = query.get("path", [""])[0]
@@ -302,6 +401,10 @@ def _resolve_symbols(
     return parse_symbol_list(text)
 
 
+def _query_payload(query: dict[str, list[str]]) -> dict[str, Any]:
+    return {key: values[-1] for key, values in query.items() if values}
+
+
 def _strategy_config_from_payload(
     payload: dict[str, Any],
     symbol: str,
@@ -349,6 +452,50 @@ def _get_klines_with_retries(
             attempts += 1
             if retry_delay > 0:
                 time.sleep(retry_delay)
+
+
+def _strategy_signal_markers(
+    candles: list[Candle],
+    config: StrategyConfig,
+) -> list[dict[str, Any]]:
+    closes = [candle.close for candle in candles]
+    fast = ema(closes, config.fast_ema)
+    slow = ema(closes, config.slow_ema)
+    rsi_values = rsi(closes, config.rsi_period)
+
+    markers: list[dict[str, Any]] = []
+    for index, candle in enumerate(candles):
+        signal = signal_for_index(config, fast, slow, rsi_values, index)
+        if signal.type.value == "enter_long":
+            markers.append(
+                {
+                    "time": candle.open_time,
+                    "price": candle.close,
+                    "type": "long_signal",
+                    "reason": signal.reason,
+                }
+            )
+        elif signal.type.value == "enter_short":
+            markers.append(
+                {
+                    "time": candle.open_time,
+                    "price": candle.close,
+                    "type": "short_signal",
+                    "reason": signal.reason,
+                }
+            )
+    return markers
+
+
+def _candle_payload(candle: Candle) -> dict[str, float | int]:
+    return {
+        "time": candle.open_time,
+        "open": candle.open,
+        "high": candle.high,
+        "low": candle.low,
+        "close": candle.close,
+        "volume": candle.volume,
+    }
 
 
 def _run_payload(
