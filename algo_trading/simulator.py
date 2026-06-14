@@ -18,6 +18,11 @@ def run_backtest(candles: list[Candle], config: StrategyConfig) -> BacktestResul
     if not candles:
         raise ValueError("at least one candle is required")
     _validate_config(config)
+    required_candles = max(config.slow_ema, config.rsi_period + 1)
+    if len(candles) < required_candles:
+        raise ValueError(
+            f"not enough candles: need at least {required_candles} for indicator warmup"
+        )
 
     closes = [candle.close for candle in candles]
     fast = ema(closes, config.fast_ema)
@@ -243,3 +248,13 @@ def _validate_config(config: StrategyConfig) -> None:
         raise ValueError("fees and slippage cannot be negative")
     if config.fast_ema <= 0 or config.slow_ema <= 0 or config.rsi_period <= 0:
         raise ValueError("indicator periods must be positive")
+    if config.fast_ema >= config.slow_ema:
+        raise ValueError("fast_ema must be less than slow_ema")
+    if config.stop_loss_pct < 0:
+        raise ValueError("stop_loss_pct cannot be negative")
+    if config.take_profit_pct < 0:
+        raise ValueError("take_profit_pct cannot be negative")
+    if config.trailing_stop_pct < 0:
+        raise ValueError("trailing_stop_pct cannot be negative")
+    if not 0 <= config.rsi_oversold < config.rsi_overbought <= 100:
+        raise ValueError("rsi thresholds must satisfy 0 <= oversold < overbought <= 100")

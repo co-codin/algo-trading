@@ -16,6 +16,26 @@ def candle(time: int, close: float) -> Candle:
 
 
 class SimulatorTests(unittest.TestCase):
+    def test_backtest_rejects_candles_before_indicator_warmup(self):
+        candles = [candle(index, price) for index, price in enumerate([10, 11, 12, 13])]
+
+        with self.assertRaisesRegex(ValueError, "not enough candles"):
+            run_backtest(candles, StrategyConfig())
+
+    def test_backtest_rejects_invalid_risk_config(self):
+        candles = [candle(index, float(index + 10)) for index in range(30)]
+        config = StrategyConfig(stop_loss_pct=-0.01)
+
+        with self.assertRaisesRegex(ValueError, "stop_loss_pct"):
+            run_backtest(candles, config)
+
+    def test_backtest_rejects_inverted_rsi_thresholds(self):
+        candles = [candle(index, float(index + 10)) for index in range(30)]
+        config = StrategyConfig(rsi_oversold=75.0, rsi_overbought=70.0)
+
+        with self.assertRaisesRegex(ValueError, "rsi"):
+            run_backtest(candles, config)
+
     def test_backtest_produces_trade_and_equity(self):
         candles = [
             candle(index, price)
@@ -69,6 +89,72 @@ class SimulatorTests(unittest.TestCase):
         short_trades = [trade for trade in result.trades if trade.side is PositionSide.SHORT]
         self.assertTrue(short_trades)
         self.assertTrue(any(trade.realized_pnl > 0 for trade in short_trades))
+
+    def test_stop_loss_exit_reason_is_recorded(self):
+        candles = [candle(index, price) for index, price in enumerate([10, 12, 11, 10])]
+        config = StrategyConfig(
+            fast_ema=1,
+            slow_ema=2,
+            rsi_period=2,
+            stop_loss_pct=0.05,
+            take_profit_pct=1.0,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertEqual(result.trades[0].exit_reason, "stop_loss")
+
+    def test_take_profit_exit_reason_is_recorded(self):
+        candles = [candle(index, price) for index, price in enumerate([10, 12, 13, 14])]
+        config = StrategyConfig(
+            fast_ema=1,
+            slow_ema=2,
+            rsi_period=2,
+            stop_loss_pct=1.0,
+            take_profit_pct=0.05,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertEqual(result.trades[0].exit_reason, "take_profit")
+
+    def test_trailing_stop_exit_reason_is_recorded(self):
+        candles = [candle(index, price) for index, price in enumerate([10, 12, 14, 13])]
+        config = StrategyConfig(
+            fast_ema=1,
+            slow_ema=2,
+            rsi_period=2,
+            stop_loss_pct=1.0,
+            take_profit_pct=1.0,
+            trailing_stop_pct=0.05,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertEqual(result.trades[0].exit_reason, "trailing_stop")
+
+    def test_fees_and_slippage_are_recorded(self):
+        candles = [candle(index, price) for index, price in enumerate([10, 12, 13, 14])]
+        config = StrategyConfig(
+            fast_ema=1,
+            slow_ema=2,
+            rsi_period=2,
+            fee_rate=0.001,
+            slippage_rate=0.0005,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertGreater(result.trades[0].fees, 0)
+        self.assertGreater(result.trades[0].slippage, 0)
+        self.assertGreater(result.summary["fee_total"], 0)
+        self.assertGreater(result.summary["slippage_estimate"], 0)
 
 
 if __name__ == "__main__":
