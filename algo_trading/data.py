@@ -5,7 +5,7 @@ import json
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, Sequence
 
 from algo_trading.models import Candle
 
@@ -53,7 +53,9 @@ def load_candles_from_csv(path: str | Path) -> list[Candle]:
         ]
 
 
-def _candle_from_kline(row: list[object]) -> Candle:
+def _candle_from_kline(row: Sequence[Any]) -> Candle:
+    if len(row) < 6:
+        raise ValueError("kline row must contain at least 6 fields")
     return Candle(
         open_time=int(row[0]),
         open=float(row[1]),
