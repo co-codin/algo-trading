@@ -156,6 +156,20 @@ class SimulatorTests(unittest.TestCase):
         self.assertGreater(result.summary["fee_total"], 0)
         self.assertGreater(result.summary["slippage_estimate"], 0)
 
+    def test_profit_factor_is_explicit_when_there_are_no_losses(self):
+        candles = [candle(index, price) for index, price in enumerate([10, 12, 13, 14])]
+        config = StrategyConfig(
+            fast_ema=1,
+            slow_ema=2,
+            rsi_period=2,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertEqual(result.summary["profit_factor"], "infinite")
+
 
 if __name__ == "__main__":
     unittest.main()

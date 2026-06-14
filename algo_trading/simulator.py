@@ -192,6 +192,13 @@ class _Account:
         losses = [trade.realized_pnl for trade in self.trades if trade.realized_pnl < 0]
         gross_win = sum(wins)
         gross_loss = abs(sum(losses))
+        profit_factor: float | str
+        if gross_loss:
+            profit_factor = round(gross_win / gross_loss, 8)
+        elif gross_win:
+            profit_factor = "infinite"
+        else:
+            profit_factor = 0.0
         return {
             "symbol": self.config.symbol,
             "initial_balance": round(self.config.starting_balance, 8),
@@ -205,7 +212,7 @@ class _Account:
             "win_rate": round((len(wins) / len(self.trades)) if self.trades else 0.0, 8),
             "average_win": round((gross_win / len(wins)) if wins else 0.0, 8),
             "average_loss": round((sum(losses) / len(losses)) if losses else 0.0, 8),
-            "profit_factor": round((gross_win / gross_loss) if gross_loss else float(gross_win > 0), 8),
+            "profit_factor": profit_factor,
             "fee_total": round(sum(trade.fees for trade in self.trades), 8),
             "slippage_estimate": round(sum(trade.slippage for trade in self.trades), 8),
         }
