@@ -98,6 +98,7 @@ def _add_backtest_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
 def _add_paper_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser("paper", help="run a bounded paper-trading loop")
     _add_common_options(parser)
+    parser.set_defaults(interval="1m")
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument("--poll-seconds", type=float, default=30.0)
 
