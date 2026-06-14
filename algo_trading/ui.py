@@ -34,6 +34,23 @@ from algo_trading.strategy import (
 from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
 WEB_ROOT = Path(__file__).with_name("web")
+FRONTEND_ROUTES = frozenset(
+    {
+        "",
+        "/",
+        "/index.html",
+        "/backtest",
+        "/paper",
+        "/live",
+        "/chart",
+        "/runs",
+        "/history",
+    }
+)
+
+
+def is_frontend_route(path: str) -> bool:
+    return path in FRONTEND_ROUTES
 
 
 def top_symbols_payload(client: MarketDataClient, top: int = 10) -> dict[str, Any]:
@@ -296,7 +313,7 @@ def create_handler(
                 )
 
         def _handle_get(self, parsed: urllib.parse.ParseResult) -> None:
-            if parsed.path in ("", "/", "/index.html"):
+            if is_frontend_route(parsed.path):
                 self._send_file(WEB_ROOT / "index.html", "text/html; charset=utf-8")
                 return
             if parsed.path == "/styles.css":

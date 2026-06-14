@@ -3,6 +3,23 @@ const state = {
   liveTimer: null,
 };
 
+const ROUTE_MODES = {
+  "/": "backtest",
+  "/backtest": "backtest",
+  "/paper": "paper",
+  "/live": "live",
+  "/chart": "live",
+  "/runs": "runs",
+  "/history": "runs",
+};
+
+const MODE_ROUTES = {
+  backtest: "/backtest",
+  paper: "/paper",
+  live: "/live",
+  runs: "/runs",
+};
+
 const form = document.querySelector("#run-form");
 const statusEl = document.querySelector("#status");
 const resultEl = document.querySelector("#result");
@@ -22,10 +39,24 @@ function setLiveStatus(message, type = "") {
   liveStatusEl.className = `status${type ? ` is-${type}` : ""}`;
 }
 
-function setMode(mode) {
+function modeFromLocation() {
+  return ROUTE_MODES[window.location.pathname] || "backtest";
+}
+
+function updateBrowserRoute(mode) {
+  const route = MODE_ROUTES[mode] || MODE_ROUTES.backtest;
+  if (window.location.pathname !== route) {
+    window.history.pushState({ mode }, "", route);
+  }
+}
+
+function setMode(mode, { updateUrl = true } = {}) {
   stopLivePolling();
   state.mode = mode;
   document.body.dataset.mode = mode;
+  if (updateUrl) {
+    updateBrowserRoute(mode);
+  }
   document.querySelectorAll("[data-mode-tab]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.modeTab === mode);
   });
@@ -387,6 +418,10 @@ document.querySelectorAll("[data-mode-tab]").forEach((button) => {
   button.addEventListener("click", () => setMode(button.dataset.modeTab));
 });
 
+window.addEventListener("popstate", () => {
+  setMode(modeFromLocation(), { updateUrl: false });
+});
+
 document.querySelector("#load-symbols").addEventListener("click", loadSymbols);
 document.querySelector("#refresh-runs").addEventListener("click", loadRuns);
 document.querySelector("#refresh-live").addEventListener("click", () => {
@@ -426,5 +461,5 @@ runsListEl.addEventListener("click", (event) => {
   }
 });
 
-setMode("backtest");
+setMode(modeFromLocation(), { updateUrl: false });
 loadRuns();

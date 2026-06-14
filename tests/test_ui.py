@@ -5,6 +5,7 @@ from pathlib import Path
 
 from algo_trading.models import Candle
 from algo_trading.ui import (
+    is_frontend_route,
     load_run_details,
     list_runs,
     live_chart_payload,
@@ -50,6 +51,20 @@ def trending_candles() -> list[Candle]:
 
 
 class UiTests(unittest.TestCase):
+    def test_frontend_routes_allow_direct_view_urls(self):
+        self.assertTrue(is_frontend_route("/"))
+        self.assertTrue(is_frontend_route("/backtest"))
+        self.assertTrue(is_frontend_route("/paper"))
+        self.assertTrue(is_frontend_route("/live"))
+        self.assertTrue(is_frontend_route("/chart"))
+        self.assertTrue(is_frontend_route("/runs"))
+        self.assertTrue(is_frontend_route("/history"))
+
+    def test_frontend_routes_do_not_capture_api_or_unknown_paths(self):
+        self.assertFalse(is_frontend_route("/api/runs"))
+        self.assertFalse(is_frontend_route("/styles.css"))
+        self.assertFalse(is_frontend_route("/unknown"))
+
     def test_top_symbols_payload_filters_and_ranks(self):
         payload = top_symbols_payload(FakeClient(), top=2)
 
