@@ -11,6 +11,8 @@ from algo_trading.ui import (
     live_chart_payload,
     paper_trade_markers,
     run_backtest_payload,
+    strategies_payload,
+    strategy_lab_payload,
     top_symbols_payload,
 )
 
@@ -59,6 +61,7 @@ class UiTests(unittest.TestCase):
         self.assertTrue(is_frontend_route("/chart"))
         self.assertTrue(is_frontend_route("/runs"))
         self.assertTrue(is_frontend_route("/history"))
+        self.assertTrue(is_frontend_route("/lab"))
 
     def test_frontend_routes_do_not_capture_api_or_unknown_paths(self):
         self.assertFalse(is_frontend_route("/api/runs"))
@@ -71,6 +74,44 @@ class UiTests(unittest.TestCase):
         self.assertEqual(
             [item["symbol"] for item in payload["symbols"]],
             ["BTCUSDT", "ETHUSDT"],
+        )
+
+    def test_strategies_payload_lists_strategy_metadata(self):
+        payload = strategies_payload()
+
+        strategy_names = [strategy["name"] for strategy in payload["strategies"]]
+        self.assertIn("supertrend", strategy_names)
+        self.assertIn("vwap-reversion", strategy_names)
+        self.assertTrue(all(strategy["description"] for strategy in payload["strategies"]))
+
+    def test_strategy_lab_payload_ranks_strategy_results(self):
+        client = FakeClient()
+        client.candles = trending_candles()
+
+        payload = strategy_lab_payload(
+            {
+                "symbols": "BTCUSDT",
+                "strategies": "ema-rsi,macd",
+                "presets": "custom",
+                "interval": "1h",
+                "limit": 12,
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "macd_signal": 2,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(payload["mode"], "strategy-lab")
+        self.assertEqual(len(payload["rows"]), 2)
+        self.assertEqual(payload["rows"][0]["rank"], 1)
+        self.assertGreaterEqual(
+            payload["rows"][0]["total_return_pct"],
+            payload["rows"][1]["total_return_pct"],
         )
 
     def test_run_backtest_payload_writes_one_run_per_symbol(self):

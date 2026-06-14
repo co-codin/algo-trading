@@ -157,6 +157,17 @@ def _config_from_args(args: argparse.Namespace, symbol: str | None = None) -> St
         bollinger_period=args.bollinger_period,
         bollinger_stddev=args.bollinger_stddev,
         donchian_period=args.donchian_period,
+        atr_period=args.atr_period,
+        supertrend_multiplier=args.supertrend_multiplier,
+        vwap_period=args.vwap_period,
+        vwap_threshold_pct=args.vwap_threshold_pct,
+        stoch_rsi_period=args.stoch_rsi_period,
+        stoch_rsi_oversold=args.stoch_rsi_oversold,
+        stoch_rsi_overbought=args.stoch_rsi_overbought,
+        ema_ribbon_fast=args.ema_ribbon_fast,
+        ema_ribbon_mid=args.ema_ribbon_mid,
+        ema_ribbon_slow=args.ema_ribbon_slow,
+        momentum_period=args.momentum_period,
         stop_loss_pct=args.stop_loss_pct,
         take_profit_pct=args.take_profit_pct,
         trailing_stop_pct=args.trailing_stop_pct,
@@ -251,6 +262,17 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bollinger-period", type=int, default=20)
     parser.add_argument("--bollinger-stddev", type=float, default=2.0)
     parser.add_argument("--donchian-period", type=int, default=20)
+    parser.add_argument("--atr-period", type=int, default=14)
+    parser.add_argument("--supertrend-multiplier", type=float, default=3.0)
+    parser.add_argument("--vwap-period", type=int, default=20)
+    parser.add_argument("--vwap-threshold-pct", type=float, default=0.01)
+    parser.add_argument("--stoch-rsi-period", type=int, default=14)
+    parser.add_argument("--stoch-rsi-oversold", type=float, default=20.0)
+    parser.add_argument("--stoch-rsi-overbought", type=float, default=80.0)
+    parser.add_argument("--ema-ribbon-fast", type=int, default=8)
+    parser.add_argument("--ema-ribbon-mid", type=int, default=21)
+    parser.add_argument("--ema-ribbon-slow", type=int, default=55)
+    parser.add_argument("--momentum-period", type=int, default=10)
     parser.add_argument("--stop-loss-pct", type=float, default=0.03)
     parser.add_argument("--take-profit-pct", type=float, default=0.06)
     parser.add_argument("--trailing-stop-pct", type=float, default=0.0)

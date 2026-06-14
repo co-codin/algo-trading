@@ -30,6 +30,8 @@ from algo_trading.strategy import (
     apply_strategy_preset,
     build_strategy_context,
     entry_signal_for_index,
+    get_strategy,
+    list_strategy_names,
 )
 from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
@@ -45,6 +47,7 @@ FRONTEND_ROUTES = frozenset(
         "/chart",
         "/runs",
         "/history",
+        "/lab",
     }
 )
 
@@ -168,6 +171,91 @@ def live_chart_payload(
             output_root,
         ),
     }
+
+
+def strategies_payload() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "strategies": [
+            {
+                "name": name,
+                "description": get_strategy(name).description,
+            }
+            for name in list_strategy_names()
+        ],
+        "presets": [preset.value for preset in StrategyPreset],
+    }
+
+
+def strategy_lab_payload(
+    payload: dict[str, Any],
+    client: MarketDataClient | None = None,
+) -> dict[str, Any]:
+    market_client = client or BinanceMarketDataClient()
+    symbols = _resolve_symbols(
+        str(payload.get("symbols") or payload.get("symbol") or "BTCUSDT"),
+        _int_value(payload, "top", 5),
+        market_client,
+    )
+    strategies = _strategy_names_from_payload(payload)
+    presets = _preset_names_from_payload(payload)
+    limit = _int_value(payload, "limit", 300)
+    retries = _int_value(payload, "market_data_retries", 2)
+    retry_delay = _float_value(payload, "retry_delay", 0.5)
+    rows: list[dict[str, Any]] = []
+
+    for symbol in symbols:
+        interval = str(payload.get("interval") or "1h")
+        candles = _get_klines_with_retries(
+            market_client,
+            symbol,
+            interval,
+            limit,
+            retries,
+            retry_delay,
+        )
+        for strategy in strategies:
+            for preset in presets:
+                config_payload = {
+                    **payload,
+                    "strategy": strategy.value,
+                    "preset": preset.value,
+                }
+                config = apply_strategy_preset(
+                    _strategy_config_from_payload(
+                        config_payload,
+                        symbol=symbol,
+                        default_interval=interval,
+                    )
+                )
+                result = run_backtest(candles, config)
+                summary = result.summary
+                rows.append(
+                    {
+                        "rank": 0,
+                        "symbol": symbol,
+                        "strategy": strategy.value,
+                        "preset": preset.value,
+                        "final_balance": summary["final_balance"],
+                        "total_return_pct": summary["total_return_pct"],
+                        "max_drawdown_pct": summary["max_drawdown_pct"],
+                        "trades": summary["trades"],
+                        "win_rate": summary["win_rate"],
+                        "profit_factor": summary["profit_factor"],
+                    }
+                )
+
+    rows.sort(
+        key=lambda row: (
+            float(row["total_return_pct"]),
+            -float(row["max_drawdown_pct"]),
+            int(row["trades"]),
+        ),
+        reverse=True,
+    )
+    for index, row in enumerate(rows, start=1):
+        row["rank"] = index
+    return {"ok": True, "mode": "strategy-lab", "rows": rows}
 
 
 def paper_trade_markers(
@@ -327,6 +415,9 @@ def create_handler(
                 top = int(query.get("top", ["10"])[0])
                 self._send_json(top_symbols_payload(client_factory(), top=top))
                 return
+            if parsed.path == "/api/strategies":
+                self._send_json(strategies_payload())
+                return
             if parsed.path == "/api/runs":
                 self._send_json({"ok": True, "runs": list_runs(output_path)})
                 return
@@ -356,6 +447,9 @@ def create_handler(
                 return
             if parsed.path == "/api/paper":
                 self._send_json(run_paper_payload(payload, client_factory(), output_path))
+                return
+            if parsed.path == "/api/strategy-lab":
+                self._send_json(strategy_lab_payload(payload, client_factory()))
                 return
             self._send_json({"ok": False, "error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -462,6 +556,17 @@ def _strategy_config_from_payload(
         bollinger_period=_int_value(payload, "bollinger_period", 20),
         bollinger_stddev=_float_value(payload, "bollinger_stddev", 2.0),
         donchian_period=_int_value(payload, "donchian_period", 20),
+        atr_period=_int_value(payload, "atr_period", 14),
+        supertrend_multiplier=_float_value(payload, "supertrend_multiplier", 3.0),
+        vwap_period=_int_value(payload, "vwap_period", 20),
+        vwap_threshold_pct=_float_value(payload, "vwap_threshold_pct", 0.01),
+        stoch_rsi_period=_int_value(payload, "stoch_rsi_period", 14),
+        stoch_rsi_oversold=_float_value(payload, "stoch_rsi_oversold", 20.0),
+        stoch_rsi_overbought=_float_value(payload, "stoch_rsi_overbought", 80.0),
+        ema_ribbon_fast=_int_value(payload, "ema_ribbon_fast", 8),
+        ema_ribbon_mid=_int_value(payload, "ema_ribbon_mid", 21),
+        ema_ribbon_slow=_int_value(payload, "ema_ribbon_slow", 55),
+        momentum_period=_int_value(payload, "momentum_period", 10),
         stop_loss_pct=_float_value(payload, "stop_loss_pct", 0.03),
         take_profit_pct=_float_value(payload, "take_profit_pct", 0.06),
         trailing_stop_pct=_float_value(payload, "trailing_stop_pct", 0.0),
@@ -491,6 +596,20 @@ def _get_klines_with_retries(
             attempts += 1
             if retry_delay > 0:
                 time.sleep(retry_delay)
+
+
+def _strategy_names_from_payload(payload: dict[str, Any]) -> list[StrategyName]:
+    value = str(payload.get("strategies") or payload.get("strategy") or "").strip()
+    if not value or value.lower() == "all":
+        return [StrategyName(name) for name in list_strategy_names()]
+    return [StrategyName(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def _preset_names_from_payload(payload: dict[str, Any]) -> list[StrategyPreset]:
+    value = str(payload.get("presets") or payload.get("preset") or "custom").strip()
+    if value.lower() == "all":
+        return list(StrategyPreset)
+    return [StrategyPreset(item.strip()) for item in value.split(",") if item.strip()]
 
 
 def _strategy_signal_markers(

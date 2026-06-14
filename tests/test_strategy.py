@@ -53,6 +53,11 @@ class StrategyTests(unittest.TestCase):
                 "bollinger-reversion",
                 "donchian-breakout",
                 "rsi-reversal",
+                "supertrend",
+                "vwap-reversion",
+                "stoch-rsi-reversal",
+                "ema-ribbon",
+                "momentum-scalping",
             ],
         )
 
@@ -146,6 +151,82 @@ class StrategyTests(unittest.TestCase):
         self.assertIsNotNone(signal)
         self.assertEqual(signal.type, SignalType.ENTER_LONG)
         self.assertEqual(signal.reason, "rsi_reversal_long")
+
+    def test_supertrend_enters_long_on_atr_trend_flip(self):
+        config = StrategyConfig(
+            strategy=StrategyName("supertrend"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            atr_period=2,
+            supertrend_multiplier=1.0,
+        )
+
+        signal = first_entry_signal(config, [12, 11, 10, 9, 10, 12, 14, 16])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "supertrend_flip_long")
+
+    def test_vwap_reversion_enters_long_after_vwap_reclaim(self):
+        config = StrategyConfig(
+            strategy=StrategyName("vwap-reversion"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            vwap_period=3,
+            vwap_threshold_pct=0.0,
+        )
+
+        signal = first_entry_signal(config, [10, 10, 10, 7, 10, 11])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "vwap_reclaim_long")
+
+    def test_stoch_rsi_reversal_enters_long_when_oscillator_recovers(self):
+        config = StrategyConfig(
+            strategy=StrategyName("stoch-rsi-reversal"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            rsi_period=2,
+            stoch_rsi_period=2,
+            stoch_rsi_oversold=20.0,
+            stoch_rsi_overbought=80.0,
+        )
+
+        signal = first_entry_signal(config, [10, 9, 8, 9, 10, 11])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "stoch_rsi_reversal_long")
+
+    def test_ema_ribbon_enters_long_when_ribbon_turns_bullish(self):
+        config = StrategyConfig(
+            strategy=StrategyName("ema-ribbon"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            ema_ribbon_fast=2,
+            ema_ribbon_mid=3,
+            ema_ribbon_slow=5,
+        )
+
+        signal = first_entry_signal(config, [10, 9, 8, 9, 11, 13, 15])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "ema_ribbon_bullish")
+
+    def test_momentum_scalping_enters_long_on_confirmed_momentum(self):
+        config = StrategyConfig(
+            strategy=StrategyName("momentum-scalping"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=5,
+            macd_signal=2,
+            rsi_period=2,
+            momentum_period=2,
+        )
+
+        signal = first_entry_signal(config, [10, 9, 8, 9, 11, 13, 15])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "momentum_scalping_long")
 
     def test_allowed_side_blocks_disallowed_entries(self):
         config = StrategyConfig(

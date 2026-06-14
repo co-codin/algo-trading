@@ -279,6 +279,23 @@ class SimulatorTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "strategy"):
                     run_backtest(candles, config)
 
+    def test_backtest_rejects_invalid_extended_strategy_periods(self):
+        candles = [candle(index, float(index + 10)) for index in range(80)]
+
+        for config in [
+            StrategyConfig(strategy=StrategyName("supertrend"), atr_period=0),
+            StrategyConfig(strategy=StrategyName("supertrend"), supertrend_multiplier=0),
+            StrategyConfig(strategy=StrategyName("vwap-reversion"), vwap_period=0),
+            StrategyConfig(strategy=StrategyName("vwap-reversion"), vwap_threshold_pct=-0.1),
+            StrategyConfig(strategy=StrategyName("stoch-rsi-reversal"), stoch_rsi_period=0),
+            StrategyConfig(strategy=StrategyName("stoch-rsi-reversal"), stoch_rsi_oversold=90, stoch_rsi_overbought=80),
+            StrategyConfig(strategy=StrategyName("ema-ribbon"), ema_ribbon_fast=5, ema_ribbon_mid=3, ema_ribbon_slow=8),
+            StrategyConfig(strategy=StrategyName("momentum-scalping"), momentum_period=0),
+        ]:
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(ValueError, "strategy"):
+                    run_backtest(candles, config)
+
 
 if __name__ == "__main__":
     unittest.main()

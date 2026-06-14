@@ -268,8 +268,19 @@ def _validate_config(config: StrategyConfig) -> None:
         or config.bollinger_period <= 0
         or config.bollinger_stddev <= 0
         or config.donchian_period <= 0
+        or config.atr_period <= 0
+        or config.supertrend_multiplier <= 0
+        or config.vwap_period <= 0
+        or config.stoch_rsi_period <= 0
+        or config.momentum_period <= 0
     ):
         raise ValueError("strategy periods must be positive")
+    if config.vwap_threshold_pct < 0:
+        raise ValueError("strategy vwap_threshold_pct cannot be negative")
+    if not 0 <= config.stoch_rsi_oversold < config.stoch_rsi_overbought <= 100:
+        raise ValueError("strategy stochastic rsi thresholds must satisfy 0 <= oversold < overbought <= 100")
+    if not 0 < config.ema_ribbon_fast < config.ema_ribbon_mid < config.ema_ribbon_slow:
+        raise ValueError("strategy ema ribbon periods must satisfy fast < mid < slow")
     if not 0 <= config.rsi_midline <= 100:
         raise ValueError("strategy rsi_midline must be between 0 and 100")
     for name, value in [
@@ -297,4 +308,14 @@ def _required_candles(config: StrategyConfig) -> int:
         return config.donchian_period + 1
     if strategy is StrategyName.RSI_REVERSAL:
         return config.rsi_period + 2
+    if strategy is StrategyName.SUPERTREND:
+        return config.atr_period + 2
+    if strategy is StrategyName.VWAP_REVERSION:
+        return config.vwap_period + 2
+    if strategy is StrategyName.STOCH_RSI_REVERSAL:
+        return config.rsi_period + config.stoch_rsi_period + 2
+    if strategy is StrategyName.EMA_RIBBON:
+        return config.ema_ribbon_slow + 2
+    if strategy is StrategyName.MOMENTUM_SCALPING:
+        return max(config.slow_ema, config.macd_signal + 1, config.rsi_period + 1, config.momentum_period + 2)
     return max(config.slow_ema, config.rsi_period + 1)

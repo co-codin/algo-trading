@@ -29,6 +29,11 @@ class StrategyName(str, Enum):
     BOLLINGER_REVERSION = "bollinger-reversion"
     DONCHIAN_BREAKOUT = "donchian-breakout"
     RSI_REVERSAL = "rsi-reversal"
+    SUPERTREND = "supertrend"
+    VWAP_REVERSION = "vwap-reversion"
+    STOCH_RSI_REVERSAL = "stoch-rsi-reversal"
+    EMA_RIBBON = "ema-ribbon"
+    MOMENTUM_SCALPING = "momentum-scalping"
 
 
 class StrategyPreset(str, Enum):
@@ -77,6 +82,17 @@ class StrategyConfig:
     bollinger_period: int = 20
     bollinger_stddev: float = 2.0
     donchian_period: int = 20
+    atr_period: int = 14
+    supertrend_multiplier: float = 3.0
+    vwap_period: int = 20
+    vwap_threshold_pct: float = 0.01
+    stoch_rsi_period: int = 14
+    stoch_rsi_oversold: float = 20.0
+    stoch_rsi_overbought: float = 80.0
+    ema_ribbon_fast: int = 8
+    ema_ribbon_mid: int = 21
+    ema_ribbon_slow: int = 55
+    momentum_period: int = 10
     stop_loss_pct: float = 0.03
     take_profit_pct: float = 0.06
     trailing_stop_pct: float = 0.0

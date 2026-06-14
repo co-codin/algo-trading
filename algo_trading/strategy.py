@@ -3,7 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from algo_trading.indicators import ema, rsi
+from algo_trading.indicators import (
+    atr,
+    ema,
+    momentum,
+    previous_rolling_high,
+    previous_rolling_low,
+    rolling_mean,
+    rolling_stddev,
+    rolling_vwap,
+    rsi,
+    stochastic_rsi,
+)
 from algo_trading.models import (
     AllowedSide,
     Candle,
@@ -32,6 +43,14 @@ class StrategyContext:
     bollinger_lower: list[float]
     donchian_high: list[float]
     donchian_low: list[float]
+    atr_values: list[float]
+    supertrend_direction: list[int]
+    vwap: list[float]
+    stoch_rsi_values: list[float]
+    ema_ribbon_fast_values: list[float]
+    ema_ribbon_mid_values: list[float]
+    ema_ribbon_slow_values: list[float]
+    momentum_values: list[float]
 
 
 class TradingStrategy(Protocol):
@@ -93,6 +112,17 @@ def apply_strategy_preset(config: StrategyConfig) -> StrategyConfig:
             bollinger_period=30,
             bollinger_stddev=2.2,
             donchian_period=30,
+            atr_period=21,
+            supertrend_multiplier=3.5,
+            vwap_period=30,
+            vwap_threshold_pct=0.012,
+            stoch_rsi_period=21,
+            stoch_rsi_oversold=25.0,
+            stoch_rsi_overbought=75.0,
+            ema_ribbon_fast=13,
+            ema_ribbon_mid=34,
+            ema_ribbon_slow=89,
+            momentum_period=14,
         )
     if preset is StrategyPreset.BALANCED:
         return replace(
@@ -111,6 +141,17 @@ def apply_strategy_preset(config: StrategyConfig) -> StrategyConfig:
             bollinger_period=20,
             bollinger_stddev=2.0,
             donchian_period=20,
+            atr_period=14,
+            supertrend_multiplier=3.0,
+            vwap_period=20,
+            vwap_threshold_pct=0.01,
+            stoch_rsi_period=14,
+            stoch_rsi_oversold=20.0,
+            stoch_rsi_overbought=80.0,
+            ema_ribbon_fast=8,
+            ema_ribbon_mid=21,
+            ema_ribbon_slow=55,
+            momentum_period=10,
         )
     if preset is StrategyPreset.AGGRESSIVE:
         return replace(
@@ -129,6 +170,17 @@ def apply_strategy_preset(config: StrategyConfig) -> StrategyConfig:
             bollinger_period=10,
             bollinger_stddev=1.6,
             donchian_period=10,
+            atr_period=7,
+            supertrend_multiplier=2.0,
+            vwap_period=10,
+            vwap_threshold_pct=0.004,
+            stoch_rsi_period=7,
+            stoch_rsi_oversold=15.0,
+            stoch_rsi_overbought=85.0,
+            ema_ribbon_fast=5,
+            ema_ribbon_mid=13,
+            ema_ribbon_slow=34,
+            momentum_period=5,
         )
     raise ValueError(f"unsupported preset: {config.preset}")
 
@@ -142,8 +194,8 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
     rsi_values = rsi(closes, config.rsi_period)
     macd = [fast_value - slow_value for fast_value, slow_value in zip(fast, slow)]
     macd_signal = ema(macd, config.macd_signal)
-    bollinger_mid = _rolling_mean(closes, config.bollinger_period)
-    bollinger_stddev = _rolling_stddev(closes, config.bollinger_period, bollinger_mid)
+    bollinger_mid = rolling_mean(closes, config.bollinger_period)
+    bollinger_stddev = rolling_stddev(closes, config.bollinger_period, bollinger_mid)
     bollinger_upper = [
         middle + (stddev * config.bollinger_stddev)
         for middle, stddev in zip(bollinger_mid, bollinger_stddev)
@@ -165,8 +217,16 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         bollinger_mid=bollinger_mid,
         bollinger_upper=bollinger_upper,
         bollinger_lower=bollinger_lower,
-        donchian_high=_previous_rolling_high(highs, config.donchian_period),
-        donchian_low=_previous_rolling_low(lows, config.donchian_period),
+        donchian_high=previous_rolling_high(highs, config.donchian_period),
+        donchian_low=previous_rolling_low(lows, config.donchian_period),
+        atr_values=atr(candles, config.atr_period),
+        supertrend_direction=_supertrend_direction(candles, config),
+        vwap=rolling_vwap(candles, config.vwap_period),
+        stoch_rsi_values=stochastic_rsi(rsi_values, config.stoch_rsi_period),
+        ema_ribbon_fast_values=ema(closes, config.ema_ribbon_fast),
+        ema_ribbon_mid_values=ema(closes, config.ema_ribbon_mid),
+        ema_ribbon_slow_values=ema(closes, config.ema_ribbon_slow),
+        momentum_values=momentum(closes, config.momentum_period),
     )
 
 
@@ -409,6 +469,219 @@ class RsiReversalStrategy:
         return Signal(SignalType.HOLD, "no_signal")
 
 
+class SuperTrendStrategy:
+    name = StrategyName.SUPERTREND
+    description = "ATR SuperTrend-style trend flip"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.atr_period or index >= len(context.supertrend_direction):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous = context.supertrend_direction[index - 1]
+        current = context.supertrend_direction[index]
+        if previous <= 0 < current and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "supertrend_flip_long")
+        if previous >= 0 > current and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "supertrend_flip_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.supertrend_direction):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.supertrend_direction[index]
+        if side is PositionSide.LONG and current < 0:
+            return Signal(SignalType.EXIT_LONG, "supertrend_flip_short")
+        if side is PositionSide.SHORT and current > 0:
+            return Signal(SignalType.EXIT_SHORT, "supertrend_flip_long")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class VwapReversionStrategy:
+    name = StrategyName.VWAP_REVERSION
+    description = "Mean reversion after reclaiming rolling VWAP"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.vwap_period or index >= len(context.vwap):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous_close = context.closes[index - 1]
+        current_close = context.closes[index]
+        previous_vwap = context.vwap[index - 1]
+        current_vwap = context.vwap[index]
+        threshold = config.vwap_threshold_pct
+        if (
+            previous_close < previous_vwap * (1.0 - threshold)
+            and current_close >= current_vwap
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "vwap_reclaim_long")
+        if (
+            previous_close > previous_vwap * (1.0 + threshold)
+            and current_close <= current_vwap
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "vwap_reject_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.vwap):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current_close = context.closes[index]
+        current_vwap = context.vwap[index]
+        if side is PositionSide.LONG and current_close >= current_vwap:
+            return Signal(SignalType.EXIT_LONG, "vwap_mean_reversion")
+        if side is PositionSide.SHORT and current_close <= current_vwap:
+            return Signal(SignalType.EXIT_SHORT, "vwap_mean_reversion")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class StochRsiReversalStrategy:
+    name = StrategyName.STOCH_RSI_REVERSAL
+    description = "Stochastic RSI leaving extreme levels"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.stoch_rsi_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous = context.stoch_rsi_values[index - 1]
+        current = context.stoch_rsi_values[index]
+        if (
+            previous <= config.stoch_rsi_oversold
+            and current > config.stoch_rsi_oversold
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "stoch_rsi_reversal_long")
+        if (
+            previous >= config.stoch_rsi_overbought
+            and current < config.stoch_rsi_overbought
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "stoch_rsi_reversal_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.stoch_rsi_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.stoch_rsi_values[index]
+        if side is PositionSide.LONG and current >= 50.0:
+            return Signal(SignalType.EXIT_LONG, "stoch_rsi_midline")
+        if side is PositionSide.SHORT and current <= 50.0:
+            return Signal(SignalType.EXIT_SHORT, "stoch_rsi_midline")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class EmaRibbonStrategy:
+    name = StrategyName.EMA_RIBBON
+    description = "EMA ribbon alignment trend following"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.ema_ribbon_slow_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        was_bullish = _ribbon_bullish(context, index - 1)
+        is_bullish = _ribbon_bullish(context, index)
+        was_bearish = _ribbon_bearish(context, index - 1)
+        is_bearish = _ribbon_bearish(context, index)
+        if not was_bullish and is_bullish and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "ema_ribbon_bullish")
+        if not was_bearish and is_bearish and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "ema_ribbon_bearish")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.ema_ribbon_slow_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        if side is PositionSide.LONG and not _ribbon_bullish(context, index):
+            return Signal(SignalType.EXIT_LONG, "ema_ribbon_bullish_lost")
+        if side is PositionSide.SHORT and not _ribbon_bearish(context, index):
+            return Signal(SignalType.EXIT_SHORT, "ema_ribbon_bearish_lost")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class MomentumScalpingStrategy:
+    name = StrategyName.MOMENTUM_SCALPING
+    description = "Short-term momentum with RSI and MACD confirmation"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.momentum_period or index >= len(context.momentum_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        bullish = (
+            context.momentum_values[index - 1] <= 0 < context.momentum_values[index]
+            and context.rsi_values[index] >= config.rsi_midline
+            and context.macd[index] > context.macd_signal[index]
+        )
+        bearish = (
+            context.momentum_values[index - 1] >= 0 > context.momentum_values[index]
+            and context.rsi_values[index] <= config.rsi_midline
+            and context.macd[index] < context.macd_signal[index]
+        )
+        if bullish and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "momentum_scalping_long")
+        if bearish and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "momentum_scalping_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.momentum_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        if side is PositionSide.LONG and context.momentum_values[index] < 0:
+            return Signal(SignalType.EXIT_LONG, "momentum_faded")
+        if side is PositionSide.SHORT and context.momentum_values[index] > 0:
+            return Signal(SignalType.EXIT_SHORT, "momentum_faded")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
 def _side_allowed(config: StrategyConfig, side: PositionSide) -> bool:
     if side is PositionSide.LONG:
         return config.allowed_side in {AllowedSide.BOTH, AllowedSide.LONG_ONLY}
@@ -421,6 +694,64 @@ def _crossed_above(first: list[float], second: list[float], index: int) -> bool:
 
 def _crossed_below(first: list[float], second: list[float], index: int) -> bool:
     return first[index - 1] >= second[index - 1] and first[index] < second[index]
+
+
+def _ribbon_bullish(context: StrategyContext, index: int) -> bool:
+    return (
+        context.ema_ribbon_fast_values[index]
+        > context.ema_ribbon_mid_values[index]
+        > context.ema_ribbon_slow_values[index]
+    )
+
+
+def _ribbon_bearish(context: StrategyContext, index: int) -> bool:
+    return (
+        context.ema_ribbon_fast_values[index]
+        < context.ema_ribbon_mid_values[index]
+        < context.ema_ribbon_slow_values[index]
+    )
+
+
+def _supertrend_direction(candles: list[Candle], config: StrategyConfig) -> list[int]:
+    if not candles:
+        return []
+    atr_values = atr(candles, config.atr_period)
+    final_upper: list[float] = []
+    final_lower: list[float] = []
+    direction: list[int] = []
+    for index, candle in enumerate(candles):
+        midpoint = (candle.high + candle.low) / 2.0
+        basic_upper = midpoint + (config.supertrend_multiplier * atr_values[index])
+        basic_lower = midpoint - (config.supertrend_multiplier * atr_values[index])
+        if index == 0:
+            final_upper.append(basic_upper)
+            final_lower.append(basic_lower)
+            direction.append(0)
+            continue
+
+        previous_candle = candles[index - 1]
+        upper = (
+            basic_upper
+            if basic_upper < final_upper[index - 1]
+            or previous_candle.close > final_upper[index - 1]
+            else final_upper[index - 1]
+        )
+        lower = (
+            basic_lower
+            if basic_lower > final_lower[index - 1]
+            or previous_candle.close < final_lower[index - 1]
+            else final_lower[index - 1]
+        )
+        final_upper.append(upper)
+        final_lower.append(lower)
+
+        if candle.close > final_upper[index - 1]:
+            direction.append(1)
+        elif candle.close < final_lower[index - 1]:
+            direction.append(-1)
+        else:
+            direction.append(direction[index - 1])
+    return direction
 
 
 def _rolling_mean(values: list[float], period: int) -> list[float]:
@@ -469,4 +800,9 @@ _STRATEGIES: dict[StrategyName, TradingStrategy] = {
     StrategyName.BOLLINGER_REVERSION: BollingerReversionStrategy(),
     StrategyName.DONCHIAN_BREAKOUT: DonchianBreakoutStrategy(),
     StrategyName.RSI_REVERSAL: RsiReversalStrategy(),
+    StrategyName.SUPERTREND: SuperTrendStrategy(),
+    StrategyName.VWAP_REVERSION: VwapReversionStrategy(),
+    StrategyName.STOCH_RSI_REVERSAL: StochRsiReversalStrategy(),
+    StrategyName.EMA_RIBBON: EmaRibbonStrategy(),
+    StrategyName.MOMENTUM_SCALPING: MomentumScalpingStrategy(),
 }
