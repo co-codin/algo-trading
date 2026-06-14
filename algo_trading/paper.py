@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from sys import stderr
 
-from algo_trading.data import MarketDataClient
+from algo_trading.data import MarketDataClient, TransientMarketDataError
 from algo_trading.models import Candle, StrategyConfig
 from algo_trading.simulator import run_backtest
 from algo_trading.storage import write_run_outputs
@@ -29,7 +29,7 @@ def run_paper_session(
     for iteration in range(iterations):
         try:
             candles = client.get_klines(config.symbol, config.interval, limit)
-        except Exception as exc:
+        except TransientMarketDataError as exc:
             print(f"paper poll failed: {exc}", file=stderr)
             candles = []
         if not candles:

@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from algo_trading.cli import main
+from algo_trading.data import TransientMarketDataError
 from algo_trading.models import Candle, StrategyConfig
 from algo_trading.paper import run_paper_session
 
@@ -52,8 +53,19 @@ class FlakyMarketDataClient:
     def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
         self.calls += 1
         if self.calls == 1:
-            raise RuntimeError("temporary market data outage")
+            raise TransientMarketDataError("temporary market data outage")
         return [candle(1, 10.0), candle(2, 12.0), candle(3, 13.0)]
+
+
+class BrokenMarketDataClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+        self.calls += 1
+        if self.calls == 1:
+            return [candle(1, 10.0), candle(2, 12.0), candle(3, 13.0)]
+        raise ValueError("invalid kline row")
 
 
 class PaperTests(unittest.TestCase):
@@ -107,6 +119,20 @@ class PaperTests(unittest.TestCase):
 
             self.assertEqual(client.calls, 2)
             self.assertTrue((run_dir / "summary.json").exists())
+
+    def test_paper_session_propagates_non_transient_poll_errors(self):
+        client = BrokenMarketDataClient()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "invalid kline row"):
+                run_paper_session(
+                    client,
+                    StrategyConfig(fast_ema=1, slow_ema=2, rsi_period=2),
+                    Path(tmp),
+                    poll_seconds=0,
+                    iterations=2,
+                    limit=3,
+                )
 
     def test_paper_cli_uses_read_only_client(self):
         with tempfile.TemporaryDirectory() as tmp:

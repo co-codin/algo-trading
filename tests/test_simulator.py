@@ -29,6 +29,18 @@ class SimulatorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stop_loss_pct"):
             run_backtest(candles, config)
 
+    def test_backtest_rejects_risk_percentages_above_one(self):
+        candles = [candle(index, float(index + 10)) for index in range(30)]
+
+        for config in [
+            StrategyConfig(stop_loss_pct=1.5),
+            StrategyConfig(take_profit_pct=1.5),
+            StrategyConfig(trailing_stop_pct=1.5),
+        ]:
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(ValueError, "between 0 and 1"):
+                    run_backtest(candles, config)
+
     def test_backtest_rejects_inverted_rsi_thresholds(self):
         candles = [candle(index, float(index + 10)) for index in range(30)]
         config = StrategyConfig(rsi_oversold=75.0, rsi_overbought=70.0)

@@ -257,11 +257,12 @@ def _validate_config(config: StrategyConfig) -> None:
         raise ValueError("indicator periods must be positive")
     if config.fast_ema >= config.slow_ema:
         raise ValueError("fast_ema must be less than slow_ema")
-    if config.stop_loss_pct < 0:
-        raise ValueError("stop_loss_pct cannot be negative")
-    if config.take_profit_pct < 0:
-        raise ValueError("take_profit_pct cannot be negative")
-    if config.trailing_stop_pct < 0:
-        raise ValueError("trailing_stop_pct cannot be negative")
+    for name, value in [
+        ("stop_loss_pct", config.stop_loss_pct),
+        ("take_profit_pct", config.take_profit_pct),
+        ("trailing_stop_pct", config.trailing_stop_pct),
+    ]:
+        if not 0 <= value <= 1:
+            raise ValueError(f"{name} must be between 0 and 1")
     if not 0 <= config.rsi_oversold < config.rsi_overbought <= 100:
         raise ValueError("rsi thresholds must satisfy 0 <= oversold < overbought <= 100")
