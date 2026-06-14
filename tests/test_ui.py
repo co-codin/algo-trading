@@ -72,6 +72,16 @@ class UiTests(unittest.TestCase):
         self.assertIn("value: 180", source)
         self.assertIn("value: 500", source)
 
+    def test_live_market_selector_changes_auto_refresh_chart(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";', source)
+        self.assertIn("watch([liveSymbol, liveInterval, liveLimit], () => {", source)
+        self.assertIn('if (activeMode.value === "live") {', source)
+        self.assertIn("refreshLiveChart();", source)
+
     def test_frontend_routes_allow_direct_view_urls(self):
         self.assertTrue(is_frontend_route("/"))
         self.assertTrue(is_frontend_route("/backtest"))

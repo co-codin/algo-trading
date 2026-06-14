@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { requestJson, toQuery } from "./api";
 import TradingViewChart from "./components/TradingViewChart.vue";
 import type {
@@ -148,6 +148,12 @@ let liveTimer = 0;
 const strategyName = computed(() => strategyLabel(settings.strategy));
 const filteredSignals = computed(() => livePayload.value?.signals ?? []);
 const filteredPaperMarkers = computed(() => livePayload.value?.paper_markers ?? []);
+
+watch([liveSymbol, liveInterval, liveLimit], () => {
+  if (activeMode.value === "live") {
+    refreshLiveChart();
+  }
+});
 
 onMounted(async () => {
   window.addEventListener("popstate", handlePopState);
