@@ -8,6 +8,7 @@ from algo_trading.data import MarketDataClient, TransientMarketDataError
 from algo_trading.models import Candle, StrategyConfig
 from algo_trading.simulator import run_backtest
 from algo_trading.storage import write_run_outputs
+from algo_trading.strategy import apply_strategy_preset
 
 
 def run_paper_session(
@@ -18,6 +19,7 @@ def run_paper_session(
     iterations: int = 3,
     limit: int = 300,
 ) -> Path:
+    config = apply_strategy_preset(config)
     if iterations <= 0:
         raise ValueError("iterations must be positive")
     if poll_seconds < 0:

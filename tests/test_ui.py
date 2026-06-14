@@ -126,6 +126,27 @@ class UiTests(unittest.TestCase):
         self.assertIn("long_signal", signal_types)
         self.assertIn("short_signal", signal_types)
 
+    def test_live_chart_payload_uses_selected_strategy_for_markers(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])]
+
+        payload = live_chart_payload(
+            {
+                "symbol": "BTCUSDT",
+                "interval": "1h",
+                "limit": 7,
+                "strategy": "macd",
+                "fast_ema": 2,
+                "slow_ema": 5,
+                "macd_signal": 2,
+            },
+            client=client,
+        )
+
+        self.assertTrue(
+            any(marker["reason"].startswith("macd_") for marker in payload["signals"])
+        )
+
     def test_paper_trade_markers_reads_entry_and_exit_markers(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "paper" / "run-a"

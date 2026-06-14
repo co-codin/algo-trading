@@ -1,6 +1,6 @@
 import unittest
 
-from algo_trading.models import Candle, PositionSide, StrategyConfig
+from algo_trading.models import Candle, PositionSide, StrategyConfig, StrategyName
 from algo_trading.simulator import run_backtest
 
 
@@ -181,6 +181,103 @@ class SimulatorTests(unittest.TestCase):
         result = run_backtest(candles, config)
 
         self.assertEqual(result.summary["profit_factor"], "infinite")
+
+    def test_backtest_runs_macd_strategy(self):
+        candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 9, 8, 9, 11, 13, 15, 14, 12, 10])
+        ]
+        config = StrategyConfig(
+            strategy=StrategyName.MACD,
+            fast_ema=2,
+            slow_ema=5,
+            macd_signal=2,
+            stop_loss_pct=1.0,
+            take_profit_pct=1.0,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertGreater(len(result.trades), 0)
+        self.assertTrue(
+            any(trade.entry_reason.startswith("macd_") for trade in result.trades)
+        )
+
+    def test_backtest_runs_bollinger_reversion_strategy(self):
+        candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 10, 10, 7, 10, 11, 10, 9])
+        ]
+        config = StrategyConfig(
+            strategy=StrategyName.BOLLINGER_REVERSION,
+            bollinger_period=3,
+            bollinger_stddev=1.0,
+            stop_loss_pct=1.0,
+            take_profit_pct=1.0,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertGreater(len(result.trades), 0)
+        self.assertEqual(result.trades[0].entry_reason, "bollinger_lower_reclaim")
+
+    def test_backtest_runs_donchian_breakout_strategy(self):
+        candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 10, 10, 14, 15, 16, 12, 9, 8])
+        ]
+        config = StrategyConfig(
+            strategy=StrategyName.DONCHIAN_BREAKOUT,
+            donchian_period=3,
+            stop_loss_pct=1.0,
+            take_profit_pct=1.0,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertGreater(len(result.trades), 0)
+        self.assertEqual(result.trades[0].entry_reason, "donchian_breakout_high")
+
+    def test_backtest_runs_rsi_reversal_strategy(self):
+        candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 9, 8, 9, 10, 11, 10, 9])
+        ]
+        config = StrategyConfig(
+            strategy=StrategyName.RSI_REVERSAL,
+            rsi_period=2,
+            rsi_oversold=30.0,
+            rsi_overbought=70.0,
+            stop_loss_pct=1.0,
+            take_profit_pct=1.0,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(candles, config)
+
+        self.assertGreater(len(result.trades), 0)
+        self.assertEqual(result.trades[0].entry_reason, "rsi_reversal_long")
+
+    def test_backtest_rejects_invalid_strategy_periods(self):
+        candles = [candle(index, float(index + 10)) for index in range(30)]
+
+        for config in [
+            StrategyConfig(macd_signal=0),
+            StrategyConfig(bollinger_period=0),
+            StrategyConfig(bollinger_stddev=0),
+            StrategyConfig(donchian_period=0),
+            StrategyConfig(rsi_midline=101),
+        ]:
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(ValueError, "strategy"):
+                    run_backtest(candles, config)
 
 
 if __name__ == "__main__":

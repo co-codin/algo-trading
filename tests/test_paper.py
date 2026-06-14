@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,7 +6,7 @@ from unittest.mock import patch
 
 from algo_trading.cli import main
 from algo_trading.data import TransientMarketDataError
-from algo_trading.models import Candle, StrategyConfig
+from algo_trading.models import Candle, StrategyConfig, StrategyName, StrategyPreset
 from algo_trading.paper import run_paper_session
 
 
@@ -33,6 +34,12 @@ class FakeMarketDataClient:
             candle(3, 13.0),
             candle(4, 14.0),
         ][-limit:]
+
+
+class LongerMarketDataClient:
+    def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+        prices = [10, 9, 8, 9, 10, 11, 10, 9, 8, 7]
+        return [candle(index + 1, price) for index, price in enumerate(prices)][-limit:]
 
 
 class ProgressiveMarketDataClient:
@@ -86,6 +93,30 @@ class PaperTests(unittest.TestCase):
             self.assertIsNone(client.api_key)
             self.assertTrue((run_dir / "summary.json").exists())
             self.assertTrue((run_dir / "trades.csv").exists())
+
+    def test_paper_session_records_effective_preset_config(self):
+        client = LongerMarketDataClient()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = run_paper_session(
+                client,
+                StrategyConfig(
+                    strategy=StrategyName.RSI_REVERSAL,
+                    preset=StrategyPreset.AGGRESSIVE,
+                    fee_rate=0.0,
+                    slippage_rate=0.0,
+                ),
+                Path(tmp),
+                poll_seconds=0,
+                iterations=1,
+                limit=10,
+            )
+
+            config = json.loads((run_dir / "config.json").read_text())
+            self.assertEqual(config["strategy"], "rsi-reversal")
+            self.assertEqual(config["preset"], "aggressive")
+            self.assertEqual(config["rsi_period"], 7)
+            self.assertEqual(config["stop_loss_pct"], 0.04)
 
     def test_paper_session_accumulates_candles_across_polls(self):
         client = ProgressiveMarketDataClient()

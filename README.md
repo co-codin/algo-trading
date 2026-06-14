@@ -22,6 +22,16 @@ Then open `http://127.0.0.1:8765`. The UI binds to localhost by default, uses re
 
 The UI includes a `Live` tab for public Binance candle charts. It overlays EMA/RSI long and short signal markers plus simulated paper entry/exit markers from local `runs/paper/` output.
 
+The UI strategy dropdown supports:
+
+- `ema-rsi`: fast/slow EMA crossover filtered by RSI.
+- `macd`: MACD line crossing its signal line.
+- `bollinger-reversion`: mean reversion after a Bollinger band reclaim/reject.
+- `donchian-breakout`: breakout above or below the previous Donchian channel.
+- `rsi-reversal`: RSI leaving overbought or oversold zones.
+
+Presets are `custom`, `conservative`, `balanced`, and `aggressive`. Presets replace the related risk and indicator values with deterministic settings that are written into each run's `config.json`.
+
 ## Docker And Make
 
 Run all local checks:
@@ -60,6 +70,12 @@ Run a live read-only single-symbol backtest:
 python3 -m algo_trading.cli backtest --symbol BTCUSDT --interval 1h --limit 300
 ```
 
+Run a specific strategy and preset:
+
+```bash
+python3 -m algo_trading.cli backtest --symbol BTCUSDT --strategy macd --preset aggressive --interval 1h --limit 300
+```
+
 Run a batch backtest over the current top traded USDT crypto pairs:
 
 ```bash
@@ -87,5 +103,7 @@ python3 -m algo_trading.cli paper --symbol BTCUSDT --interval 1m --iterations 3
 Paper trading is intentionally single-symbol in v1. Use separate bounded sessions for separate symbols until a real portfolio simulator is added.
 
 Use `--allowed-side long-only` or `--allowed-side short-only` to focus a run on one side. The default is `both`.
+
+Strategy-specific CLI options include `--macd-signal`, `--bollinger-period`, `--bollinger-stddev`, `--donchian-period`, and `--rsi-midline`. All strategies still use read-only public market data and only write simulated backtest or paper-trading outputs.
 
 Outputs are written under `runs/backtests/<timestamp>/` or `runs/paper/<timestamp>/` and include `config.json`, `trades.csv`, `equity.csv`, and `summary.json`.

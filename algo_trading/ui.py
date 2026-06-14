@@ -16,12 +16,21 @@ from algo_trading.data import (
     MarketDataClient,
     TransientMarketDataError,
 )
-from algo_trading.indicators import ema, rsi
-from algo_trading.models import AllowedSide, Candle, StrategyConfig
+from algo_trading.models import (
+    AllowedSide,
+    Candle,
+    StrategyConfig,
+    StrategyName,
+    StrategyPreset,
+)
 from algo_trading.paper import run_paper_session
 from algo_trading.simulator import run_backtest
 from algo_trading.storage import write_run_outputs
-from algo_trading.strategy import signal_for_index
+from algo_trading.strategy import (
+    apply_strategy_preset,
+    build_strategy_context,
+    entry_signal_for_index,
+)
 from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
 WEB_ROOT = Path(__file__).with_name("web")
@@ -61,7 +70,9 @@ def run_backtest_payload(
 
     runs: list[dict[str, Any]] = []
     for symbol in symbols:
-        config = _strategy_config_from_payload(payload, symbol=symbol, default_interval="1h")
+        config = apply_strategy_preset(
+            _strategy_config_from_payload(payload, symbol=symbol, default_interval="1h")
+        )
         candles = _get_klines_with_retries(
             market_client,
             config.symbol,
@@ -88,10 +99,12 @@ def run_paper_payload(
     if len(symbols) != 1:
         raise ValueError("paper mode accepts one symbol")
 
-    config = _strategy_config_from_payload(
-        payload,
-        symbol=symbols[0],
-        default_interval="1m",
+    config = apply_strategy_preset(
+        _strategy_config_from_payload(
+            payload,
+            symbol=symbols[0],
+            default_interval="1m",
+        )
     )
     run_dir = run_paper_session(
         market_client,
@@ -117,7 +130,9 @@ def live_chart_payload(
     market_client = client or BinanceMarketDataClient()
     symbol = str(payload.get("symbol") or "BTCUSDT").upper()
     limit = _int_value(payload, "limit", 180)
-    config = _strategy_config_from_payload(payload, symbol=symbol, default_interval="1m")
+    config = apply_strategy_preset(
+        _strategy_config_from_payload(payload, symbol=symbol, default_interval="1m")
+    )
     candles = market_client.get_klines(config.symbol, config.interval, limit)
     if not candles:
         raise ValueError("market-data client returned no candles")
@@ -418,11 +433,18 @@ def _strategy_config_from_payload(
         slippage_rate=_float_value(payload, "slippage_rate", 0.0005),
         position_fraction=_float_value(payload, "position_fraction", 1.0),
         allowed_side=AllowedSide(str(payload.get("allowed_side") or "both")),
+        strategy=StrategyName(str(payload.get("strategy") or StrategyName.EMA_RSI.value)),
+        preset=StrategyPreset(str(payload.get("preset") or StrategyPreset.CUSTOM.value)),
         fast_ema=_int_value(payload, "fast_ema", 12),
         slow_ema=_int_value(payload, "slow_ema", 26),
         rsi_period=_int_value(payload, "rsi_period", 14),
         rsi_overbought=_float_value(payload, "rsi_overbought", 70.0),
         rsi_oversold=_float_value(payload, "rsi_oversold", 30.0),
+        rsi_midline=_float_value(payload, "rsi_midline", 50.0),
+        macd_signal=_int_value(payload, "macd_signal", 9),
+        bollinger_period=_int_value(payload, "bollinger_period", 20),
+        bollinger_stddev=_float_value(payload, "bollinger_stddev", 2.0),
+        donchian_period=_int_value(payload, "donchian_period", 20),
         stop_loss_pct=_float_value(payload, "stop_loss_pct", 0.03),
         take_profit_pct=_float_value(payload, "take_profit_pct", 0.06),
         trailing_stop_pct=_float_value(payload, "trailing_stop_pct", 0.0),
@@ -458,14 +480,10 @@ def _strategy_signal_markers(
     candles: list[Candle],
     config: StrategyConfig,
 ) -> list[dict[str, Any]]:
-    closes = [candle.close for candle in candles]
-    fast = ema(closes, config.fast_ema)
-    slow = ema(closes, config.slow_ema)
-    rsi_values = rsi(closes, config.rsi_period)
-
+    context = build_strategy_context(candles, config)
     markers: list[dict[str, Any]] = []
     for index, candle in enumerate(candles):
-        signal = signal_for_index(config, fast, slow, rsi_values, index)
+        signal = entry_signal_for_index(config, context, index)
         if signal.type.value == "enter_long":
             markers.append(
                 {

@@ -176,6 +176,60 @@ class CliTests(unittest.TestCase):
             summaries = sorted(Path(tmp).glob("backtests/*/summary.json"))
             self.assertEqual(len(summaries), 2)
 
+    def test_backtest_command_records_selected_strategy_and_effective_preset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fixture = tmp_path / "candles.csv"
+            fixture.write_text(
+                "\n".join(
+                    [
+                        "open_time,open,high,low,close,volume",
+                        "1,10,11,9,10,1",
+                        "2,9,10,8,9,1",
+                        "3,8,9,7,8,1",
+                        "4,9,10,8,9,1",
+                        "5,11,12,10,11,1",
+                        "6,13,14,12,13,1",
+                        "7,15,16,14,15,1",
+                        "8,14,15,13,14,1",
+                        "9,12,13,11,12,1",
+                        "10,10,11,9,10,1",
+                        "11,9,10,8,9,1",
+                        "12,8,9,7,8,1",
+                        "13,7,8,6,7,1",
+                        "14,8,9,7,8,1",
+                    ]
+                )
+            )
+
+            exit_code = main(
+                [
+                    "backtest",
+                    "--fixture",
+                    str(fixture),
+                    "--output-root",
+                    str(tmp_path),
+                    "--strategy",
+                    "macd",
+                    "--preset",
+                    "aggressive",
+                    "--fee-rate",
+                    "0",
+                    "--slippage-rate",
+                    "0",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            configs = list(tmp_path.glob("backtests/*/config.json"))
+            self.assertEqual(len(configs), 1)
+            config = json.loads(configs[0].read_text())
+            self.assertEqual(config["strategy"], "macd")
+            self.assertEqual(config["preset"], "aggressive")
+            self.assertEqual(config["fast_ema"], 6)
+            self.assertEqual(config["slow_ema"], 13)
+            self.assertEqual(config["macd_signal"], 5)
+
 
 if __name__ == "__main__":
     unittest.main()

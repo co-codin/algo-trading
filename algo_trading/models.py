@@ -23,6 +23,21 @@ class AllowedSide(str, Enum):
     SHORT_ONLY = "short-only"
 
 
+class StrategyName(str, Enum):
+    EMA_RSI = "ema-rsi"
+    MACD = "macd"
+    BOLLINGER_REVERSION = "bollinger-reversion"
+    DONCHIAN_BREAKOUT = "donchian-breakout"
+    RSI_REVERSAL = "rsi-reversal"
+
+
+class StrategyPreset(str, Enum):
+    CUSTOM = "custom"
+    CONSERVATIVE = "conservative"
+    BALANCED = "balanced"
+    AGGRESSIVE = "aggressive"
+
+
 @dataclass(frozen=True)
 class Candle:
     open_time: int
@@ -50,11 +65,18 @@ class StrategyConfig:
     slippage_rate: float = 0.0005
     position_fraction: float = 1.0
     allowed_side: AllowedSide = AllowedSide.BOTH
+    strategy: StrategyName = StrategyName.EMA_RSI
+    preset: StrategyPreset = StrategyPreset.CUSTOM
     fast_ema: int = 12
     slow_ema: int = 26
     rsi_period: int = 14
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
+    rsi_midline: float = 50.0
+    macd_signal: int = 9
+    bollinger_period: int = 20
+    bollinger_stddev: float = 2.0
+    donchian_period: int = 20
     stop_loss_pct: float = 0.03
     take_profit_pct: float = 0.06
     trailing_stop_pct: float = 0.0

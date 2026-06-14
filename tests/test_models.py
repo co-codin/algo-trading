@@ -6,6 +6,8 @@ from algo_trading.models import (
     PositionSide,
     SignalType,
     StrategyConfig,
+    StrategyName,
+    StrategyPreset,
 )
 
 
@@ -18,6 +20,13 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(config.starting_balance, 10000.0)
         self.assertEqual(config.fee_rate, 0.001)
         self.assertEqual(config.slippage_rate, 0.0005)
+        self.assertEqual(config.strategy, StrategyName.EMA_RSI)
+        self.assertEqual(config.preset, StrategyPreset.CUSTOM)
+        self.assertEqual(config.macd_signal, 9)
+        self.assertEqual(config.bollinger_period, 20)
+        self.assertEqual(config.bollinger_stddev, 2.0)
+        self.assertEqual(config.donchian_period, 20)
+        self.assertEqual(config.rsi_midline, 50.0)
 
     def test_candle_rejects_invalid_prices(self):
         with self.assertRaises(ValueError):

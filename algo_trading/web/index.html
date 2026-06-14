@@ -62,6 +62,25 @@
               </select>
             </label>
             <label>
+              <span>Strategy</span>
+              <select name="strategy">
+                <option value="ema-rsi">EMA + RSI</option>
+                <option value="macd">MACD</option>
+                <option value="bollinger-reversion">Bollinger Reversion</option>
+                <option value="donchian-breakout">Donchian Breakout</option>
+                <option value="rsi-reversal">RSI Reversal</option>
+              </select>
+            </label>
+            <label>
+              <span>Preset</span>
+              <select name="preset">
+                <option value="custom">Custom</option>
+                <option value="conservative">Conservative</option>
+                <option value="balanced">Balanced</option>
+                <option value="aggressive">Aggressive</option>
+              </select>
+            </label>
+            <label>
               <span>Starting USDT</span>
               <input name="starting_balance" type="number" min="1" step="0.01" value="10000">
             </label>
@@ -96,6 +115,26 @@
             <label>
               <span>RSI Oversold</span>
               <input name="rsi_oversold" type="number" min="0" max="99" step="0.1" value="30">
+            </label>
+            <label>
+              <span>RSI Midline</span>
+              <input name="rsi_midline" type="number" min="0" max="100" step="0.1" value="50">
+            </label>
+            <label>
+              <span>MACD Signal</span>
+              <input name="macd_signal" type="number" min="1" value="9">
+            </label>
+            <label>
+              <span>Bollinger Period</span>
+              <input name="bollinger_period" type="number" min="1" value="20">
+            </label>
+            <label>
+              <span>Bollinger Stddev</span>
+              <input name="bollinger_stddev" type="number" min="0.1" step="0.1" value="2">
+            </label>
+            <label>
+              <span>Donchian Period</span>
+              <input name="donchian_period" type="number" min="1" value="20">
             </label>
             <label>
               <span>Stop Loss</span>

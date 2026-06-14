@@ -11,9 +11,16 @@ from algo_trading.data import (
     TransientMarketDataError,
     load_candles_from_csv,
 )
-from algo_trading.models import AllowedSide, Candle, StrategyConfig
+from algo_trading.models import (
+    AllowedSide,
+    Candle,
+    StrategyConfig,
+    StrategyName,
+    StrategyPreset,
+)
 from algo_trading.simulator import run_backtest
 from algo_trading.storage import write_run_outputs
+from algo_trading.strategy import apply_strategy_preset, list_strategy_names
 from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
 
@@ -39,7 +46,7 @@ def _run_backtest_command(args: argparse.Namespace) -> int:
     symbols = _resolve_backtest_symbols(args, client)
     fixture_candles = load_candles_from_csv(args.fixture) if args.fixture else None
     for symbol in symbols:
-        config = _config_from_args(args, symbol=symbol)
+        config = apply_strategy_preset(_config_from_args(args, symbol=symbol))
         if fixture_candles is not None:
             candles = fixture_candles
         else:
@@ -116,7 +123,7 @@ def _get_klines_with_retries(
 def _run_paper_command(args: argparse.Namespace) -> int:
     from algo_trading.paper import run_paper_session
 
-    config = _config_from_args(args)
+    config = apply_strategy_preset(_config_from_args(args))
     run_dir = run_paper_session(
         BinanceMarketDataClient(),
         config,
@@ -138,11 +145,18 @@ def _config_from_args(args: argparse.Namespace, symbol: str | None = None) -> St
         slippage_rate=args.slippage_rate,
         position_fraction=args.position_fraction,
         allowed_side=AllowedSide(args.allowed_side),
+        strategy=StrategyName(args.strategy),
+        preset=StrategyPreset(args.preset),
         fast_ema=args.fast_ema,
         slow_ema=args.slow_ema,
         rsi_period=args.rsi_period,
         rsi_overbought=args.rsi_overbought,
         rsi_oversold=args.rsi_oversold,
+        rsi_midline=args.rsi_midline,
+        macd_signal=args.macd_signal,
+        bollinger_period=args.bollinger_period,
+        bollinger_stddev=args.bollinger_stddev,
+        donchian_period=args.donchian_period,
         stop_loss_pct=args.stop_loss_pct,
         take_profit_pct=args.take_profit_pct,
         trailing_stop_pct=args.trailing_stop_pct,
@@ -217,11 +231,26 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
         choices=[side.value for side in AllowedSide],
         default=AllowedSide.BOTH.value,
     )
+    parser.add_argument(
+        "--strategy",
+        choices=list_strategy_names(),
+        default=StrategyName.EMA_RSI.value,
+    )
+    parser.add_argument(
+        "--preset",
+        choices=[preset.value for preset in StrategyPreset],
+        default=StrategyPreset.CUSTOM.value,
+    )
     parser.add_argument("--fast-ema", type=int, default=12)
     parser.add_argument("--slow-ema", type=int, default=26)
     parser.add_argument("--rsi-period", type=int, default=14)
     parser.add_argument("--rsi-overbought", type=float, default=70.0)
     parser.add_argument("--rsi-oversold", type=float, default=30.0)
+    parser.add_argument("--rsi-midline", type=float, default=50.0)
+    parser.add_argument("--macd-signal", type=int, default=9)
+    parser.add_argument("--bollinger-period", type=int, default=20)
+    parser.add_argument("--bollinger-stddev", type=float, default=2.0)
+    parser.add_argument("--donchian-period", type=int, default=20)
     parser.add_argument("--stop-loss-pct", type=float, default=0.03)
     parser.add_argument("--take-profit-pct", type=float, default=0.06)
     parser.add_argument("--trailing-stop-pct", type=float, default=0.0)

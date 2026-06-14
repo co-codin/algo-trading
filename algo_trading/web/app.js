@@ -148,11 +148,18 @@ function liveQueryString() {
   const params = new URLSearchParams();
   const fields = [
     "allowed_side",
+    "strategy",
+    "preset",
     "fast_ema",
     "slow_ema",
     "rsi_period",
     "rsi_overbought",
     "rsi_oversold",
+    "rsi_midline",
+    "macd_signal",
+    "bollinger_period",
+    "bollinger_stddev",
+    "donchian_period",
     "stop_loss_pct",
     "take_profit_pct",
     "trailing_stop_pct",
