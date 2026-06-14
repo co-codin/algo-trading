@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
-from algo_trading.data import BinanceMarketDataClient, load_candles_from_csv
-from algo_trading.models import AllowedSide, StrategyConfig
+from algo_trading.data import (
+    BinanceMarketDataClient,
+    MarketDataClient,
+    TransientMarketDataError,
+    load_candles_from_csv,
+)
+from algo_trading.models import AllowedSide, Candle, StrategyConfig
 from algo_trading.simulator import run_backtest
 from algo_trading.storage import write_run_outputs
+from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,6 +25,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_backtest_command(args)
         if args.command == "paper":
             return _run_paper_command(args)
+        if args.command == "symbols":
+            return _run_symbols_command(args)
         parser.print_help()
         return 2
     except Exception as exc:
@@ -26,20 +35,82 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_backtest_command(args: argparse.Namespace) -> int:
-    config = _config_from_args(args)
-    if args.fixture:
-        candles = load_candles_from_csv(args.fixture)
-    else:
-        candles = BinanceMarketDataClient().get_klines(
-            config.symbol,
-            config.interval,
-            args.limit,
-        )
-    result = run_backtest(candles, config)
-    run_dir = write_run_outputs("backtests", config, result, Path(args.output_root))
-    print(f"wrote backtest results to {run_dir}")
-    print(f"final_balance={result.summary['final_balance']}")
+    client = BinanceMarketDataClient()
+    symbols = _resolve_backtest_symbols(args, client)
+    fixture_candles = load_candles_from_csv(args.fixture) if args.fixture else None
+    for symbol in symbols:
+        config = _config_from_args(args, symbol=symbol)
+        if fixture_candles is not None:
+            candles = fixture_candles
+        else:
+            candles = _get_klines_with_retries(
+                client,
+                config.symbol,
+                config.interval,
+                args.limit,
+                args.market_data_retries,
+                args.retry_delay,
+            )
+        result = run_backtest(candles, config)
+        run_dir = write_run_outputs("backtests", config, result, Path(args.output_root))
+        print(f"wrote {config.symbol} backtest results to {run_dir}")
+        print(f"{config.symbol} final_balance={result.summary['final_balance']}")
     return 0
+
+
+def _run_symbols_command(args: argparse.Namespace) -> int:
+    ranked = ranked_usdt_symbols(
+        BinanceMarketDataClient().get_24h_tickers(),
+        limit=args.top,
+    )
+    for index, item in enumerate(ranked, start=1):
+        print(
+            f"{index}\t{item.symbol}\tquoteVolume={item.quote_volume:.2f}\tlast={item.last_price:g}"
+        )
+    return 0
+
+
+def _resolve_backtest_symbols(
+    args: argparse.Namespace,
+    client: MarketDataClient,
+) -> list[str]:
+    if not args.symbols:
+        return [args.symbol.upper()]
+    if args.symbols.strip().lower() == "top":
+        return [
+            item.symbol
+            for item in ranked_usdt_symbols(client.get_24h_tickers(), args.top)
+        ]
+    return parse_symbol_list(args.symbols)
+
+
+def _get_klines_with_retries(
+    client: MarketDataClient,
+    symbol: str,
+    interval: str,
+    limit: int,
+    retries: int,
+    retry_delay: float,
+) -> list[Candle]:
+    if retries < 0:
+        raise ValueError("market-data retries cannot be negative")
+    if retry_delay < 0:
+        raise ValueError("retry delay cannot be negative")
+
+    attempts = 0
+    while True:
+        try:
+            return client.get_klines(symbol, interval, limit)
+        except TransientMarketDataError as exc:
+            if attempts >= retries:
+                raise
+            attempts += 1
+            print(
+                f"{symbol} market-data fetch failed: {exc}; retrying {attempts}/{retries}",
+                file=sys.stderr,
+            )
+            if retry_delay > 0:
+                time.sleep(retry_delay)
 
 
 def _run_paper_command(args: argparse.Namespace) -> int:
@@ -58,9 +129,9 @@ def _run_paper_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _config_from_args(args: argparse.Namespace) -> StrategyConfig:
+def _config_from_args(args: argparse.Namespace, symbol: str | None = None) -> StrategyConfig:
     return StrategyConfig(
-        symbol=args.symbol.upper(),
+        symbol=(symbol or args.symbol).upper(),
         interval=args.interval,
         starting_balance=args.starting_balance,
         fee_rate=args.fee_rate,
@@ -86,12 +157,36 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     _add_backtest_parser(subparsers)
     _add_paper_parser(subparsers)
+    _add_symbols_parser(subparsers)
     return parser
 
 
 def _add_backtest_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser("backtest", help="run a historical backtest")
     _add_common_options(parser)
+    parser.add_argument(
+        "--symbols",
+        default="",
+        help="comma-separated symbols, or 'top' to use ranked USDT pairs",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=10,
+        help="number of top symbols when --symbols=top",
+    )
+    parser.add_argument(
+        "--market-data-retries",
+        type=int,
+        default=2,
+        help="transient market-data retries per symbol",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=0.5,
+        help="seconds to wait between transient market-data retries",
+    )
     parser.add_argument("--fixture", default="", help="CSV candle fixture path")
 
 
@@ -101,6 +196,11 @@ def _add_paper_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
     parser.set_defaults(interval="1m")
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument("--poll-seconds", type=float, default=30.0)
+
+
+def _add_symbols_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("symbols", help="list top read-only Binance USDT symbols")
+    parser.add_argument("--top", type=int, default=10, help="number of symbols to print")
 
 
 def _add_common_options(parser: argparse.ArgumentParser) -> None:

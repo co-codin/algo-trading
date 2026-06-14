@@ -16,6 +16,9 @@ class MarketDataClient(Protocol):
     def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
         raise NotImplementedError
 
+    def get_24h_tickers(self) -> list[dict[str, object]]:
+        raise NotImplementedError
+
 
 class TransientMarketDataError(RuntimeError):
     """Raised when a read-only market-data request can be retried later."""
@@ -50,6 +53,25 @@ class BinanceMarketDataClient:
         if not isinstance(payload, list):
             raise ValueError("unexpected Binance kline response")
         return [_candle_from_kline(row) for row in payload]
+
+    def get_24h_tickers(self) -> list[dict[str, object]]:
+        url = f"{self.base_url}/api/v3/ticker/24hr"
+        try:
+            with urllib.request.urlopen(url, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code == 429 or exc.code >= 500:
+                raise TransientMarketDataError(
+                    f"transient Binance HTTP {exc.code}"
+                ) from exc
+            raise ValueError(f"Binance HTTP {exc.code}") from exc
+        except (TimeoutError, URLError) as exc:
+            raise TransientMarketDataError("transient Binance market-data failure") from exc
+        if not isinstance(payload, list):
+            raise ValueError("unexpected Binance ticker response")
+        if not all(isinstance(item, dict) for item in payload):
+            raise ValueError("unexpected Binance ticker response")
+        return payload
 
 
 def load_candles_from_csv(path: str | Path) -> list[Candle]:
