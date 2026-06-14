@@ -1,8 +1,9 @@
 [project]
 name = "algo-trading"
 version = "0.1.0"
-description = "Local BTCUSDT backtesting and paper trading simulator"
+description = "Local crypto backtesting and paper trading simulator"
 requires-python = ">=3.11"
 
 [project.scripts]
 algo-trading = "algo_trading.cli:main"
+algo-trading-ui = "algo_trading.ui:main"

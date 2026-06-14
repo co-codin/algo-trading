@@ -12,6 +12,14 @@ Run the full test suite:
 python3 -m unittest discover -v
 ```
 
+Start the local browser UI:
+
+```bash
+python3 -m algo_trading.ui --port 8765
+```
+
+Then open `http://127.0.0.1:8765`. The UI binds to localhost by default, uses read-only public market data, and cannot place real orders.
+
 List the most-traded Binance USDT crypto pairs by current 24h quote volume:
 
 ```bash
