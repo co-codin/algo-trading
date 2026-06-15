@@ -136,8 +136,10 @@ class UiTests(unittest.TestCase):
         self.assertIn("watch(() => props.resetKey", chart_source)
         self.assertIn("shouldFitContent = true;", chart_source)
         self.assertIn("if (shouldFitContent) {", chart_source)
-        self.assertIn("chart.value?.timeScale().fitContent();", chart_source)
+        self.assertIn("timeScale?.fitContent();", chart_source)
         self.assertIn("shouldFitContent = false;", chart_source)
+        self.assertIn("getVisibleLogicalRange()", chart_source)
+        self.assertIn("setVisibleLogicalRange(visibleRange)", chart_source)
 
     def test_all_strategies_selection_stays_live_only(self):
         source = (
