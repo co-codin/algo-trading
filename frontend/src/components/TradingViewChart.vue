@@ -59,6 +59,8 @@ function renderChart() {
   }
   ensureChart();
   const candleData = props.candles.map(toCandleData);
+  const timeScale = chart.value?.timeScale();
+  const visibleRange = shouldFitContent ? null : timeScale?.getVisibleLogicalRange();
   series.value?.setData(candleData);
   markerApi.value?.setMarkers(
     visibleMarkers.value
@@ -66,8 +68,10 @@ function renderChart() {
       .sort((left, right) => Number(left.time) - Number(right.time)),
   );
   if (shouldFitContent) {
-    chart.value?.timeScale().fitContent();
+    timeScale?.fitContent();
     shouldFitContent = false;
+  } else if (visibleRange) {
+    timeScale?.setVisibleLogicalRange(visibleRange);
   }
 }
 
