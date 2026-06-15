@@ -1077,7 +1077,7 @@ function errorMessage(error: unknown): string {
           </select>
         </label>
         <div class="strategy-picker live-strategy-field">
-          <span>{{ t("labels.strategy") }}</span>
+          <strong class="strategy-picker-label">{{ t("labels.strategy") }}</strong>
           <details class="strategy-menu" :aria-label="t('labels.strategyPickerHint')">
             <summary class="strategy-summary">
               <span>

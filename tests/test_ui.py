@@ -113,6 +113,7 @@ class UiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('class="strategy-picker live-strategy-field"', source)
+        self.assertIn('<strong class="strategy-picker-label">{{ t("labels.strategy") }}</strong>', source)
         self.assertIn('<summary class="strategy-summary">', source)
         self.assertIn("selectedLiveStrategyPreview", source)
         self.assertIn("const liveStrategyGroups = computed<StrategyGroup[]>(() =>", source)
