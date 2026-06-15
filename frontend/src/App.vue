@@ -205,6 +205,9 @@ const liveStrategyOptions = computed(() => [
 const activeLiveSymbolOptions = computed(
   () => liveSymbolsByMarket[liveMarket.value] ?? liveSymbolOptions,
 );
+const liveChartResetKey = computed(() =>
+  [liveMarket.value, liveSymbol.value, liveInterval.value, liveLimit.value].join(":"),
+);
 const activeLiveStrategyLabel = computed(() =>
   settings.strategy === "all" ? "All strategies" : strategyLabel(settings.strategy),
 );
@@ -722,6 +725,7 @@ function errorMessage(error: unknown): string {
           :paper-markers="filteredPaperMarkers"
           :show-signals="showSignals"
           :show-paper="showPaper"
+          :reset-key="liveChartResetKey"
         />
         <div v-else class="empty">Load a chart to start</div>
       </div>
