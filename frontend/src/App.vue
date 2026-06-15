@@ -12,6 +12,9 @@ import {
   type MessageKey,
 } from "./i18n";
 import type {
+  AuthMePayload,
+  AuthPayload,
+  AuthUser,
   CombinationSignalsPayload,
   LiveChartPayload,
   Mode,
@@ -136,6 +139,15 @@ const settings = reactive<Record<string, string>>({
 });
 
 const locale = ref<Locale>(normalizeLocale(window.localStorage.getItem(LOCALE_STORAGE_KEY)));
+const authChecked = ref(false);
+const authUser = ref<AuthUser | null>(null);
+const authMode = ref<"login" | "register">("login");
+const authForm = reactive({
+  username: "",
+  password: "",
+});
+const authStatus = ref("");
+const authStatusType = ref<StatusType>("");
 
 function t(key: MessageKey): string {
   return translate(locale.value, key);
@@ -303,12 +315,23 @@ watch(locale, () => {
   if (!labStatusType.value) {
     labStatus.value = t("status.ready");
   }
+  if (!authStatusType.value && authStatus.value) {
+    authStatus.value = t("auth.ready");
+  }
 });
 
 onMounted(async () => {
   window.addEventListener("popstate", handlePopState);
-  await Promise.all([loadStrategies(), loadRuns()]);
-  setMode(modeFromLocation(), false);
+  await loadCurrentUser();
+  if (authUser.value) {
+    try {
+      await bootstrapAuthenticatedApp();
+    } catch (error) {
+      authUser.value = null;
+      authStatus.value = errorMessage(error);
+      authStatusType.value = "error";
+    }
+  }
 });
 
 onBeforeUnmount(() => {
@@ -359,6 +382,59 @@ function setComboStatus(message: string, type: StatusType = "") {
 function setLabStatus(message: string, type: StatusType = "") {
   labStatus.value = message;
   labStatusType.value = type;
+}
+
+async function loadCurrentUser() {
+  authChecked.value = false;
+  try {
+    const payload = await requestJson<AuthMePayload>("/api/auth/me");
+    authUser.value = payload.user;
+  } catch {
+    authUser.value = null;
+  } finally {
+    authChecked.value = true;
+  }
+}
+
+async function bootstrapAuthenticatedApp() {
+  await Promise.all([loadStrategies(), loadRuns()]);
+  setMode(modeFromLocation(), false);
+}
+
+async function submitAuth() {
+  authStatus.value = "";
+  authStatusType.value = "busy";
+  const endpoint = authMode.value === "login" ? "/api/auth/login" : "/api/auth/register";
+  try {
+    const payload = await requestJson<AuthPayload>(endpoint, {
+      method: "POST",
+      body: JSON.stringify({
+        username: authForm.username,
+        password: authForm.password,
+      }),
+    });
+    authUser.value = payload.user;
+    authForm.password = "";
+    authStatus.value = t("auth.ready");
+    authStatusType.value = "";
+    await bootstrapAuthenticatedApp();
+  } catch (error) {
+    authStatus.value = errorMessage(error);
+    authStatusType.value = "error";
+  }
+}
+
+async function logout() {
+  await requestJson<{ ok: true }>("/api/auth/logout", { method: "POST" });
+  authUser.value = null;
+  stopLivePolling();
+  symbols.value = [];
+  runs.value = [];
+  outputRuns.value = [];
+  runDetails.value = null;
+  livePayload.value = null;
+  comboPayload.value = null;
+  labRows.value = [];
 }
 
 async function loadStrategies() {
@@ -608,6 +684,84 @@ function errorMessage(error: unknown): string {
 </script>
 
 <template>
+  <section v-if="!authChecked" class="auth-shell">
+    <div class="auth-card">
+      <div>
+        <h1>{{ t("auth.title") }}</h1>
+        <p>{{ t("auth.loading") }}</p>
+      </div>
+      <div class="status is-busy">{{ t("auth.loading") }}</div>
+    </div>
+  </section>
+
+  <section v-else-if="!authUser" class="auth-shell">
+    <form class="auth-card" @submit.prevent="submitAuth">
+      <div class="auth-card-heading">
+        <div>
+          <h1>{{ t("auth.title") }}</h1>
+          <p>{{ t("auth.subtitle") }}</p>
+        </div>
+        <div class="language-switcher" :aria-label="t('aria.language')">
+          <button
+            v-for="item in SUPPORTED_LOCALES"
+            :key="item.code"
+            type="button"
+            class="language-option"
+            :class="{ 'is-active': locale === item.code }"
+            @click="setLocale(item.code)"
+          >
+            <span aria-hidden="true">{{ item.flag }}</span>
+            <span>{{ item.label }}</span>
+          </button>
+        </div>
+      </div>
+      <div class="auth-tabs">
+        <button
+          type="button"
+          :class="{ 'is-active': authMode === 'login' }"
+          @click="authMode = 'login'"
+        >
+          {{ t("auth.login") }}
+        </button>
+        <button
+          type="button"
+          :class="{ 'is-active': authMode === 'register' }"
+          @click="authMode = 'register'"
+        >
+          {{ t("auth.register") }}
+        </button>
+      </div>
+      <label>
+        <span>{{ t("auth.username") }}</span>
+        <input v-model.trim="authForm.username" autocomplete="username" required minlength="3">
+      </label>
+      <label>
+        <span>{{ t("auth.password") }}</span>
+        <input
+          v-model="authForm.password"
+          autocomplete="current-password"
+          required
+          minlength="8"
+          type="password"
+        >
+      </label>
+      <button class="primary" type="submit">
+        {{ authMode === "login" ? t("auth.submitLogin") : t("auth.submitRegister") }}
+      </button>
+      <button
+        class="auth-link"
+        type="button"
+        @click="authMode = authMode === 'login' ? 'register' : 'login'"
+      >
+        {{ authMode === "login" ? t("auth.switchToRegister") : t("auth.switchToLogin") }}
+      </button>
+      <div v-if="authStatus" class="status auth-status" :class="authStatusType ? `is-${authStatusType}` : ''">
+        {{ authStatus }}
+      </div>
+    </form>
+  </section>
+
+  <template v-else>
   <header class="topbar">
     <div>
       <h1>{{ t("app.title") }}</h1>
@@ -627,6 +781,9 @@ function errorMessage(error: unknown): string {
           <span>{{ item.label }}</span>
         </button>
       </div>
+      <button class="secondary logout-button" type="button" @click="logout">
+        {{ t("auth.logout") }}
+      </button>
       <div class="safety">{{ t("app.safety") }}</div>
     </div>
   </header>
@@ -1127,4 +1284,5 @@ function errorMessage(error: unknown): string {
       </section>
     </section>
   </main>
+  </template>
 </template>

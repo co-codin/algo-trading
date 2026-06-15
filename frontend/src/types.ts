@@ -1,5 +1,20 @@
 export type Mode = "backtest" | "paper" | "live" | "runs" | "lab" | "combos";
 
+export type AuthUser = {
+  id: number;
+  username: string;
+};
+
+export type AuthMePayload = {
+  ok: true;
+  user: AuthUser | null;
+};
+
+export type AuthPayload = {
+  ok: true;
+  user: AuthUser;
+};
+
 export type StrategyInfo = {
   name: string;
   description: string;

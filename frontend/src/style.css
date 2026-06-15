@@ -78,6 +78,80 @@ button {
   gap: 10px;
 }
 
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 18px;
+  background: var(--bg);
+}
+
+.auth-card {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 18px;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.auth-card p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+
+.auth-card-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.auth-tabs button {
+  border: 0;
+  border-radius: 0;
+  background: var(--field);
+  color: var(--muted);
+}
+
+.auth-tabs button.is-active {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+}
+
+.auth-link {
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  padding: 0;
+  text-align: left;
+}
+
+.auth-status {
+  border-radius: 4px;
+  white-space: normal;
+}
+
+.logout-button {
+  white-space: nowrap;
+}
+
 .language-switcher {
   display: inline-flex;
   overflow: hidden;
