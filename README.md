@@ -2,7 +2,7 @@
 
 Local market charting, breadth monitoring, and simulated strategy research.
 
-Safety boundary: this project uses read-only public market data only. It does not accept exchange API keys and cannot place real orders.
+Safety boundary: this project uses read-only market data only. It can read optional data-provider tokens such as `MOEX_API_KEY`, but it does not accept trading credentials and cannot place real orders.
 
 ## Usage
 
@@ -18,7 +18,7 @@ Start the local browser UI:
 python3 -m algo_trading.ui --port 8765
 ```
 
-Then open `http://127.0.0.1:8765`. The UI binds to localhost by default, uses read-only public market data, and cannot place real orders.
+Then open `http://127.0.0.1:8765`. The UI binds to localhost by default, uses read-only market data, and cannot place real orders.
 
 The frontend is a Vue 3 control panel with direct URLs:
 
@@ -89,7 +89,7 @@ make compose-up
 
 Both Docker paths mount local `runs/` for command-line simulation outputs. Docker Compose also mounts `historical_data/` so market-breadth CSV history persists across rebuilds.
 
-Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template. MOEX requests read `MOEX_API_KEY` or `MOEXALGO_API_KEY` when either variable is present.
+Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template and set `MOEX_API_KEY` or `MOEXALGO_API_KEY` there when MOEX authenticated data is needed. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker.
 
 The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file.
 
