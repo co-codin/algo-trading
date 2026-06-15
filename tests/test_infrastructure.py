@@ -35,6 +35,17 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("condition: service_healthy", compose)
         self.assertIn("postgres-data:", compose)
 
+    def test_compose_persists_market_breadth_historical_csvs(self):
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+        self.assertIn('user: "${UID:-1000}:${GID:-1000}"', compose)
+        self.assertIn("./historical_data:/app/historical_data", compose)
+        self.assertIn("MARKET_BREADTH_DATA_DIR: /app/historical_data/breadth", compose)
+        self.assertIn("HISTORICAL_DATA_DIR ?= $(CURDIR)/historical_data", makefile)
+        self.assertIn('"$(HISTORICAL_DATA_DIR)"', makefile)
+        self.assertIn('--user "$$(id -u):$$(id -g)"', makefile)
+
     def test_docker_smoke_authenticates_before_protected_api_checks(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 

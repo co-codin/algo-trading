@@ -1,4 +1,8 @@
+import os
+import tempfile
+import time
 import unittest
+from pathlib import Path
 
 from algo_trading.market_breadth import (
     ALLOWED_MARKET_BREADTH_SYMBOLS,
@@ -29,6 +33,19 @@ class FakeBreadthClient:
     ) -> bytes:
         self.calls.append((symbol, overrides))
         return self.bodies[symbol]
+
+
+class FailingBreadthClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, str] | None]] = []
+
+    def fetch_csv(
+        self,
+        symbol: str,
+        overrides: dict[str, str] | None = None,
+    ) -> bytes:
+        self.calls.append((symbol, overrides))
+        raise RuntimeError("Barchart unavailable")
 
 
 class MarketBreadthTests(unittest.TestCase):
@@ -64,7 +81,11 @@ $CPC,2025-01-03,0.8,0.9,0.7,0.85,0
 """,
             }
         )
-        service = MarketBreadthService(client=fake_client, ttl_seconds=60)
+        service = MarketBreadthService(
+            client=fake_client,
+            ttl_seconds=60,
+            data_dir=None,
+        )
 
         payload = market_breadth_payload(service, symbols=["$S5FD", "$CPC"])
 
@@ -84,10 +105,117 @@ $CPC,2025-01-03,0.8,0.9,0.7,0.85,0
         )
 
     def test_service_rejects_unknown_symbols(self):
-        service = MarketBreadthService(client=FakeBreadthClient({}), ttl_seconds=60)
+        service = MarketBreadthService(
+            client=FakeBreadthClient({}),
+            ttl_seconds=60,
+            data_dir=None,
+        )
 
         with self.assertRaises(ValueError):
             market_breadth_payload(service, symbols=["$UNKNOWN"])
+
+    def test_service_persists_breadth_bars_to_csv_and_reuses_fresh_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            fake_client = FakeBreadthClient({"$S5FD": CSV_BODY})
+            service = MarketBreadthService(
+                client=fake_client,
+                ttl_seconds=0,
+                data_dir=data_dir,
+                refresh_seconds=3600,
+            )
+
+            first_bars = service.bars_for_symbol("$S5FD")
+
+            cache_file = data_dir / "S5FD.csv"
+            self.assertEqual([bar.close for bar in first_bars], [52.0, 57.0])
+            self.assertTrue(cache_file.exists())
+            self.assertEqual(
+                cache_file.read_text(encoding="utf-8").splitlines()[0],
+                "symbol,date,open,high,low,close,volume",
+            )
+
+            second_client = FakeBreadthClient({})
+            second_service = MarketBreadthService(
+                client=second_client,
+                ttl_seconds=0,
+                data_dir=data_dir,
+                refresh_seconds=3600,
+            )
+
+            second_bars = second_service.bars_for_symbol("$S5FD")
+
+            self.assertEqual([bar.close for bar in second_bars], [52.0, 57.0])
+            self.assertEqual(second_client.calls, [])
+
+    def test_service_refreshes_stale_csv_hourly_and_merges_new_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            cache_file = data_dir / "S5FD.csv"
+            cache_file.write_text(
+                "symbol,date,open,high,low,close,volume\n"
+                "$S5FD,2025-01-02,45,55,40,52,100\n"
+                "$S5FD,2025-01-03,52,58,51,56,110\n",
+                encoding="utf-8",
+            )
+            stale_time = time.time() - 7200
+            os.utime(cache_file, (stale_time, stale_time))
+            fake_client = FakeBreadthClient(
+                {
+                    "$S5FD": b"""symbol,date,open,high,low,close,volume
+$S5FD,2025-01-03,53,59,52,57,111
+$S5FD,2025-01-04,57,62,56,60,120
+"""
+                }
+            )
+            service = MarketBreadthService(
+                client=fake_client,
+                ttl_seconds=0,
+                data_dir=data_dir,
+                refresh_seconds=3600,
+            )
+
+            bars = service.bars_for_symbol("$S5FD")
+
+            self.assertEqual(
+                fake_client.calls,
+                [("$S5FD", {"data": "daily"})],
+            )
+            self.assertEqual(
+                [bar.date.isoformat() for bar in bars],
+                ["2025-01-02", "2025-01-03", "2025-01-04"],
+            )
+            self.assertEqual([bar.close for bar in bars], [52.0, 57.0, 60.0])
+            saved_lines = cache_file.read_text(encoding="utf-8").splitlines()
+            self.assertIn("$S5FD,2025-01-04,57.0,62.0,56.0,60.0,120.0", saved_lines)
+
+    def test_service_serves_saved_csv_when_hourly_refresh_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            cache_file = data_dir / "S5FD.csv"
+            cache_file.write_text(
+                "symbol,date,open,high,low,close,volume\n"
+                "$S5FD,2025-01-02,45,55,40,52,100\n",
+                encoding="utf-8",
+            )
+            stale_time = time.time() - 7200
+            os.utime(cache_file, (stale_time, stale_time))
+            failing_client = FailingBreadthClient()
+            service = MarketBreadthService(
+                client=failing_client,
+                ttl_seconds=0,
+                data_dir=data_dir,
+                refresh_seconds=3600,
+            )
+
+            bars = service.bars_for_symbol("$S5FD")
+
+            self.assertEqual(
+                failing_client.calls,
+                [("$S5FD", {"data": "daily"})],
+            )
+            self.assertEqual([bar.date.isoformat() for bar in bars], ["2025-01-02"])
+            self.assertEqual(bars[0].close, 52.0)
 
 
 if __name__ == "__main__":

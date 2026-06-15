@@ -91,7 +91,9 @@ Run with Docker Compose:
 make compose-up
 ```
 
-Both Docker paths mount local `runs/` into the container so backtest and paper-trading outputs persist on the host.
+Both Docker paths mount local `runs/` into the container so backtest and paper-trading outputs persist on the host. Docker Compose also mounts `historical_data/` so market-breadth CSV history persists across rebuilds.
+
+The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file.
 
 List the most-traded Binance USDT crypto pairs by current 24h quote volume:
 

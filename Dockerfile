@@ -21,7 +21,9 @@ COPY algo_trading ./algo_trading
 COPY tests ./tests
 COPY --from=frontend /app/algo_trading/web/dist ./algo_trading/web/dist
 
-RUN pip install --no-cache-dir . && mkdir -p /app/runs && chown -R app:app /app
+RUN pip install --no-cache-dir . \
+    && mkdir -p /app/runs /app/historical_data \
+    && chown -R app:app /app
 
 USER app
 

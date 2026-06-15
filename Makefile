@@ -4,6 +4,7 @@ IMAGE ?= binance-algo-trading:local
 PORT ?= 8765
 SMOKE_PORT ?= 8766
 RUNS_DIR ?= $(CURDIR)/runs
+HISTORICAL_DATA_DIR ?= $(CURDIR)/historical_data
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
@@ -48,12 +49,12 @@ docker-build:
 	docker build -t $(IMAGE) .
 
 docker-run: docker-build
-	mkdir -p "$(RUNS_DIR)"
-	docker run --rm -it -p 127.0.0.1:$(PORT):8765 -v "$(RUNS_DIR):/app/runs" $(IMAGE)
+	mkdir -p "$(RUNS_DIR)" "$(HISTORICAL_DATA_DIR)"
+	docker run --rm -it --user "$$(id -u):$$(id -g)" -p 127.0.0.1:$(PORT):8765 -v "$(RUNS_DIR):/app/runs" -v "$(HISTORICAL_DATA_DIR):/app/historical_data" $(IMAGE)
 
 docker-smoke: docker-build
-	mkdir -p "$(RUNS_DIR)"
-	@container=$$(docker run -d -p 127.0.0.1:$(SMOKE_PORT):8765 -v "$(RUNS_DIR):/app/runs" $(IMAGE)); \
+	mkdir -p "$(RUNS_DIR)" "$(HISTORICAL_DATA_DIR)"
+	@container=$$(docker run -d --user "$$(id -u):$$(id -g)" -p 127.0.0.1:$(SMOKE_PORT):8765 -v "$(RUNS_DIR):/app/runs" -v "$(HISTORICAL_DATA_DIR):/app/historical_data" $(IMAGE)); \
 	cookie_jar=$$(mktemp); \
 	trap 'rm -f "$$cookie_jar"; docker rm -f $$container >/dev/null' EXIT; \
 	for attempt in 1 2 3 4 5 6 7 8 9 10; do \
@@ -73,7 +74,7 @@ docker-smoke: docker-build
 	exit 1
 
 compose-up:
-	mkdir -p "$(RUNS_DIR)"
+	mkdir -p "$(RUNS_DIR)" "$(HISTORICAL_DATA_DIR)"
 	PORT=$(PORT) $(COMPOSE) up -d --build
 
 compose-down:

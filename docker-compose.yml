@@ -17,6 +17,7 @@ services:
     build:
       context: .
     image: binance-algo-trading:local
+    user: "${UID:-1000}:${GID:-1000}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -24,9 +25,11 @@ services:
       - "127.0.0.1:${PORT:-8765}:8765"
     volumes:
       - ./runs:/app/runs
+      - ./historical_data:/app/historical_data
     environment:
       PYTHONUNBUFFERED: "1"
       DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading
+      MARKET_BREADTH_DATA_DIR: /app/historical_data/breadth
 
 volumes:
   postgres-data:

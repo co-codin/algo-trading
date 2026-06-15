@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+from pathlib import Path
 import threading
 import time
 import urllib.parse
@@ -20,10 +21,15 @@ BARCHART_COOKIE_TTL_SECONDS = 600
 MARKET_BREADTH_CACHE_TTL_SECONDS = int(
     os.environ.get("MARKET_BREADTH_CACHE_TTL_SECONDS", "3600")
 )
+MARKET_BREADTH_DATA_DIR = os.environ.get(
+    "MARKET_BREADTH_DATA_DIR",
+    "historical_data/breadth",
+)
 BARCHART_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
+MARKET_BREADTH_CSV_FIELDS = ["symbol", "date", "open", "high", "low", "close", "volume"]
 BARCHART_QUERY_DEFAULTS = {
     "data": "daily",
     "maxrecords": "640",
@@ -193,9 +199,13 @@ class MarketBreadthService:
         self,
         client: BarchartCsvClient | None = None,
         ttl_seconds: int = MARKET_BREADTH_CACHE_TTL_SECONDS,
+        data_dir: str | Path | None = MARKET_BREADTH_DATA_DIR,
+        refresh_seconds: int = MARKET_BREADTH_CACHE_TTL_SECONDS,
     ) -> None:
         self._client = client or BarchartBreadthClient()
         self._ttl_seconds = max(0, int(ttl_seconds))
+        self._data_dir = Path(data_dir) if data_dir else None
+        self._refresh_seconds = max(0, int(refresh_seconds))
         self._cache: dict[str, tuple[float, list[MarketBreadthBar]]] = {}
         self._lock = threading.Lock()
 
@@ -210,17 +220,55 @@ class MarketBreadthService:
             if cached and cached[0] > now:
                 return list(cached[1])
 
-        settings = MARKET_BREADTH_SYMBOLS[symbol]
-        body = self._client.fetch_csv(symbol, {"data": settings["data"]})
-        parsed = parse_barchart_csv(body)
-        bars = [bar for bar in parsed if bar.symbol == symbol]
-        if not bars:
-            bars = parsed
-        bars = sorted(bars, key=lambda bar: bar.date)
+        stored_bars = self._read_cached_bars(symbol)
+        cache_path = self._csv_path(symbol)
+        if stored_bars and cache_path and self._csv_is_fresh(cache_path):
+            bars = stored_bars
+        else:
+            bars = self._fetch_and_store_bars(symbol, stored_bars)
 
         with self._lock:
             self._cache[symbol] = (now + self._ttl_seconds, bars)
         return list(bars)
+
+    def _fetch_and_store_bars(
+        self,
+        symbol: str,
+        stored_bars: list[MarketBreadthBar],
+    ) -> list[MarketBreadthBar]:
+        settings = MARKET_BREADTH_SYMBOLS[symbol]
+        try:
+            body = self._client.fetch_csv(symbol, {"data": settings["data"]})
+        except Exception:
+            if stored_bars:
+                return stored_bars
+            raise
+        parsed = parse_barchart_csv(body)
+        fetched_bars = matching_symbol_bars(symbol, parsed)
+        bars = merge_breadth_bars([*stored_bars, *fetched_bars])
+        if not bars:
+            bars = fetched_bars
+
+        cache_path = self._csv_path(symbol)
+        if cache_path and bars:
+            write_breadth_bars_to_csv(cache_path, bars)
+        return bars
+
+    def _read_cached_bars(self, symbol: str) -> list[MarketBreadthBar]:
+        cache_path = self._csv_path(symbol)
+        if not cache_path or not cache_path.is_file():
+            return []
+        return matching_symbol_bars(symbol, parse_barchart_csv(cache_path.read_bytes()))
+
+    def _csv_is_fresh(self, path: Path) -> bool:
+        if self._refresh_seconds <= 0:
+            return False
+        return time.time() - path.stat().st_mtime < self._refresh_seconds
+
+    def _csv_path(self, symbol: str) -> Path | None:
+        if self._data_dir is None:
+            return None
+        return self._data_dir / f"{symbol_filename(symbol)}.csv"
 
 
 def market_breadth_payload(
@@ -269,6 +317,43 @@ def parse_barchart_csv(body: bytes) -> list[MarketBreadthBar]:
             volume=volume,
         )
     return sorted(rows.values(), key=lambda bar: (bar.date, bar.symbol))
+
+
+def write_breadth_bars_to_csv(path: Path, bars: list[MarketBreadthBar]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=MARKET_BREADTH_CSV_FIELDS)
+        writer.writeheader()
+        for bar in merge_breadth_bars(bars):
+            writer.writerow(
+                {
+                    "symbol": bar.symbol,
+                    "date": bar.date.isoformat(),
+                    "open": bar.open,
+                    "high": bar.high,
+                    "low": bar.low,
+                    "close": bar.close,
+                    "volume": bar.volume,
+                }
+            )
+    return path
+
+
+def matching_symbol_bars(
+    symbol: str,
+    bars: list[MarketBreadthBar],
+) -> list[MarketBreadthBar]:
+    filtered = [bar for bar in bars if bar.symbol == symbol]
+    return merge_breadth_bars(filtered or bars)
+
+
+def merge_breadth_bars(bars: list[MarketBreadthBar]) -> list[MarketBreadthBar]:
+    rows = {(bar.symbol, bar.date): bar for bar in bars}
+    return sorted(rows.values(), key=lambda bar: (bar.date, bar.symbol))
+
+
+def symbol_filename(symbol: str) -> str:
+    return symbol.strip().lstrip("$").replace("/", "_").replace("=", "_")
 
 
 def series_payload(symbol: str, bars: list[MarketBreadthBar]) -> dict[str, Any]:
