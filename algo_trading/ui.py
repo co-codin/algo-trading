@@ -92,6 +92,7 @@ FRONTEND_ROUTES = frozenset(
         "/paper",
         "/live",
         "/chart",
+        "/breadth",
         "/runs",
         "/history",
         "/lab",

@@ -183,6 +183,33 @@ class UiTests(unittest.TestCase):
         self.assertIn("combo_exit_confirmations", source)
         self.assertIn("combo_lookback", source)
 
+    def test_frontend_exposes_market_breadth_page(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('"/breadth": "breadth"', source)
+        self.assertIn('breadth: "/breadth"', source)
+        self.assertIn('{ mode: "breadth" as const, label: t("tabs.breadth") }', source)
+        self.assertIn("const breadthPayload = ref<MarketBreadthPayload | null>(null);", source)
+        self.assertIn("async function loadMarketBreadth()", source)
+        self.assertIn('requestJson<MarketBreadthPayload>("/api/market-breadth")', source)
+        self.assertIn('activeMode === "breadth"', source)
+        self.assertIn('class="breadth-grid"', source)
+        self.assertIn('v-for="group in breadthGroups"', source)
+        self.assertIn('v-for="item in group.items"', source)
+        self.assertIn('breadthPayload?.series[item.symbol]', source)
+        self.assertIn('export type MarketBreadthPayload', types_source)
+        self.assertIn('"tabs.breadth": "Breadth"', i18n_source)
+        self.assertIn('"tabs.breadth": "Ширина"', i18n_source)
+
     def test_frontend_defines_bilingual_i18n_contract(self):
         root = Path(__file__).resolve().parents[1]
         i18n_path = root / "frontend" / "src" / "i18n.ts"
@@ -324,6 +351,7 @@ class UiTests(unittest.TestCase):
         self.assertTrue(is_frontend_route("/paper"))
         self.assertTrue(is_frontend_route("/live"))
         self.assertTrue(is_frontend_route("/chart"))
+        self.assertTrue(is_frontend_route("/breadth"))
         self.assertTrue(is_frontend_route("/runs"))
         self.assertTrue(is_frontend_route("/history"))
         self.assertTrue(is_frontend_route("/lab"))

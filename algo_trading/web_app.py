@@ -20,6 +20,7 @@ from algo_trading.auth import (
     public_user,
 )
 from algo_trading.data import BinanceMarketDataClient, MarketDataClient
+from algo_trading.market_breadth import MarketBreadthService
 from algo_trading.ui import (
     WEB_DIST_ROOT,
     combination_signals_payload,
@@ -41,10 +42,12 @@ def create_app(
     output_root: str | Path = "runs",
     client_factory: Callable[[], MarketDataClient] = BinanceMarketDataClient,
     auth_store: AuthStore | None = None,
+    market_breadth_service: Any | None = None,
 ) -> FastAPI:
     output_path = Path(output_root)
     store = auth_store or auth_store_from_env()
     store.ensure_schema()
+    breadth_service = market_breadth_service or MarketBreadthService()
     app = FastAPI(title="Algo Trading")
 
     def require_user(
@@ -162,6 +165,18 @@ def create_app(
             _live_client_for_handler(payload, client_factory),
             output_path,
         )
+
+    @app.get("/api/market-breadth")
+    def get_market_breadth(
+        symbols: str = "",
+        _user: AuthUser = Depends(require_user),
+    ) -> dict[str, Any]:
+        requested_symbols = (
+            [symbol.strip().upper() for symbol in symbols.split(",") if symbol.strip()]
+            if symbols
+            else None
+        )
+        return breadth_service.payload(requested_symbols)
 
     @app.get("/api/run")
     def get_run(

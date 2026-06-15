@@ -1,4 +1,4 @@
-export type Mode = "backtest" | "paper" | "live" | "runs" | "lab" | "combos";
+export type Mode = "backtest" | "paper" | "live" | "breadth" | "runs" | "lab" | "combos";
 
 export type AuthUser = {
   id: number;
@@ -133,4 +133,37 @@ export type CombinationSignalsPayload = {
   summary: RunSummary;
   candles: Candle[];
   signals: Marker[];
+};
+
+export type MarketBreadthItem = {
+  symbol: string;
+  label: string;
+  period: string;
+  data: string;
+};
+
+export type MarketBreadthGroup = {
+  name: string;
+  items: MarketBreadthItem[];
+};
+
+export type MarketBreadthBar = Candle & {
+  date: string;
+};
+
+export type MarketBreadthSeries = {
+  symbol: string;
+  label: string;
+  period: string;
+  data: string;
+  candles: MarketBreadthBar[];
+};
+
+export type MarketBreadthPayload = {
+  ok: true;
+  source: string;
+  groups: MarketBreadthGroup[];
+  series: Record<string, MarketBreadthSeries>;
+  put_call_symbol: string;
+  updated_at: string;
 };

@@ -5,6 +5,7 @@ description = "Local crypto backtesting and paper trading simulator"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.136,<1",
+    "httpx>=0.27,<1",
     "uvicorn[standard]>=0.40,<1",
     "psycopg[binary]>=3.3,<4",
 ]

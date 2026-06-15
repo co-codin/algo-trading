@@ -17,6 +17,8 @@ import type {
   AuthUser,
   CombinationSignalsPayload,
   LiveChartPayload,
+  MarketBreadthBar,
+  MarketBreadthPayload,
   Mode,
   Marker,
   RunCard,
@@ -41,6 +43,7 @@ const routeModes: Record<string, Mode> = {
   "/paper": "paper",
   "/live": "live",
   "/chart": "live",
+  "/breadth": "breadth",
   "/runs": "runs",
   "/history": "runs",
   "/lab": "lab",
@@ -51,6 +54,7 @@ const modeRoutes: Record<Mode, string> = {
   backtest: "/backtest",
   paper: "/paper",
   live: "/live",
+  breadth: "/breadth",
   runs: "/runs",
   lab: "/lab",
   combos: "/combos",
@@ -166,12 +170,15 @@ const runs = ref<RunCard[]>([]);
 const runDetails = ref<RunDetails | null>(null);
 const outputRuns = ref<RunCard[]>([]);
 const livePayload = ref<LiveChartPayload | null>(null);
+const breadthPayload = ref<MarketBreadthPayload | null>(null);
 const comboPayload = ref<CombinationSignalsPayload | null>(null);
 const labRows = ref<StrategyLabRow[]>([]);
 const status = ref(t("status.ready"));
 const statusType = ref<StatusType>("");
 const liveStatus = ref(t("status.ready"));
 const liveStatusType = ref<StatusType>("");
+const breadthStatus = ref(t("status.ready"));
+const breadthStatusType = ref<StatusType>("");
 const comboStatus = ref(t("status.ready"));
 const comboStatusType = ref<StatusType>("");
 const labStatus = ref(t("status.ready"));
@@ -222,6 +229,7 @@ const tabs = computed(() => [
   { mode: "backtest" as const, label: t("tabs.backtest") },
   { mode: "paper" as const, label: t("tabs.paper") },
   { mode: "live" as const, label: t("tabs.live") },
+  { mode: "breadth" as const, label: t("tabs.breadth") },
   { mode: "combos" as const, label: t("tabs.combos") },
   { mode: "runs" as const, label: t("tabs.runs") },
   { mode: "lab" as const, label: t("tabs.lab") },
@@ -267,6 +275,19 @@ const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
 const livePaperMarkerCount = computed(() => livePayload.value?.paper_markers.length ?? 0);
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
 const filteredPaperMarkers = computed(() => livePayload.value?.paper_markers ?? []);
+const breadthGroups = computed(() => breadthPayload.value?.groups ?? []);
+const breadthSeriesCount = computed(() =>
+  Object.keys(breadthPayload.value?.series ?? {}).length,
+);
+const breadthUpdatedAt = computed(() =>
+  breadthPayload.value?.updated_at
+    ? new Date(breadthPayload.value.updated_at).toLocaleTimeString()
+    : "—",
+);
+const breadthPutCall = computed(() => {
+  const symbol = breadthPayload.value?.put_call_symbol;
+  return symbol ? breadthPayload.value?.series[symbol] ?? null : null;
+});
 const comboSignals = computed(() => comboPayload.value?.signals ?? []);
 const comboSignalCount = computed(() => comboPayload.value?.signals.length ?? 0);
 const comboCandleCount = computed(() => comboPayload.value?.candles.length ?? 0);
@@ -308,6 +329,9 @@ watch(locale, () => {
   }
   if (!liveStatusType.value) {
     liveStatus.value = t("status.ready");
+  }
+  if (!breadthStatusType.value) {
+    breadthStatus.value = t("status.ready");
   }
   if (!comboStatusType.value) {
     comboStatus.value = t("status.ready");
@@ -359,6 +383,9 @@ function setMode(mode: Mode, updateUrl = true) {
   if (mode === "live") {
     startLivePolling();
   }
+  if (mode === "breadth") {
+    void loadMarketBreadth();
+  }
   if (mode === "runs") {
     void loadRuns();
   }
@@ -372,6 +399,11 @@ function setStatus(message: string, type: StatusType = "") {
 function setLiveStatus(message: string, type: StatusType = "") {
   liveStatus.value = message;
   liveStatusType.value = type;
+}
+
+function setBreadthStatus(message: string, type: StatusType = "") {
+  breadthStatus.value = message;
+  breadthStatusType.value = type;
 }
 
 function setComboStatus(message: string, type: StatusType = "") {
@@ -433,6 +465,7 @@ async function logout() {
   outputRuns.value = [];
   runDetails.value = null;
   livePayload.value = null;
+  breadthPayload.value = null;
   comboPayload.value = null;
   labRows.value = [];
 }
@@ -518,6 +551,17 @@ function refreshLiveChart() {
     return;
   }
   void loadLiveChart();
+}
+
+async function loadMarketBreadth() {
+  setBreadthStatus(t("status.loadingBreadth"), "busy");
+  try {
+    breadthPayload.value = await requestJson<MarketBreadthPayload>("/api/market-breadth");
+    setBreadthStatus(`${t("status.updated")} ${breadthUpdatedAt.value}`);
+  } catch (error) {
+    breadthPayload.value = null;
+    setBreadthStatus(errorMessage(error), "error");
+  }
 }
 
 async function runCombinationSignals() {
@@ -676,6 +720,28 @@ function formatNumber(value: unknown): string {
     return String(value);
   }
   return number.toLocaleString(undefined, { maximumFractionDigits: 4 });
+}
+
+function latestBreadthCandle(symbol: string): MarketBreadthBar | null {
+  const candles = breadthPayload.value?.series[symbol]?.candles ?? [];
+  return candles.length ? candles[candles.length - 1] : null;
+}
+
+function latestBreadthClose(symbol: string): string {
+  const candle = latestBreadthCandle(symbol);
+  return candle ? formatNumber(candle.close) : "—";
+}
+
+function latestBreadthDate(symbol: string): string {
+  return latestBreadthCandle(symbol)?.date ?? "—";
+}
+
+function breadthToneClass(symbol: string): string {
+  const candle = latestBreadthCandle(symbol);
+  if (!candle) {
+    return "";
+  }
+  return candle.close >= 50 ? "is-positive" : "is-negative";
 }
 
 function errorMessage(error: unknown): string {
@@ -1068,6 +1134,104 @@ function errorMessage(error: unknown): string {
         />
         <div v-else class="empty">{{ t("empty.loadChart") }}</div>
       </div>
+    </section>
+
+    <section v-else-if='activeMode === "breadth"' class="panel breadth-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("pages.marketBreadth") }}</h2>
+          <p>{{ t("pages.marketBreadthSubtitle") }}</p>
+        </div>
+        <div class="actions">
+          <button class="primary" type="button" @click="loadMarketBreadth">
+            {{ t("actions.refresh") }}
+          </button>
+          <div class="status" :class="breadthStatusType ? `is-${breadthStatusType}` : ''">
+            {{ breadthStatus }}
+          </div>
+        </div>
+      </div>
+      <div class="breadth-summary">
+        <div class="ticker-pill">
+          <span>{{ t("labels.source") }}</span>
+          <b>{{ breadthPayload?.source ?? "Barchart" }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>{{ t("labels.series") }}</span>
+          <b>{{ formatNumber(breadthSeriesCount) }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>{{ t("labels.updated") }}</span>
+          <b>{{ breadthUpdatedAt }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>{{ t("labels.latest") }}</span>
+          <b>{{ breadthPutCall ? latestBreadthClose(breadthPutCall.symbol) : "—" }}</b>
+        </div>
+      </div>
+      <div v-if="!breadthPayload" class="empty breadth-empty">{{ t("empty.loadBreadth") }}</div>
+      <template v-else>
+        <div class="breadth-grid">
+          <section v-for="group in breadthGroups" :key="group.name" class="breadth-group">
+            <div class="breadth-group-heading">
+              <h3>{{ group.name }}</h3>
+              <span>% above moving average</span>
+            </div>
+            <article
+              v-for="item in group.items"
+              :key="item.symbol"
+              class="breadth-card"
+              :class="breadthToneClass(item.symbol)"
+            >
+              <div class="breadth-card-heading">
+                <div>
+                  <h4>{{ item.period }}</h4>
+                  <p>{{ item.symbol }}</p>
+                </div>
+                <div class="breadth-latest">
+                  <b>{{ latestBreadthClose(item.symbol) }}</b>
+                  <span>{{ latestBreadthDate(item.symbol) }}</span>
+                </div>
+              </div>
+              <TradingViewChart
+                v-if="breadthPayload?.series[item.symbol]"
+                :candles="breadthPayload.series[item.symbol].candles"
+                :signals="[]"
+                :paper-markers="[]"
+                :show-signals="false"
+                :show-paper="false"
+                :reset-key="`breadth:${item.symbol}`"
+                :aria-label="`${chartLabels.aria} ${item.symbol}`"
+                :empty-label="chartLabels.empty"
+                :paper-entry-label="chartLabels.paperEntry"
+                :paper-exit-label="chartLabels.paperExit"
+                :long-signal-label="chartLabels.longSignal"
+                :short-signal-label="chartLabels.shortSignal"
+              />
+            </article>
+          </section>
+        </div>
+        <section v-if="breadthPutCall" class="breadth-put-call">
+          <div class="breadth-group-heading">
+            <h3>{{ t("pages.putCallRatio") }}</h3>
+            <span>{{ breadthPutCall.symbol }} · {{ breadthPutCall.period }}</span>
+          </div>
+          <TradingViewChart
+            :candles="breadthPutCall.candles"
+            :signals="[]"
+            :paper-markers="[]"
+            :show-signals="false"
+            :show-paper="false"
+            :reset-key="`breadth:${breadthPutCall.symbol}`"
+            :aria-label="`${chartLabels.aria} ${breadthPutCall.symbol}`"
+            :empty-label="chartLabels.empty"
+            :paper-entry-label="chartLabels.paperEntry"
+            :paper-exit-label="chartLabels.paperExit"
+            :long-signal-label="chartLabels.longSignal"
+            :short-signal-label="chartLabels.shortSignal"
+          />
+        </section>
+      </template>
     </section>
 
     <section v-else-if="activeMode === 'combos'" class="workspace combo-layout">

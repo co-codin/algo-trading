@@ -14,6 +14,7 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("fastapi", dependencies)
         self.assertIn("uvicorn[standard]", dependencies)
         self.assertIn("psycopg[binary]", dependencies)
+        self.assertIn("httpx", dependencies)
 
     def test_dockerfile_installs_project_and_uses_public_healthcheck(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
