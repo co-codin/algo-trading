@@ -22,8 +22,6 @@ import type {
   Mode,
   Marker,
   StrategyInfo,
-  StrategyLabPayload,
-  StrategyLabRow,
   StrategyPayload,
 } from "./types";
 
@@ -35,11 +33,10 @@ type SelectOption = {
 type SignalDisplayMode = "consensus" | "individual";
 
 const routeModes: Record<string, Mode> = {
-  "/": "lab",
+  "/": "live",
   "/live": "live",
   "/chart": "live",
   "/breadth": "breadth",
-  "/lab": "lab",
   "/profile": "profile",
   "/admin": "admin",
 };
@@ -47,7 +44,6 @@ const routeModes: Record<string, Mode> = {
 const modeRoutes: Record<Mode, string> = {
   live: "/live",
   breadth: "/breadth",
-  lab: "/lab",
   profile: "/profile",
   admin: "/admin",
 };
@@ -55,6 +51,15 @@ const modeRoutes: Record<Mode, string> = {
 const liveSymbolOptions = [
   { value: "BTCUSDT", label: "BTCUSDT" },
   { value: "ETHUSDT", label: "ETHUSDT" },
+] satisfies SelectOption[];
+
+const moexBluechipSymbolOptions = [
+  { value: "SBER", label: "SBER" },
+  { value: "GAZP", label: "GAZP" },
+  { value: "LKOH", label: "LKOH" },
+  { value: "YNDX", label: "YNDX" },
+  { value: "ROSN", label: "ROSN" },
+  { value: "NVTK", label: "NVTK" },
 ] satisfies SelectOption[];
 
 const liveIntervalOptions = [
@@ -120,8 +125,6 @@ const settings = reactive<Record<string, string>>({
   stop_loss_pct: "0.03",
   take_profit_pct: "0.06",
   trailing_stop_pct: "0",
-  walk_forward_windows: "3",
-  walk_forward_min_candles: "30",
 });
 
 const locale = ref<Locale>(normalizeLocale(window.localStorage.getItem(LOCALE_STORAGE_KEY)));
@@ -159,13 +162,10 @@ const activeMode = ref<Mode>(modeFromLocation());
 const strategies = ref<StrategyInfo[]>([]);
 const livePayload = ref<LiveChartPayload | null>(null);
 const breadthPayload = ref<MarketBreadthPayload | null>(null);
-const labRows = ref<StrategyLabRow[]>([]);
 const liveStatus = ref(t("status.ready"));
 const liveStatusType = ref<StatusType>("");
 const breadthStatus = ref(t("status.ready"));
 const breadthStatusType = ref<StatusType>("");
-const labStatus = ref(t("status.ready"));
-const labStatusType = ref<StatusType>("");
 const liveMarket = ref("crypto_spot");
 const liveSymbol = ref("BTCUSDT");
 const liveInterval = ref("5m");
@@ -173,43 +173,15 @@ const liveLimit = ref<string | number>(180);
 const liveRefresh = ref("10");
 const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
 const liveConsensusMinConfirmations = ref(2);
+const liveMaxSignals = ref(80);
 const showSignals = ref(true);
-const labSymbols = ref("BTCUSDT,ETHUSDT,SOLUSDT");
-const labStrategies = ref("all");
-const labPresets = ref("custom,balanced,aggressive");
-const labBenchmarkSymbols = ref("BTCUSDT,ES=F,NQ=F");
 let liveTimer = 0;
-
-const labCsvHeaders: (keyof StrategyLabRow)[] = [
-  "rank",
-  "symbol",
-  "strategy",
-  "preset",
-  "final_balance",
-  "total_return_pct",
-  "max_drawdown_pct",
-  "trades",
-  "win_rate",
-  "profit_factor",
-  "sharpe_ratio",
-  "sortino_ratio",
-  "max_drawdown_duration",
-  "average_trade_duration",
-  "exposure_pct",
-  "worst_trade",
-  "walk_forward_windows",
-  "walk_forward_avg_return_pct",
-  "walk_forward_worst_return_pct",
-  "walk_forward_best_return_pct",
-  "walk_forward_profitable_pct",
-];
 
 const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
 const isAdminUser = computed(() =>
-  authUser.value?.username === "cuiyeqing960904@gmail.com",
+  authUser.value?.is_admin === true,
 );
 const featureTabs = computed(() => [
-  { mode: "lab" as const, label: t("tabs.lab") },
   { mode: "live" as const, label: t("tabs.live") },
   { mode: "breadth" as const, label: t("tabs.breadth") },
 ]);
@@ -231,6 +203,7 @@ const filteredAdminUsers = computed(() => {
 const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "crypto_spot", label: t("options.cryptoSpot") },
   { value: "cme_futures", label: t("options.usIndexFutures") },
+  { value: "russian_bluechips", label: t("options.moexBluechips") },
 ]);
 const liveFuturesSymbolOptions = computed<SelectOption[]>(() => [
   { value: "ES=F", label: t("options.sp500Future") },
@@ -238,12 +211,8 @@ const liveFuturesSymbolOptions = computed<SelectOption[]>(() => [
 const liveSymbolsByMarket = computed<Record<string, SelectOption[]>>(() => ({
   crypto_spot: liveSymbolOptions,
   cme_futures: liveFuturesSymbolOptions.value,
+  russian_bluechips: moexBluechipSymbolOptions,
 }));
-const sideOptions = computed<SelectOption[]>(() => [
-  { value: "both", label: t("options.both") },
-  { value: "long-only", label: t("options.longOnly") },
-  { value: "short-only", label: t("options.shortOnly") },
-]);
 const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
   { value: "consensus", label: t("options.consensusSignals") },
   { value: "individual", label: t("options.individualSignals") },
@@ -284,8 +253,6 @@ const chartLabels = computed(() => ({
   empty: t("empty.noCandles"),
   longSignal: t("chart.longSignal"),
   shortSignal: t("chart.shortSignal"),
-  paperEntry: t("chart.paperEntry"),
-  paperExit: t("chart.paperExit"),
 }));
 const consensusSignals = computed(() =>
   groupSignalsByConsensus(livePayload.value?.signals ?? [], liveConsensusMinConfirmations.value),
@@ -293,9 +260,11 @@ const consensusSignals = computed(() =>
 const displayedSignals = computed(() => {
   const rawSignals = livePayload.value?.signals ?? [];
   if (settings.strategy !== "all" || liveSignalDisplayMode.value === "individual") {
-    return rawSignals;
+    return settings.strategy === "all"
+      ? limitRecentSignals(rawSignals, liveMaxSignals.value)
+      : rawSignals;
   }
-  return consensusSignals.value;
+  return limitRecentSignals(consensusSignals.value, liveMaxSignals.value);
 });
 
 watch(liveMarket, () => {
@@ -314,9 +283,6 @@ watch(locale, () => {
   }
   if (!breadthStatusType.value) {
     breadthStatus.value = t("status.ready");
-  }
-  if (!labStatusType.value) {
-    labStatus.value = t("status.ready");
   }
   if (!adminStatusType.value) {
     adminStatus.value = t("status.ready");
@@ -353,11 +319,11 @@ function handlePopState() {
 }
 
 function modeFromLocation(): Mode {
-  return routeModes[window.location.pathname] ?? "lab";
+  return routeModes[window.location.pathname] ?? "live";
 }
 
 function isFeatureMode(mode: Mode): boolean {
-  return mode === "lab" || mode === "live" || mode === "breadth";
+  return mode === "live" || mode === "breadth";
 }
 
 function permittedMode(mode: Mode): Mode {
@@ -402,11 +368,6 @@ function setLiveStatus(message: string, type: StatusType = "") {
 function setBreadthStatus(message: string, type: StatusType = "") {
   breadthStatus.value = message;
   breadthStatusType.value = type;
-}
-
-function setLabStatus(message: string, type: StatusType = "") {
-  labStatus.value = message;
-  labStatusType.value = type;
 }
 
 function setAdminStatus(message: string, type: StatusType = "") {
@@ -532,7 +493,6 @@ async function logout() {
   stopLivePolling();
   livePayload.value = null;
   breadthPayload.value = null;
-  labRows.value = [];
   adminUsers.value = [];
 }
 
@@ -604,58 +564,6 @@ async function loadMarketBreadth() {
   }
 }
 
-async function runStrategyLab() {
-  if (!canUseFeatures.value) {
-    setLabStatus(t("auth.inactive"), "error");
-    return;
-  }
-  setLabStatus(t("status.labRunning"), "busy");
-  labRows.value = [];
-  try {
-    const payload = await requestJson<StrategyLabPayload>("/api/strategy-lab", {
-      method: "POST",
-      body: JSON.stringify({
-        ...settings,
-        symbols: labSymbols.value,
-        strategies: labStrategies.value,
-        presets: labPresets.value,
-        benchmark_symbols: labBenchmarkSymbols.value,
-      }),
-    });
-    labRows.value = payload.rows;
-    setLabStatus(`${t("status.rankedResults")} ${payload.rows.length}`);
-  } catch (error) {
-    setLabStatus(errorMessage(error), "error");
-  }
-}
-
-function exportLabCsv() {
-  if (!labRows.value.length) {
-    return;
-  }
-  const lines = [
-    labCsvHeaders.join(","),
-    ...labRows.value.map((row) =>
-      labCsvHeaders.map((field) => csvCell(row[field])).join(","),
-    ),
-  ];
-  const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "strategy-lab.csv";
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function csvCell(value: unknown) {
-  const text = String(value ?? "");
-  if (/[",\n]/.test(text)) {
-    return `"${text.replaceAll('"', '""')}"`;
-  }
-  return text;
-}
-
 function strategyLabel(name: string): string {
   const strategy = strategies.value.find((item) => item.name === name);
   return translateStrategyDescription(locale.value, name, strategy?.description ?? name);
@@ -672,6 +580,14 @@ function groupSignalsByConsensus(signals: Marker[], minimumConfirmations: number
     .filter((group) => group.length >= minimum)
     .map((group) => consensusMarkerFromGroup(group))
     .sort((left, right) => Number(left.time) - Number(right.time));
+}
+
+function limitRecentSignals(signals: Marker[], limit: number): Marker[] {
+  const normalizedLimit = Math.max(0, Math.floor(Number(limit) || 0));
+  if (!normalizedLimit || signals.length <= normalizedLimit) {
+    return signals;
+  }
+  return signals.slice(-normalizedLimit);
 }
 
 function consensusMarkerFromGroup(group: Marker[]): Marker {
@@ -972,6 +888,10 @@ function errorMessage(error: unknown): string {
           <span>{{ t("labels.minConfirmations") }}</span>
           <input v-model.number="liveConsensusMinConfirmations" type="number" min="1" max="20">
         </label>
+        <label v-if="settings.strategy === 'all'">
+          <span>{{ t("labels.maxMarkers") }}</span>
+          <input v-model.number="liveMaxSignals" type="number" min="10" max="500">
+        </label>
         <label><span>{{ t("labels.refreshSec") }}</span><input v-model="liveRefresh" type="number" min="2" max="300"></label>
         <label class="toggle-row"><input v-model="showSignals" type="checkbox"><span>{{ t("labels.strategyMarkers") }}</span></label>
         <button class="primary" type="button" @click="refreshLiveChart">{{ t("actions.refreshChart") }}</button>
@@ -986,9 +906,7 @@ function errorMessage(error: unknown): string {
           v-if="livePayload"
           :candles="livePayload.candles"
           :signals="displayedSignals"
-          :paper-markers="[]"
           :show-signals="showSignals"
-          :show-paper="false"
           :reset-key="liveChartResetKey"
           :aria-label="chartLabels.aria"
           :empty-label="chartLabels.empty"
@@ -1042,14 +960,10 @@ function errorMessage(error: unknown): string {
           <TradingViewChart
             :candles="breadthPutCall.candles"
             :signals="[]"
-            :paper-markers="[]"
             :show-signals="false"
-            :show-paper="false"
             :reset-key="`breadth:${breadthPutCall.symbol}`"
             :aria-label="`${chartLabels.aria} ${breadthPutCall.symbol}`"
             :empty-label="chartLabels.empty"
-            :paper-entry-label="chartLabels.paperEntry"
-            :paper-exit-label="chartLabels.paperExit"
             :long-signal-label="chartLabels.longSignal"
             :short-signal-label="chartLabels.shortSignal"
           />
@@ -1080,14 +994,10 @@ function errorMessage(error: unknown): string {
                 v-if="breadthPayload?.series[item.symbol]"
                 :candles="breadthPayload.series[item.symbol].candles"
                 :signals="[]"
-                :paper-markers="[]"
                 :show-signals="false"
-                :show-paper="false"
                 :reset-key="`breadth:${item.symbol}`"
                 :aria-label="`${chartLabels.aria} ${item.symbol}`"
                 :empty-label="chartLabels.empty"
-                :paper-entry-label="chartLabels.paperEntry"
-                :paper-exit-label="chartLabels.paperExit"
                 :long-signal-label="chartLabels.longSignal"
                 :short-signal-label="chartLabels.shortSignal"
               />
@@ -1224,82 +1134,6 @@ function errorMessage(error: unknown): string {
       </table>
     </section>
 
-    <section v-else class="workspace lab-layout">
-      <form class="panel settings" @submit.prevent="runStrategyLab">
-        <div class="panel-heading">
-          <div>
-            <h2>{{ t("pages.strategyLab") }}</h2>
-            <p>{{ t("pages.strategyLabSubtitle") }}</p>
-          </div>
-          <button class="primary" type="submit">{{ t("actions.runLab") }}</button>
-        </div>
-        <div class="field-grid">
-          <label><span>{{ t("labels.symbols") }}</span><input v-model="labSymbols" autocomplete="off"></label>
-          <label><span>{{ t("labels.strategies") }}</span><input v-model="labStrategies" autocomplete="off"></label>
-          <label><span>{{ t("labels.presets") }}</span><input v-model="labPresets" autocomplete="off"></label>
-          <label><span>{{ t("labels.benchmarks") }}</span><input v-model="labBenchmarkSymbols" autocomplete="off"></label>
-          <label><span>{{ t("labels.walkWindows") }}</span><input v-model="settings.walk_forward_windows" type="number" min="0"></label>
-          <label><span>{{ t("labels.walkMinCandles") }}</span><input v-model="settings.walk_forward_min_candles" type="number" min="1"></label>
-          <label><span>{{ t("labels.interval") }}</span><input v-model="settings.interval" autocomplete="off"></label>
-          <label><span>{{ t("labels.candles") }}</span><input v-model="settings.limit" type="number" min="30"></label>
-          <label><span>{{ t("labels.side") }}</span>
-            <select v-model="settings.allowed_side">
-              <option v-for="option in sideOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-        </div>
-      </form>
-      <section class="panel output">
-        <div class="panel-heading">
-          <h2>{{ t("pages.ranking") }}</h2>
-          <div class="actions">
-            <button type="button" :disabled="!labRows.length" @click="exportLabCsv">{{ t("actions.exportCsv") }}</button>
-            <div class="status" :class="labStatusType ? `is-${labStatusType}` : ''">{{ labStatus }}</div>
-          </div>
-        </div>
-        <div v-if="!labRows.length" class="empty">{{ t("empty.runLab") }}</div>
-        <table v-else>
-          <thead>
-            <tr>
-              <th>{{ t("table.rank") }}</th>
-              <th>{{ t("table.symbol") }}</th>
-              <th>{{ t("table.strategy") }}</th>
-              <th>{{ t("table.preset") }}</th>
-              <th>{{ t("table.return") }}</th>
-              <th>{{ t("table.maxDd") }}</th>
-              <th>{{ t("table.trades") }}</th>
-              <th>{{ t("table.pf") }}</th>
-              <th>{{ t("table.sharpe") }}</th>
-              <th>{{ t("table.sortino") }}</th>
-              <th>{{ t("table.exposure") }}</th>
-              <th>{{ t("table.worst") }}</th>
-              <th>{{ t("table.wfAvg") }}</th>
-              <th>{{ t("table.wfWin") }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in labRows" :key="`${row.rank}-${row.symbol}-${row.strategy}-${row.preset}`">
-              <td>{{ row.rank }}</td>
-              <td>{{ row.symbol }}</td>
-              <td>{{ row.strategy }}</td>
-              <td>{{ row.preset }}</td>
-              <td>{{ formatNumber(row.total_return_pct) }}</td>
-              <td>{{ formatNumber(row.max_drawdown_pct) }}</td>
-              <td>{{ row.trades }}</td>
-              <td>{{ formatNumber(row.profit_factor) }}</td>
-              <td>{{ formatNumber(row.sharpe_ratio) }}</td>
-              <td>{{ formatNumber(row.sortino_ratio) }}</td>
-              <td>{{ formatNumber(row.exposure_pct) }}</td>
-              <td>{{ formatNumber(row.worst_trade) }}</td>
-              <td>{{ formatNumber(row.walk_forward_avg_return_pct) }}</td>
-              <td>{{ formatNumber(row.walk_forward_profitable_pct) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-    </section>
   </main>
   </template>
 </template>

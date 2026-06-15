@@ -3,7 +3,7 @@
 ## Source of truth
 - Status: Active
 - Last refreshed: 2026-06-15
-- Primary product surfaces: Vue control panel, `/live` chart, backtest, paper trading, runs, strategy lab.
+- Primary product surfaces: Vue control panel, `/live` chart, `/breadth` breadth dashboard, `/profile`, `/admin`.
 - Evidence reviewed: `README.md`, `frontend/src/App.vue`, `frontend/src/style.css`, `frontend/src/components/TradingViewChart.vue`.
 
 ## Brand
@@ -12,19 +12,19 @@
 - Avoid: Marketing hero layouts, decorative illustrations, oversized cards, profit promises, and controls hidden behind command-line workflows.
 
 ## Product goals
-- Goals: Let a user inspect public Binance candles, overlay simulated strategy markers, run backtests, run bounded paper sessions, and compare strategies without shell commands.
-- Non-goals: Real order placement, account management, portfolio allocation, or guaranteed profitability.
-- Success signals: `/live` is chart-first, key controls are visible at a glance, marker meaning is clear, and all actions remain simulated.
+- Goals: Let a user inspect public market candles, overlay simulated strategy markers, monitor breadth history, and manage local user access.
+- Non-goals: Real order placement, portfolio allocation, or guaranteed profitability.
+- Success signals: `/live` is chart-first, key controls are visible at a glance, marker meaning is clear, breadth charts are easy to inspect, and all trading actions remain simulated.
 
 ## Personas and jobs
-- Primary personas: Crypto trader, strategy tinkerer, developer evaluating signal logic.
-- User jobs: Pick market/timeframe/candle depth, compare strategy signals, review simulated trades, run strategy research loops.
+- Primary personas: Crypto trader, index trader, Russian equities watcher, developer evaluating signal logic.
+- User jobs: Pick market/timeframe/candle depth, compare strategy signals, inspect breadth history, and manage account activation.
 - Key contexts of use: Local desktop browser, repeated chart refreshes, quick switching between symbols and strategies.
 
 ## Information architecture
-- Primary navigation: Backtest, Paper, Live, Runs, Strategy Lab.
-- Core routes/screens: `/backtest`, `/paper`, `/live`, `/chart`, `/runs`, `/history`, `/lab`.
-- Content hierarchy: Live market chart first; controls remain compact above the chart; run and lab views prioritize tables and metrics.
+- Primary navigation: Live, Breadth, Profile, Admin.
+- Core routes/screens: `/live`, `/chart`, `/breadth`, `/profile`, `/admin`.
+- Content hierarchy: Live market chart first; controls remain compact above the chart; breadth charts prioritize large inspection surfaces; admin prioritizes user status and activation actions.
 
 ## Design principles
 - Principle 1: Chart-first density. Trading decisions start from the candle chart, not explanatory copy.
@@ -32,7 +32,7 @@
 - Tradeoffs: Dark terminal styling improves chart focus but requires careful contrast and restrained borders.
 
 ## Visual language
-- Color: Trading terminal dark charcoal surfaces, blue command actions, green long signals, red short signals, amber busy states, violet paper exits.
+- Color: Trading terminal dark charcoal surfaces, blue command actions, green long signals, red short signals, amber busy states.
 - Typography: System sans-serif, compact labels, no negative letter spacing.
 - Spacing/layout rhythm: Tight 8-14px rhythm with stable grid tracks for controls.
 - Shape/radius/elevation: 4-8px radii, minimal shadows, border-defined panels.
@@ -41,7 +41,7 @@
 
 ## Components
 - Existing components to reuse: `TradingViewChart`, tab navigation, panel, status pill, control inputs, metric rows, tables.
-- New/changed components: Live market strip, all-strategies selector option, dark chart theme.
+- New/changed components: Live market strip, all-strategies marker controls, breadth chart grid, admin user table, profile form.
 - Variants and states: Busy/error status colors, selected tab, marker toggles, empty chart state.
 - Token/component ownership: CSS variables in `frontend/src/style.css`; chart palette in `TradingViewChart.vue`.
 
@@ -67,7 +67,7 @@
 
 ## Content voice
 - Tone: Direct, concise, operational.
-- Terminology: Use strategy, marker, live market, paper marker, candles, interval, simulated.
+- Terminology: Use strategy, marker, live market, breadth, candles, interval, simulated.
 - Microcopy rules: Do not imply real trading execution or profit guarantee.
 
 ## Implementation constraints

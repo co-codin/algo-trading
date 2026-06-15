@@ -15,6 +15,7 @@ class WebAppTests(unittest.TestCase):
         tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
         auth_store = overrides.pop("auth_store", InMemoryAuthStore())
+        overrides.setdefault("seed_admin", False)
         app = create_app(
             output_root=Path(tempdir.name),
             auth_store=auth_store,
@@ -44,6 +45,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["user"]["username"], "alice")
         self.assertFalse(response.json()["user"]["is_active"])
+        self.assertFalse(response.json()["user"]["is_admin"])
         self.assertIsNone(response.json()["user"]["activated_at"])
         self.assertIsNone(response.json()["user"]["expired_at"])
         self.assertIn("algo_session=", response.headers["set-cookie"])
@@ -193,7 +195,46 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.json()["series"]["$S5FD"]["data"], "daily")
         self.assertEqual(service.symbols, ["$S5FD", "$CPC"])
 
-    def test_admin_users_requires_admin_email_and_lists_all_users(self):
+    def test_removed_workflow_apis_return_404(self):
+        store = InMemoryAuthStore()
+        client = self.make_client(auth_store=store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice", "password": "password123"},
+        )
+        store.set_user_access(store.list_users()[0].id, is_active=True, activated_at=utcnow())
+
+        requests = [
+            client.post("/api/strategy-lab", json={}),
+            client.post("/api/backtest", json={}),
+            client.post("/api/paper", json={}),
+            client.post("/api/combination-signals", json={}),
+            client.get("/api/runs"),
+            client.get("/api/run?path=backtests/x"),
+        ]
+
+        self.assertTrue(all(response.status_code == 404 for response in requests))
+
+    def test_seeded_admin_can_login_with_default_password_and_access_admin_api(self):
+        client = self.make_client(seed_admin=True)
+
+        login = client.post(
+            "/api/auth/login",
+            json={
+                "username": "cuiyeqing960904@gmail.com",
+                "password": "Vladimir960904",
+            },
+        )
+
+        self.assertEqual(login.status_code, 200)
+        user = login.json()["user"]
+        self.assertTrue(user["is_admin"])
+        self.assertTrue(user["is_active"])
+        response = client.get("/api/admin/users")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["users"][0]["username"], "cuiyeqing960904@gmail.com")
+
+    def test_admin_users_requires_admin_flag_and_lists_all_users(self):
         store = InMemoryAuthStore()
         client = self.make_client(auth_store=store)
         client.post(
@@ -206,9 +247,10 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(forbidden.json(), {"ok": False, "error": "admin required"})
 
         client.post("/api/auth/logout")
+        store.seed_admin_user("admin@example.com", "Vladimir960904")
         client.post(
-            "/api/auth/register",
-            json={"username": "cuiyeqing960904@gmail.com", "password": "password123"},
+            "/api/auth/login",
+            json={"username": "admin@example.com", "password": "Vladimir960904"},
         )
         response = client.get("/api/admin/users")
 
@@ -216,10 +258,12 @@ class WebAppTests(unittest.TestCase):
         users = response.json()["users"]
         self.assertEqual(
             [user["username"] for user in users],
-            ["alice@example.com", "cuiyeqing960904@gmail.com"],
+            ["alice@example.com", "admin@example.com"],
         )
         self.assertFalse(users[0]["is_active"])
         self.assertIsNone(users[0]["expired_at"])
+        self.assertFalse(users[0]["is_admin"])
+        self.assertTrue(users[1]["is_admin"])
 
     def test_admin_can_update_user_active_flag(self):
         store = InMemoryAuthStore()
@@ -230,9 +274,10 @@ class WebAppTests(unittest.TestCase):
         )
         alice = store.list_users()[0]
         client.post("/api/auth/logout")
+        store.seed_admin_user("admin@example.com", "Vladimir960904")
         client.post(
-            "/api/auth/register",
-            json={"username": "cuiyeqing960904@gmail.com", "password": "password123"},
+            "/api/auth/login",
+            json={"username": "admin@example.com", "password": "Vladimir960904"},
         )
 
         response = client.patch(

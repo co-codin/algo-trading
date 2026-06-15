@@ -56,15 +56,14 @@ docker-smoke: docker-build
 	mkdir -p "$(RUNS_DIR)" "$(HISTORICAL_DATA_DIR)"
 	@container=$$(docker run -d --user "$$(id -u):$$(id -g)" -p 127.0.0.1:$(SMOKE_PORT):8765 -v "$(RUNS_DIR):/app/runs" -v "$(HISTORICAL_DATA_DIR):/app/historical_data" $(IMAGE)); \
 	cookie_jar=$$(mktemp); \
-	trap 'rm -f "$$cookie_jar"; docker rm -f $$container >/dev/null' EXIT; \
-	for attempt in 1 2 3 4 5 6 7 8 9 10; do \
-		if curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/api/auth/me" >/dev/null 2>&1; then \
-			username="smoke-$$(date +%s)"; \
-			curl -fsS -c "$$cookie_jar" -H 'Content-Type: application/json' -d "{\"username\":\"$$username\",\"password\":\"password123\"}" "http://127.0.0.1:$(SMOKE_PORT)/api/auth/register" >/dev/null; \
-			curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/live" >/dev/null; \
-			curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/lab" >/dev/null; \
-			curl -fsS -b "$$cookie_jar" "http://127.0.0.1:$(SMOKE_PORT)/api/strategies" >/dev/null; \
-			curl -fsS -b "$$cookie_jar" "http://127.0.0.1:$(SMOKE_PORT)/api/live-chart?symbol=BTCUSDT&interval=1m&limit=40" >/dev/null; \
+		trap 'rm -f "$$cookie_jar"; docker rm -f $$container >/dev/null' EXIT; \
+		for attempt in 1 2 3 4 5 6 7 8 9 10; do \
+			if curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/api/auth/me" >/dev/null 2>&1; then \
+				curl -fsS -c "$$cookie_jar" -H 'Content-Type: application/json' -d '{"username":"cuiyeqing960904@gmail.com","password":"Vladimir960904"}' "http://127.0.0.1:$(SMOKE_PORT)/api/auth/login" >/dev/null; \
+				curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/live" >/dev/null; \
+				curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/breadth" >/dev/null; \
+				curl -fsS -b "$$cookie_jar" "http://127.0.0.1:$(SMOKE_PORT)/api/strategies" >/dev/null; \
+				curl -fsS -b "$$cookie_jar" "http://127.0.0.1:$(SMOKE_PORT)/api/live-chart?symbol=BTCUSDT&interval=1m&limit=40" >/dev/null; \
 			echo "docker smoke passed on http://127.0.0.1:$(SMOKE_PORT)"; \
 			exit 0; \
 		fi; \

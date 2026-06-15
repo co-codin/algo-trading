@@ -23,6 +23,7 @@ class AuthUser:
     id: int
     username: str
     is_active: bool = False
+    is_admin: bool = False
     activated_at: datetime | None = None
     expired_at: datetime | None = None
     first_name: str | None = None
@@ -33,6 +34,7 @@ class AuthUser:
 class AuthStore(Protocol):
     def ensure_schema(self) -> None: ...
     def register_user(self, username: str, password: str) -> AuthUser: ...
+    def seed_admin_user(self, username: str, password: str) -> AuthUser: ...
     def authenticate_user(self, username: str, password: str) -> AuthUser: ...
     def create_session(self, user_id: int) -> str: ...
     def user_for_session(self, token: str | None) -> AuthUser | None: ...
@@ -92,6 +94,33 @@ class InMemoryAuthStore:
         self._users_by_name[normalized] = record
         self._users_by_id[user.id] = record
         return user
+
+    def seed_admin_user(self, username: str, password: str) -> AuthUser:
+        normalized = normalize_username(username)
+        validate_password(password)
+        existing = self._users_by_name.get(normalized)
+        if existing is None:
+            user = AuthUser(
+                id=self._next_user_id,
+                username=normalized,
+                is_active=True,
+                is_admin=True,
+                activated_at=utcnow(),
+            )
+            self._next_user_id += 1
+            record = _MemoryUser(user=user, password_hash=hash_password(password))
+            self._users_by_name[normalized] = record
+            self._users_by_id[user.id] = record
+            return user
+
+        existing.user = replace(
+            existing.user,
+            is_active=True,
+            is_admin=True,
+            activated_at=existing.user.activated_at or utcnow(),
+        )
+        existing.password_hash = hash_password(password)
+        return existing.user
 
     def authenticate_user(self, username: str, password: str) -> AuthUser:
         normalized = normalize_username(username)
@@ -221,6 +250,12 @@ class PostgresAuthStore:
                 cursor.execute(
                     """
                     ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE users
                     ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ
                     """
                 )
@@ -291,6 +326,7 @@ class PostgresAuthStore:
                     RETURNING id,
                               username,
                               is_active,
+                              is_admin,
                               activated_at,
                               expired_at,
                               first_name,
@@ -304,6 +340,44 @@ class PostgresAuthStore:
             raise ValueError("username already exists")
         return user_from_row(row)
 
+    def seed_admin_user(self, username: str, password: str) -> AuthUser:
+        normalized = normalize_username(username)
+        validate_password(password)
+        password_hash = hash_password(password)
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO users (
+                        username,
+                        password_hash,
+                        is_active,
+                        is_admin,
+                        activated_at
+                    )
+                    VALUES (%s, %s, true, true, now())
+                    ON CONFLICT (username) DO UPDATE
+                    SET password_hash = EXCLUDED.password_hash,
+                        is_active = true,
+                        is_admin = true,
+                        activated_at = COALESCE(users.activated_at, now())
+                    RETURNING id,
+                              username,
+                              is_active,
+                              is_admin,
+                              activated_at,
+                              expired_at,
+                              first_name,
+                              last_name,
+                              middle_name
+                    """,
+                    (normalized, password_hash),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            raise ValueError("admin seed failed")
+        return user_from_row(row)
+
     def authenticate_user(self, username: str, password: str) -> AuthUser:
         normalized = normalize_username(username)
         with self._connect() as conn:
@@ -313,6 +387,7 @@ class PostgresAuthStore:
                     SELECT id,
                            username,
                            is_active,
+                           is_admin,
                            activated_at,
                            expired_at,
                            first_name,
@@ -325,7 +400,7 @@ class PostgresAuthStore:
                     (normalized,),
                 )
                 row = cursor.fetchone()
-        if row is None or not verify_password(password, str(row[8])):
+        if row is None or not verify_password(password, str(row[9])):
             raise ValueError("invalid username or password")
         return user_from_row(row)
 
@@ -356,6 +431,7 @@ class PostgresAuthStore:
                     SELECT users.id,
                            users.username,
                            users.is_active,
+                           users.is_admin,
                            users.activated_at,
                            users.expired_at,
                            users.first_name,
@@ -390,6 +466,7 @@ class PostgresAuthStore:
                     SELECT id,
                            username,
                            is_active,
+                           is_admin,
                            activated_at,
                            expired_at,
                            first_name,
@@ -426,6 +503,7 @@ class PostgresAuthStore:
                     RETURNING id,
                               username,
                               is_active,
+                              is_admin,
                               activated_at,
                               expired_at,
                               first_name,
@@ -459,6 +537,7 @@ class PostgresAuthStore:
                     RETURNING id,
                               username,
                               is_active,
+                              is_admin,
                               activated_at,
                               expired_at,
                               first_name,
@@ -507,11 +586,12 @@ def user_from_row(row: Sequence[object]) -> AuthUser:
         id=int(str(row[0])),
         username=str(row[1]),
         is_active=bool(row[2]),
-        activated_at=cast(datetime | None, row[3]),
-        expired_at=cast(datetime | None, row[4]),
-        first_name=cast(str | None, row[5]),
-        last_name=cast(str | None, row[6]),
-        middle_name=cast(str | None, row[7]),
+        is_admin=bool(row[3]),
+        activated_at=cast(datetime | None, row[4]),
+        expired_at=cast(datetime | None, row[5]),
+        first_name=cast(str | None, row[6]),
+        last_name=cast(str | None, row[7]),
+        middle_name=cast(str | None, row[8]),
     )
 
 
@@ -588,6 +668,7 @@ def public_user(user: AuthUser) -> dict[str, object]:
         "id": user.id,
         "username": user.username,
         "is_active": user.is_active,
+        "is_admin": user.is_admin,
         "activated_at": isoformat_or_none(user.activated_at),
         "expired_at": isoformat_or_none(user.expired_at),
         "first_name": user.first_name,

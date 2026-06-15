@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, urlparse
 
 from algo_trading.data import (
     BinanceMarketDataClient,
+    MoexSharesMarketDataClient,
     YahooFuturesMarketDataClient,
     _candle_from_kline,
 )
@@ -268,6 +269,86 @@ class DataTests(unittest.TestCase):
         self.assertEqual(first_query["startTime"], ["0"])
         self.assertEqual(first_query["endTime"], [str(4 * hour_ms)])
         self.assertEqual(second_query["startTime"], [str(2 * hour_ms)])
+
+    def test_moex_shares_client_parses_bluechip_iss_candles(self):
+        requests = []
+
+        def opener(url: str, timeout: int):
+            requests.append(url)
+            return FakeResponse(
+                {
+                    "candles": {
+                        "columns": [
+                            "begin",
+                            "end",
+                            "open",
+                            "close",
+                            "high",
+                            "low",
+                            "value",
+                            "volume",
+                        ],
+                        "data": [
+                            [
+                                "2026-06-15 10:00:00",
+                                "2026-06-15 10:04:59",
+                                300.0,
+                                301.0,
+                                302.0,
+                                299.0,
+                                1000000.0,
+                                1000,
+                            ],
+                            [
+                                "2026-06-15 10:05:00",
+                                "2026-06-15 10:09:59",
+                                301.0,
+                                303.0,
+                                304.0,
+                                300.0,
+                                2000000.0,
+                                1500,
+                            ],
+                        ],
+                    }
+                }
+            )
+
+        candles = MoexSharesMarketDataClient(opener=opener).get_klines("sber", "5m", 2)
+
+        self.assertEqual(len(candles), 2)
+        self.assertEqual(candles[0].open, 300.0)
+        self.assertEqual(candles[1].close, 303.0)
+        self.assertEqual(candles[1].volume, 1500.0)
+        request_url = requests[0]
+        self.assertIn("/engines/stock/markets/shares/boards/TQBR/securities/SBER/candles.json", request_url)
+        self.assertIn("interval=1", request_url)
+
+    def test_moex_shares_client_rejects_unsupported_symbols(self):
+        with self.assertRaisesRegex(ValueError, "unsupported MOEX bluechip symbol"):
+            MoexSharesMarketDataClient().get_klines("PENNY", "5m", 1)
+
+    def test_moex_shares_client_sends_optional_bearer_token(self):
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                {
+                    "candles": {
+                        "columns": ["begin", "open", "high", "low", "close", "volume"],
+                        "data": [["2026-06-15 10:00:00", 300, 302, 299, 301, 1000]],
+                    }
+                }
+            )
+
+        MoexSharesMarketDataClient(opener=opener, api_key="fake-token").get_klines(
+            "SBER",
+            "1d",
+            1,
+        )
+
+        self.assertEqual(requests[0].get_header("Authorization"), "Bearer fake-token")
 
 def _binance_kline(open_time: int) -> list[object]:
     return [

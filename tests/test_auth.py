@@ -21,6 +21,7 @@ class AuthTests(unittest.TestCase):
         self.assertFalse(user.is_active)
         self.assertIsNone(user.activated_at)
         self.assertIsNone(user.expired_at)
+        self.assertFalse(user.is_admin)
         self.assertIsNone(user.first_name)
         self.assertIsNone(user.last_name)
         self.assertIsNone(user.middle_name)
@@ -32,6 +33,7 @@ class AuthTests(unittest.TestCase):
                 "is_active": False,
                 "activated_at": None,
                 "expired_at": None,
+                "is_admin": False,
                 "first_name": None,
                 "last_name": None,
                 "middle_name": None,
@@ -55,6 +57,42 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(updated.last_name, "Liddell")
         self.assertIsNone(updated.middle_name)
         self.assertEqual(store.list_users()[0], updated)
+
+    def test_memory_store_seeds_default_admin_with_password(self):
+        store = InMemoryAuthStore()
+
+        seeded = store.seed_admin_user(
+            "cuiyeqing960904@gmail.com",
+            "Vladimir960904",
+        )
+
+        self.assertTrue(seeded.is_admin)
+        self.assertTrue(seeded.is_active)
+        self.assertIsNotNone(seeded.activated_at)
+        authenticated = store.authenticate_user(
+            "cuiyeqing960904@gmail.com",
+            "Vladimir960904",
+        )
+        self.assertEqual(authenticated.id, seeded.id)
+        self.assertTrue(authenticated.is_admin)
+
+    def test_memory_store_promotes_existing_seed_admin_and_resets_password(self):
+        store = InMemoryAuthStore()
+        user = store.register_user("cuiyeqing960904@gmail.com", "oldpassword")
+
+        seeded = store.seed_admin_user(
+            "cuiyeqing960904@gmail.com",
+            "Vladimir960904",
+        )
+
+        self.assertEqual(seeded.id, user.id)
+        self.assertTrue(seeded.is_admin)
+        with self.assertRaisesRegex(ValueError, "invalid username or password"):
+            store.authenticate_user("cuiyeqing960904@gmail.com", "oldpassword")
+        self.assertEqual(
+            store.authenticate_user("cuiyeqing960904@gmail.com", "Vladimir960904"),
+            seeded,
+        )
 
     def test_memory_store_validates_usernames_and_passwords(self):
         store = InMemoryAuthStore()

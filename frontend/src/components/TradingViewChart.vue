@@ -17,21 +17,15 @@ import type { Candle, Marker } from "../types";
 const props = withDefaults(defineProps<{
   candles: Candle[];
   signals: Marker[];
-  paperMarkers: Marker[];
   showSignals: boolean;
-  showPaper: boolean;
   resetKey: string;
   ariaLabel?: string;
   emptyLabel?: string;
-  paperEntryLabel?: string;
-  paperExitLabel?: string;
   longSignalLabel?: string;
   shortSignalLabel?: string;
 }>(), {
   ariaLabel: "TradingView live market chart",
   emptyLabel: "No candles returned",
-  paperEntryLabel: "Paper",
-  paperExitLabel: "Exit",
   longSignalLabel: "Long",
   shortSignalLabel: "Short",
 });
@@ -44,10 +38,9 @@ const DEFAULT_CHART_HEIGHT = 560;
 let resizeObserver: ResizeObserver | null = null;
 let shouldFitContent = true;
 
-const visibleMarkers = computed(() => [
-  ...(props.showSignals ? props.signals.map(signalMarker) : []),
-  ...(props.showPaper ? props.paperMarkers.map(paperMarker) : []),
-]);
+const visibleMarkers = computed(() =>
+  props.showSignals ? props.signals.map(signalMarker) : [],
+);
 
 watch(() => props.resetKey, () => {
   shouldFitContent = true;
@@ -164,18 +157,6 @@ function signalMarker(marker: Marker): SeriesMarker<Time> | null {
     };
   }
   return null;
-}
-
-function paperMarker(marker: Marker): SeriesMarker<Time> | null {
-  const isShort = marker.type.includes("short");
-  const isEntry = marker.type.startsWith("paper_entry");
-  return {
-    time: toChartTime(marker.time),
-    position: isShort ? "aboveBar" : "belowBar",
-    color: isEntry ? "#2962ff" : "#7c3aed",
-    shape: isEntry ? (isShort ? "arrowDown" : "arrowUp") : "square",
-    text: markerLabel(isEntry ? props.paperEntryLabel : props.paperExitLabel, marker.reason),
-  };
 }
 
 function markerLabel(prefix: string, reason: string): string {

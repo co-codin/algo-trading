@@ -1,6 +1,6 @@
 # Algo Trading
 
-Local market backtesting and paper trading.
+Local market charting, breadth monitoring, and simulated strategy research.
 
 Safety boundary: this project uses read-only public market data only. It does not accept exchange API keys and cannot place real orders.
 
@@ -22,19 +22,15 @@ Then open `http://127.0.0.1:8765`. The UI binds to localhost by default, uses re
 
 The frontend is a Vue 3 control panel with direct URLs:
 
-- `http://127.0.0.1:8765/backtest`
-- `http://127.0.0.1:8765/paper`
 - `http://127.0.0.1:8765/live`
 - `http://127.0.0.1:8765/chart`
-- `http://127.0.0.1:8765/runs`
-- `http://127.0.0.1:8765/lab`
-- `http://127.0.0.1:8765/combos`
+- `http://127.0.0.1:8765/breadth`
+- `http://127.0.0.1:8765/profile`
+- `http://127.0.0.1:8765/admin`
 
-The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST. The S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`. It overlays strategy long/short markers plus simulated paper entry/exit markers from local `runs/paper/` output. Choose `All strategies` in the live strategy selector to draw every strategy's long/short markers on one chart with strategy-prefixed labels.
+The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST, the S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`, and Russian blue chips use MOEX ISS share candles. Choose `All strategies` to show consensus or capped individual strategy markers instead of flooding the chart with every raw marker.
 
-The `Strategy Lab` view ranks strategy and preset combinations across selected symbols using simulated backtests. It also adds buy-and-hold benchmark rows, optional market benchmark rows such as `ES=F` and `NQ=F`, walk-forward validation fields, and richer risk metrics including Sharpe, Sortino, drawdown duration, trade duration, exposure, and worst trade. Use `Export CSV` to download the current ranking table as `strategy-lab.csv`. Treat this as research support, not a profit guarantee.
-
-The `Combinations` view runs the `combined-signals` strategy on its own page. Set member strategies, entry/exit confirmation counts, and the lookback window, then inspect the combined markers on a chart with the simulated backtest summary.
+The `Breadth` page shows cached market-breadth history, including put/call ratio at the top. `Profile` is available for signed-in users. `Admin` is visible only when the signed-in user's `is_admin` flag is true.
 
 Build the Vue frontend manually when changing frontend source:
 
@@ -91,7 +87,9 @@ Run with Docker Compose:
 make compose-up
 ```
 
-Both Docker paths mount local `runs/` into the container so backtest and paper-trading outputs persist on the host. Docker Compose also mounts `historical_data/` so market-breadth CSV history persists across rebuilds.
+Both Docker paths mount local `runs/` for command-line simulation outputs. Docker Compose also mounts `historical_data/` so market-breadth CSV history persists across rebuilds.
+
+Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template. MOEX requests read `MOEX_API_KEY` or `MOEXALGO_API_KEY` when either variable is present.
 
 The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file.
 

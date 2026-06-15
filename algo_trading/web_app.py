@@ -23,24 +23,20 @@ from algo_trading.auth import (
     public_user,
 )
 from algo_trading.data import BinanceMarketDataClient, MarketDataClient
+from algo_trading.env import load_env_file
 from algo_trading.market_breadth import MarketBreadthService
 from algo_trading.ui import (
     WEB_DIST_ROOT,
-    combination_signals_payload,
     is_frontend_route,
     is_vite_asset_route,
     live_chart_payload,
-    list_runs,
-    load_run_details,
-    run_backtest_payload,
-    run_paper_payload,
     strategies_payload,
-    strategy_lab_payload,
     top_symbols_payload,
     _live_client_for_handler,
 )
 
 ADMIN_EMAIL = "cuiyeqing960904@gmail.com"
+ADMIN_PASSWORD = "Vladimir960904"
 EXPIRY_CHECK_SECONDS = 60 * 60
 
 
@@ -50,10 +46,14 @@ def create_app(
     auth_store: AuthStore | None = None,
     market_breadth_service: Any | None = None,
     expiry_check_seconds: float | None = None,
+    seed_admin: bool = True,
+    admin_seed_password: str | None = None,
 ) -> FastAPI:
-    output_path = Path(output_root)
+    load_env_file()
     store = auth_store or auth_store_from_env()
     store.ensure_schema()
+    if seed_admin:
+        store.seed_admin_user(admin_email(), admin_seed_password or admin_password())
     breadth_service = market_breadth_service or MarketBreadthService()
     expiry_interval = (
         expiry_check_seconds
@@ -83,7 +83,7 @@ def create_app(
         return user
 
     def require_admin_user(user: AuthUser = Depends(require_user)) -> AuthUser:
-        if user.username != admin_email():
+        if not user.is_admin:
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
                 detail="admin required",
@@ -249,10 +249,6 @@ def create_app(
     def get_strategies(_user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:
         return strategies_payload()
 
-    @app.get("/api/runs")
-    def get_runs(_user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:
-        return {"ok": True, "runs": list_runs(output_path)}
-
     @app.get("/api/live-chart")
     def get_live_chart(
         request: Request,
@@ -262,7 +258,6 @@ def create_app(
         return live_chart_payload(
             payload,
             _live_client_for_handler(payload, client_factory),
-            output_path,
         )
 
     @app.get("/api/market-breadth")
@@ -277,44 +272,13 @@ def create_app(
         )
         return breadth_service.payload(requested_symbols)
 
-    @app.get("/api/run")
-    def get_run(
-        path: str = "",
-        _user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        return load_run_details(path, output_path)
-
-    @app.post("/api/backtest")
-    def post_backtest(
-        payload: dict[str, Any] | None = Body(default=None),
-        _user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        return run_backtest_payload(payload or {}, client_factory(), output_path)
-
-    @app.post("/api/paper")
-    def post_paper(
-        payload: dict[str, Any] | None = Body(default=None),
-        _user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        return run_paper_payload(payload or {}, client_factory(), output_path)
-
-    @app.post("/api/strategy-lab")
-    def post_strategy_lab(
-        payload: dict[str, Any] | None = Body(default=None),
-        _user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        return strategy_lab_payload(payload or {}, client_factory())
-
-    @app.post("/api/combination-signals")
-    def post_combination_signals(
-        payload: dict[str, Any] | None = Body(default=None),
-        _user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        request_payload = payload or {}
-        return combination_signals_payload(
-            request_payload,
-            _live_client_for_handler(request_payload, client_factory),
-        )
+    @app.api_route(
+        "/api/{_full_path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    def unknown_api(_full_path: str) -> None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="not found")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def frontend(full_path: str) -> FileResponse:
@@ -347,6 +311,10 @@ def auth_store_from_env() -> AuthStore:
 
 def admin_email() -> str:
     return os.environ.get("ADMIN_EMAIL", ADMIN_EMAIL).strip().lower()
+
+
+def admin_password() -> str:
+    return os.environ.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
 
 
 def set_session_cookie(response: Response, token: str) -> None:

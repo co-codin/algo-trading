@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import urllib.parse
 import urllib.request
 from collections.abc import Sequence as RuntimeSequence
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 from urllib.error import HTTPError, URLError
@@ -37,6 +39,22 @@ class TransientMarketDataError(RuntimeError):
 
 
 _BINANCE_MAX_KLINE_LIMIT = 1000
+MOEX_BLUECHIP_SYMBOLS = frozenset(
+    {
+        "SBER",
+        "GAZP",
+        "LKOH",
+        "YNDX",
+        "YDEX",
+        "ROSN",
+        "NVTK",
+        "GMKN",
+        "TATN",
+        "PLZL",
+        "MOEX",
+        "SNGS",
+    }
+)
 
 
 class BinanceMarketDataClient:
@@ -257,6 +275,80 @@ class YahooFuturesMarketDataClient:
         return _candles_from_yahoo_chart(payload)
 
 
+class MoexSharesMarketDataClient:
+    def __init__(
+        self,
+        base_url: str = "https://iss.moex.com/iss",
+        opener: Callable[..., Any] = urllib.request.urlopen,
+        timeout: int = 20,
+        api_key: str | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.opener = opener
+        self.timeout = timeout
+        fallback_api_key = (
+            os.environ.get("MOEX_API_KEY") or os.environ.get("MOEXALGO_API_KEY") or ""
+        )
+        self.api_key = (api_key if api_key is not None else fallback_api_key).strip()
+
+    def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        moex_symbol = _moex_bluechip_symbol(symbol)
+        moex_interval, aggregate_minutes = _moex_interval(interval)
+        candles = self._request_candles(moex_symbol, moex_interval, interval)
+        if aggregate_minutes is not None:
+            candles = _aggregate_candles(candles, aggregate_minutes)
+        return candles[-limit:]
+
+    def get_24h_tickers(self) -> list[dict[str, object]]:
+        return [
+            {
+                "symbol": symbol,
+                "quoteVolume": 0.0,
+                "lastPrice": 0.0,
+            }
+            for symbol in sorted(MOEX_BLUECHIP_SYMBOLS)
+        ]
+
+    def _request_candles(
+        self,
+        symbol: str,
+        moex_interval: int,
+        requested_interval: str,
+    ) -> list[Candle]:
+        from_date, till_date = _moex_window_dates(requested_interval)
+        query = urllib.parse.urlencode(
+            {
+                "from": from_date,
+                "till": till_date,
+                "interval": str(moex_interval),
+                "start": "0",
+            }
+        )
+        encoded_symbol = urllib.parse.quote(symbol, safe="")
+        url = (
+            f"{self.base_url}/engines/stock/markets/shares/boards/TQBR/"
+            f"securities/{encoded_symbol}/candles.json?{query}"
+        )
+        request: str | urllib.request.Request = url
+        if self.api_key:
+            request = urllib.request.Request(
+                url,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+        try:
+            with self.opener(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code == 429 or exc.code >= 500:
+                raise TransientMarketDataError(f"transient MOEX ISS HTTP {exc.code}") from exc
+            raise ValueError(f"MOEX ISS HTTP {exc.code}") from exc
+        except (TimeoutError, URLError) as exc:
+            raise TransientMarketDataError("transient MOEX ISS market-data failure") from exc
+        return _candles_from_moex_payload(payload)
+
+
 def load_candles_from_csv(path: str | Path) -> list[Candle]:
     with Path(path).open(newline="") as handle:
         reader = csv.DictReader(handle)
@@ -335,6 +427,92 @@ def _binance_interval_ms(interval: str) -> int:
         return amount * multipliers[unit]
     except KeyError as exc:
         raise ValueError(f"unsupported Binance interval: {interval}") from exc
+
+
+def _moex_bluechip_symbol(symbol: str) -> str:
+    value = symbol.strip().upper()
+    if value not in MOEX_BLUECHIP_SYMBOLS:
+        raise ValueError(f"unsupported MOEX bluechip symbol: {symbol}")
+    return value
+
+
+def _moex_interval(interval: str) -> tuple[int, int | None]:
+    intervals = {
+        "1m": (1, None),
+        "3m": (1, 3),
+        "5m": (1, 5),
+        "10m": (10, None),
+        "15m": (1, 15),
+        "30m": (1, 30),
+        "1h": (60, None),
+        "4h": (60, 240),
+        "1d": (24, None),
+    }
+    try:
+        return intervals[interval.strip().lower()]
+    except KeyError as exc:
+        raise ValueError(f"unsupported MOEX interval: {interval}") from exc
+
+
+def _moex_window_dates(interval: str) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    value = interval.strip().lower()
+    days = 400 if value == "1d" else 45
+    return (now - timedelta(days=days)).date().isoformat(), now.date().isoformat()
+
+
+def _candles_from_moex_payload(payload: Any) -> list[Candle]:
+    if not isinstance(payload, dict):
+        raise ValueError("unexpected MOEX ISS candle response")
+    try:
+        raw_candles = payload["candles"]
+        columns = raw_candles["columns"]
+        rows = raw_candles["data"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("unexpected MOEX ISS candle response") from exc
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        raise ValueError("unexpected MOEX ISS candle response")
+
+    column_index = {str(name).lower(): index for index, name in enumerate(columns)}
+    required = {"begin", "open", "high", "low", "close", "volume"}
+    if not required.issubset(column_index):
+        raise ValueError("unexpected MOEX ISS candle response")
+
+    candles: list[Candle] = []
+    for row in rows:
+        if not isinstance(row, RuntimeSequence) or isinstance(row, (str, bytes)):
+            continue
+        try:
+            open_value = float(row[column_index["open"]])
+            high_value = float(row[column_index["high"]])
+            low_value = float(row[column_index["low"]])
+            close_value = float(row[column_index["close"]])
+            volume_value = float(row[column_index["volume"]])
+            open_time = _moex_datetime_ms(str(row[column_index["begin"]]))
+        except (IndexError, TypeError, ValueError) as exc:
+            raise ValueError("unexpected MOEX ISS candle response") from exc
+        if high_value < max(open_value, close_value) or low_value > min(open_value, close_value):
+            continue
+        candles.append(
+            Candle(
+                open_time=open_time,
+                open=open_value,
+                high=high_value,
+                low=low_value,
+                close=close_value,
+                volume=volume_value,
+            )
+        )
+    if not candles:
+        raise ValueError("MOEX ISS candle response returned no usable candles")
+    return candles
+
+
+def _moex_datetime_ms(value: str) -> int:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
 
 
 _YAHOO_HEADERS = {

@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +9,7 @@ from algo_trading.auth import InMemoryAuthStore, utcnow
 import algo_trading.ui as ui
 from algo_trading.data import (
     BinanceMarketDataClient,
+    MoexSharesMarketDataClient,
     TransientMarketDataError,
     YahooFuturesMarketDataClient,
 )
@@ -17,15 +17,9 @@ from algo_trading.models import Candle
 from algo_trading.ui import (
     is_frontend_route,
     is_vite_asset_route,
-    load_run_details,
-    list_runs,
     live_chart_payload,
     market_data_client_from_payload,
-    paper_trade_markers,
-    run_backtest_payload,
     strategies_payload,
-    strategy_lab_csv,
-    strategy_lab_payload,
     top_symbols_payload,
 )
 from algo_trading.web_app import create_app
@@ -184,18 +178,20 @@ class UiTests(unittest.TestCase):
         )
 
         self.assertIn(
-            'export type Mode = "live" | "breadth" | "lab" | "profile" | "admin";',
+            'export type Mode = "live" | "breadth" | "profile" | "admin";',
             types_source,
         )
-        self.assertIn('"/": "lab"', source)
+        self.assertIn('"/": "live"', source)
+        self.assertNotIn('"/lab": "lab"', source)
         self.assertIn('"/profile": "profile"', source)
         self.assertIn('"/admin": "admin"', source)
-        self.assertIn('return routeModes[window.location.pathname] ?? "lab";', source)
-        self.assertIn('{ mode: "lab" as const, label: t("tabs.lab") }', source)
+        self.assertIn('return routeModes[window.location.pathname] ?? "live";', source)
+        self.assertNotIn('{ mode: "lab" as const, label: t("tabs.lab") }', source)
         self.assertIn('{ mode: "live" as const, label: t("tabs.live") }', source)
         self.assertIn('{ mode: "breadth" as const, label: t("tabs.breadth") }', source)
         self.assertIn('{ mode: "profile" as const, label: t("tabs.profile") }', source)
         self.assertIn('{ mode: "admin" as const, label: t("tabs.admin") }', source)
+        self.assertNotIn('"tabs.lab"', i18n_source)
         self.assertNotIn('{ mode: "backtest" as const', source)
         self.assertNotIn('{ mode: "paper" as const', source)
         self.assertNotIn('{ mode: "combos" as const', source)
@@ -214,15 +210,23 @@ class UiTests(unittest.TestCase):
         self.assertNotIn("activeMode === 'paper'", source)
         self.assertNotIn('activeMode === "runs"', source)
         self.assertNotIn('activeMode === "combos"', source)
+        self.assertNotIn('activeMode === "lab"', source)
         self.assertNotIn("async function runCurrentMode()", source)
         self.assertNotIn("async function runCombinationSignals()", source)
+        self.assertNotIn("async function runStrategyLab()", source)
+        self.assertNotIn("function exportLabCsv()", source)
         self.assertNotIn("async function loadRuns()", source)
         self.assertNotIn("async function loadRunDetails(", source)
         self.assertNotIn("/api/backtest", source)
         self.assertNotIn("/api/paper", source)
         self.assertNotIn("/api/combination-signals", source)
+        self.assertNotIn("/api/strategy-lab", source)
         self.assertNotIn("/api/runs", source)
         self.assertNotIn("/api/run?", source)
+        self.assertNotIn("labRows", source)
+        self.assertNotIn("labSymbols", source)
+        self.assertNotIn("labPresets", source)
+        self.assertNotIn("StrategyLabPayload", source)
 
     def test_frontend_exposes_market_breadth_page(self):
         root = Path(__file__).resolve().parents[1]
@@ -295,6 +299,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('is_active: boolean;', types_source)
         self.assertIn('activated_at: string | null;', types_source)
         self.assertIn('expired_at: string | null;', types_source)
+        self.assertIn('is_admin: boolean;', types_source)
         self.assertIn('first_name: string | null;', types_source)
         self.assertIn('last_name: string | null;', types_source)
         self.assertIn('middle_name: string | null;', types_source)
@@ -309,7 +314,8 @@ class UiTests(unittest.TestCase):
         self.assertIn('const authMode = ref<"login" | "register">("login");', app_source)
         self.assertIn("const authForm = reactive", app_source)
         self.assertIn('const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));', app_source)
-        self.assertIn('authUser.value?.username === "cuiyeqing960904@gmail.com"', app_source)
+        self.assertIn('authUser.value?.is_admin === true', app_source)
+        self.assertNotIn('authUser.value?.username === "cuiyeqing960904@gmail.com"', app_source)
         self.assertIn("async function loadCurrentUser()", app_source)
         self.assertIn('requestJson<AuthMePayload>("/api/auth/me")', app_source)
         self.assertIn('requestJson<AuthMePayload>("/api/profile")', app_source)
@@ -366,14 +372,14 @@ class UiTests(unittest.TestCase):
 
         self.assertIn("ariaLabel?: string;", chart_source)
         self.assertIn("emptyLabel?: string;", chart_source)
-        self.assertIn("paperEntryLabel?: string;", chart_source)
-        self.assertIn("paperExitLabel?: string;", chart_source)
+        self.assertNotIn("paperEntryLabel?: string;", chart_source)
+        self.assertNotIn("paperExitLabel?: string;", chart_source)
         self.assertIn("longSignalLabel?: string;", chart_source)
         self.assertIn("shortSignalLabel?: string;", chart_source)
         self.assertIn(':aria-label="chartLabels.aria"', app_source)
         self.assertIn(':empty-label="chartLabels.empty"', app_source)
-        self.assertIn(':paper-entry-label="chartLabels.paperEntry"', app_source)
-        self.assertIn(':paper-exit-label="chartLabels.paperExit"', app_source)
+        self.assertNotIn(':paper-entry-label="chartLabels.paperEntry"', app_source)
+        self.assertNotIn(':paper-exit-label="chartLabels.paperExit"', app_source)
         self.assertIn(':long-signal-label="chartLabels.longSignal"', app_source)
         self.assertIn(':short-signal-label="chartLabels.shortSignal"', app_source)
 
@@ -410,6 +416,44 @@ class UiTests(unittest.TestCase):
         self.assertNotIn("liveSignalDisplayMode.value", reset_key_source)
         self.assertNotIn("liveConsensusMinConfirmations.value", reset_key_source)
 
+    def test_live_all_strategy_view_limits_marker_noise(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("const liveMaxSignals = ref(80);", source)
+        self.assertIn("limitRecentSignals(consensusSignals.value, liveMaxSignals.value)", source)
+        self.assertIn("limitRecentSignals(rawSignals, liveMaxSignals.value)", source)
+        self.assertIn("function limitRecentSignals(signals: Marker[], limit: number): Marker[]", source)
+        self.assertIn('v-model.number="liveMaxSignals"', source)
+        self.assertIn('t("labels.maxMarkers")', source)
+        self.assertIn('"labels.maxMarkers": "Max markers"', i18n_source)
+        self.assertIn('"labels.maxMarkers": "Макс. меток"', i18n_source)
+
+    def test_live_page_exposes_moex_bluechips_market(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("const moexBluechipSymbolOptions = [", source)
+        self.assertIn('value: "SBER"', source)
+        self.assertIn('value: "GAZP"', source)
+        self.assertIn('value: "LKOH"', source)
+        self.assertIn('value: "YNDX"', source)
+        self.assertIn('value: "russian_bluechips"', source)
+        self.assertIn('t("options.moexBluechips")', source)
+        self.assertIn("russian_bluechips: moexBluechipSymbolOptions", source)
+        self.assertIn('"options.moexBluechips": "Russian Bluechips"', i18n_source)
+        self.assertIn('"options.moexBluechips": "Голубые фишки РФ"', i18n_source)
+
     def test_live_page_does_not_show_paper_trade_markers(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
@@ -432,8 +476,8 @@ class UiTests(unittest.TestCase):
         self.assertNotIn('t("chart.paperExitLegend")', live_section)
         self.assertNotIn(':paper-markers="filteredPaperMarkers"', live_section)
         self.assertNotIn(':show-paper="showPaper"', live_section)
-        self.assertIn(':paper-markers="[]"', live_section)
-        self.assertIn(':show-paper="false"', live_section)
+        self.assertNotIn(':paper-markers="[]"', live_section)
+        self.assertNotIn(':show-paper="false"', live_section)
 
     def test_live_ui_uses_trading_terminal_visual_language(self):
         root = Path(__file__).resolve().parents[1]
@@ -460,7 +504,7 @@ class UiTests(unittest.TestCase):
         self.assertTrue(is_frontend_route("/live"))
         self.assertTrue(is_frontend_route("/chart"))
         self.assertTrue(is_frontend_route("/breadth"))
-        self.assertTrue(is_frontend_route("/lab"))
+        self.assertFalse(is_frontend_route("/lab"))
         self.assertTrue(is_frontend_route("/profile"))
         self.assertTrue(is_frontend_route("/admin"))
         self.assertFalse(is_frontend_route("/backtest"))
@@ -539,302 +583,15 @@ class UiTests(unittest.TestCase):
         self.assertIn("combined-signals", strategy_names)
         self.assertTrue(all(strategy["description"] for strategy in payload["strategies"]))
 
-    def test_combination_signals_payload_returns_summary_and_markers(self):
-        client = FakeClient()
-        client.candles = [
-            candle(index, price)
-            for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])
-        ]
-
-        payload = ui.combination_signals_payload(
-            {
-                "symbol": "BTCUSDT",
-                "interval": "1h",
-                "limit": 7,
-                "fast_ema": 2,
-                "slow_ema": 5,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "macd_signal": 2,
-                "combo_strategies": "ema-rsi,macd",
-                "combo_entry_confirmations": 2,
-                "combo_exit_confirmations": 2,
-                "combo_lookback": 2,
-                "fee_rate": 0,
-                "slippage_rate": 0,
-                "stop_loss_pct": 1,
-                "take_profit_pct": 1,
-            },
-            client=client,
-        )
-
-        self.assertEqual(payload["ok"], True)
-        self.assertEqual(payload["mode"], "combination-signals")
-        self.assertEqual(payload["config"]["strategy"], "combined-signals")
-        self.assertEqual(payload["config"]["combo_strategies"], "ema-rsi,macd")
-        self.assertIn("final_balance", payload["summary"])
-        self.assertTrue(
-            any(
-                marker["reason"] == "combined_long:2/2:ema-rsi,macd"
-                for marker in payload["signals"]
-            )
-        )
-
-    def test_strategy_lab_payload_ranks_strategy_results(self):
-        client = FakeClient()
-        client.candles = trending_candles()
-
-        payload = strategy_lab_payload(
-            {
-                "symbols": "BTCUSDT",
-                "strategies": "ema-rsi,macd",
-                "presets": "custom",
-                "interval": "1h",
-                "limit": 12,
-                "fast_ema": 1,
-                "slow_ema": 3,
-                "macd_signal": 2,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "rsi_oversold": 0,
-            },
-            client=client,
-        )
-
-        self.assertEqual(payload["ok"], True)
-        self.assertEqual(payload["mode"], "strategy-lab")
-        strategy_rows = [
-            row for row in payload["rows"] if row["strategy"] in {"ema-rsi", "macd"}
-        ]
-        self.assertEqual(len(strategy_rows), 2)
-        self.assertEqual(payload["rows"][0]["rank"], 1)
-        returns = [row["total_return_pct"] for row in payload["rows"]]
-        self.assertEqual(returns, sorted(returns, reverse=True))
-
-    def test_strategy_lab_payload_accepts_combined_signals(self):
-        client = FakeClient()
-        client.candles = [
-            candle(index, price)
-            for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])
-        ]
-
-        payload = strategy_lab_payload(
-            {
-                "symbols": "BTCUSDT",
-                "strategies": "combined-signals",
-                "presets": "custom",
-                "interval": "1h",
-                "limit": 7,
-                "fast_ema": 2,
-                "slow_ema": 5,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "macd_signal": 2,
-                "combo_strategies": "ema-rsi,macd",
-                "combo_entry_confirmations": 2,
-                "combo_exit_confirmations": 2,
-                "combo_lookback": 2,
-                "fee_rate": 0,
-                "slippage_rate": 0,
-                "stop_loss_pct": 1,
-                "take_profit_pct": 1,
-            },
-            client=client,
-        )
-
-        strategy_rows = [
-            row for row in payload["rows"] if row["strategy"] == "combined-signals"
-        ]
-        self.assertEqual(len(strategy_rows), 1)
-
-    def test_strategy_lab_payload_adds_buy_and_hold_benchmark_row(self):
-        client = FakeClient()
-        client.candles = trending_candles()
-
-        payload = strategy_lab_payload(
-            {
-                "symbols": "BTCUSDT",
-                "strategies": "ema-rsi",
-                "presets": "custom",
-                "interval": "1h",
-                "limit": 12,
-                "fast_ema": 1,
-                "slow_ema": 3,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "rsi_oversold": 0,
-            },
-            client=client,
-        )
-
-        benchmark = next(
-            row for row in payload["rows"] if row["strategy"] == "buy-and-hold"
-        )
-        expected_return = ((client.candles[-1].close / client.candles[0].close) - 1.0) * 100.0
-        self.assertEqual(benchmark["symbol"], "BTCUSDT")
-        self.assertEqual(benchmark["preset"], "benchmark")
-        self.assertEqual(benchmark["trades"], 0)
-        self.assertEqual(benchmark["total_return_pct"], round(expected_return, 8))
-
-    def test_strategy_lab_payload_adds_market_benchmark_symbols(self):
-        client = FakeClient()
-        futures_client = FakeClient()
-        client.candles = trending_candles()
-        futures_client.candles = [
-            candle(index, price) for index, price in enumerate([100, 101, 102, 103])
-        ]
-
-        payload = strategy_lab_payload(
-            {
-                "symbols": "BTCUSDT",
-                "benchmark_symbols": "SP500,NASDAQ",
-                "strategies": "ema-rsi",
-                "presets": "custom",
-                "interval": "1h",
-                "limit": 12,
-                "fast_ema": 1,
-                "slow_ema": 3,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "rsi_oversold": 0,
-            },
-            client=client,
-            benchmark_client=futures_client,
-        )
-
-        benchmark_symbols = {
-            row["symbol"]
-            for row in payload["rows"]
-            if row["strategy"] == "buy-and-hold"
-        }
-        self.assertIn("SP500", benchmark_symbols)
-        self.assertIn("NASDAQ", benchmark_symbols)
-        self.assertEqual(futures_client.kline_symbols, ["SP500", "NASDAQ"])
-
-    def test_strategy_lab_payload_adds_walk_forward_metrics(self):
-        client = FakeClient()
-        client.candles = trending_candles()
-
-        payload = strategy_lab_payload(
-            {
-                "symbols": "BTCUSDT",
-                "strategies": "ema-rsi",
-                "presets": "custom",
-                "interval": "1h",
-                "limit": 12,
-                "fast_ema": 1,
-                "slow_ema": 3,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "rsi_oversold": 0,
-                "walk_forward_windows": 2,
-                "walk_forward_min_candles": 4,
-            },
-            client=client,
-        )
-
-        strategy_row = next(row for row in payload["rows"] if row["strategy"] == "ema-rsi")
-        self.assertEqual(strategy_row["walk_forward_windows"], 2)
-        self.assertIn("walk_forward_avg_return_pct", strategy_row)
-        self.assertIn("walk_forward_worst_return_pct", strategy_row)
-        self.assertIn("walk_forward_best_return_pct", strategy_row)
-        self.assertIn("walk_forward_profitable_pct", strategy_row)
-
-    def test_strategy_lab_csv_exports_ranked_rows(self):
-        csv_text = strategy_lab_csv(
-            [
-                {
-                    "rank": 1,
-                    "symbol": "BTC,USDT",
-                    "strategy": "buy-and-hold",
-                    "preset": "benchmark",
-                    "final_balance": 11000.0,
-                    "total_return_pct": 10.0,
-                    "max_drawdown_pct": 2.0,
-                    "trades": 0,
-                    "win_rate": 0.0,
-                    "profit_factor": 0.0,
-                    "sharpe_ratio": 1.2,
-                    "sortino_ratio": 1.4,
-                    "max_drawdown_duration": 2,
-                    "average_trade_duration": 0.0,
-                    "exposure_pct": 100.0,
-                    "worst_trade": 0.0,
-                    "walk_forward_windows": 2,
-                    "walk_forward_avg_return_pct": 5.0,
-                    "walk_forward_worst_return_pct": -1.0,
-                    "walk_forward_best_return_pct": 11.0,
-                    "walk_forward_profitable_pct": 50.0,
-                }
-            ]
-        )
-
-        lines = csv_text.splitlines()
-        self.assertTrue(lines[0].startswith("rank,symbol,strategy,preset"))
-        self.assertIn('"BTC,USDT"', lines[1])
-        self.assertIn("walk_forward_profitable_pct", lines[0])
-
-    def test_strategy_lab_frontend_exposes_validation_and_csv_controls(self):
-        source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("labBenchmarkSymbols", source)
-        self.assertIn("walk_forward_windows", source)
-        self.assertIn("exportLabCsv", source)
-        self.assertIn("strategy-lab.csv", source)
-        self.assertIn('t("actions.exportCsv")', source)
-
-    def test_run_backtest_payload_writes_one_run_per_symbol(self):
-        client = FakeClient()
-        with tempfile.TemporaryDirectory() as tmp:
-            payload = run_backtest_payload(
-                {
-                    "symbols": "BTCUSDT,ETHUSDT",
-                    "interval": "1h",
-                    "limit": 4,
-                    "fast_ema": 1,
-                    "slow_ema": 2,
-                    "rsi_period": 2,
-                    "strategy": "keltner-breakout",
-                    "atr_period": 3,
-                    "keltner_multiplier": 0.5,
-                    "fee_rate": 0,
-                    "slippage_rate": 0,
-                },
-                client=client,
-                output_root=Path(tmp),
-            )
-
-            self.assertEqual(client.kline_symbols, ["BTCUSDT", "ETHUSDT"])
-            self.assertEqual(
-                [run["symbol"] for run in payload["runs"]],
-                ["BTCUSDT", "ETHUSDT"],
-            )
-            self.assertEqual(len(list(Path(tmp).glob("backtests/*/summary.json"))), 2)
-            config_path = sorted(Path(tmp).glob("backtests/*/config.json"))[0]
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(config["strategy"], "keltner-breakout")
-            self.assertEqual(config["keltner_multiplier"], 0.5)
-
-    def test_list_runs_reads_recent_summaries(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            run_dir = Path(tmp) / "backtests" / "20260614T010203Z"
-            run_dir.mkdir(parents=True)
-            (run_dir / "summary.json").write_text(
-                json.dumps({"symbol": "BTCUSDT", "final_balance": 10100}),
-                encoding="utf-8",
-            )
-
-            runs = list_runs(Path(tmp))
-
-            self.assertEqual(runs[0]["mode"], "backtest")
-            self.assertEqual(runs[0]["symbol"], "BTCUSDT")
-
-    def test_load_run_details_rejects_path_traversal(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(ValueError):
-                load_run_details("../outside", output_root=Path(tmp))
+    def test_removed_web_workflow_helpers_are_removed(self):
+        self.assertFalse(hasattr(ui, "strategy_lab_payload"))
+        self.assertFalse(hasattr(ui, "strategy_lab_csv"))
+        self.assertFalse(hasattr(ui, "run_backtest_payload"))
+        self.assertFalse(hasattr(ui, "run_paper_payload"))
+        self.assertFalse(hasattr(ui, "combination_signals_payload"))
+        self.assertFalse(hasattr(ui, "paper_trade_markers"))
+        self.assertFalse(hasattr(ui, "list_runs"))
+        self.assertFalse(hasattr(ui, "load_run_details"))
 
     def test_live_chart_payload_returns_candles_and_strategy_signals(self):
         client = FakeClient()
@@ -972,10 +729,39 @@ class UiTests(unittest.TestCase):
         self.assertIn("ema-rsi", strategy_names)
         self.assertIn("macd", strategy_names)
 
+    def test_live_chart_payload_accepts_moex_bluechip_market(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([300, 301, 302, 303, 304])]
+
+        payload = live_chart_payload(
+            {
+                "market": "russian_bluechips",
+                "symbol": "SBER",
+                "interval": "5m",
+                "limit": 5,
+                "strategy": "ema-rsi",
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(client.kline_symbols, ["SBER"])
+        self.assertEqual(payload["market"], "russian_bluechips")
+        self.assertEqual(payload["data_source"], "MOEX ISS shares")
+        self.assertEqual(payload["symbol"], "SBER")
+
     def test_market_data_client_from_payload_selects_futures_provider(self):
         self.assertIsInstance(
             market_data_client_from_payload({"market": "cme_futures"}),
             YahooFuturesMarketDataClient,
+        )
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "russian_bluechips"}),
+            MoexSharesMarketDataClient,
         )
         self.assertIsInstance(
             market_data_client_from_payload({"market": "crypto_spot"}),
@@ -996,6 +782,7 @@ class UiTests(unittest.TestCase):
                     create_app(
                         output_root=Path(tmp),
                         auth_store=auth_store,
+                        seed_admin=False,
                     )
                 )
                 http.post(
@@ -1023,6 +810,44 @@ class UiTests(unittest.TestCase):
         self.assertEqual(payload["symbol"], "ES=F")
         self.assertEqual(client.kline_symbols, ["ES=F"])
 
+    def test_live_chart_route_uses_moex_market_provider_from_query(self):
+        client = FakeClient()
+        client.candles = [
+            candle(index, price)
+            for index, price in enumerate([300, 301, 302, 303, 304, 305, 306])
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("algo_trading.ui.MoexSharesMarketDataClient", return_value=client):
+                auth_store = InMemoryAuthStore()
+                http = TestClient(
+                    create_app(
+                        output_root=Path(tmp),
+                        auth_store=auth_store,
+                        seed_admin=False,
+                    )
+                )
+                http.post(
+                    "/api/auth/register",
+                    json={"username": "alice", "password": "password123"},
+                )
+                auth_store.set_user_access(
+                    auth_store.list_users()[0].id,
+                    is_active=True,
+                    activated_at=utcnow(),
+                )
+                response = http.get(
+                    "/api/live-chart"
+                    "?market=russian_bluechips&symbol=SBER&interval=5m&limit=7"
+                    "&strategy=ema-rsi&fast_ema=2&slow_ema=5"
+                    "&rsi_period=2&rsi_overbought=100&rsi_oversold=0"
+                )
+                payload = response.json()
+
+        self.assertEqual(payload["market"], "russian_bluechips")
+        self.assertEqual(payload["symbol"], "SBER")
+        self.assertEqual(client.kline_symbols, ["SBER"])
+
     def test_live_chart_payload_retries_transient_market_data_failures(self):
         client = FlakyLiveClient()
         client.candles = trending_candles()
@@ -1046,35 +871,6 @@ class UiTests(unittest.TestCase):
         self.assertEqual(len(client.kline_symbols), 1)
         self.assertEqual(payload["symbol"], "BTCUSDT")
         self.assertEqual(len(payload["candles"]), 12)
-
-    def test_paper_trade_markers_reads_entry_and_exit_markers(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            run_dir = Path(tmp) / "paper" / "run-a"
-            run_dir.mkdir(parents=True)
-            (run_dir / "trades.csv").write_text(
-                "\n".join(
-                    [
-                        "side,entry_time,exit_time,entry_price,exit_price,quantity,realized_pnl,fees,slippage,entry_reason,exit_reason",
-                        "long,2,5,10,13,1,3,0,0,ema_cross_above,take_profit",
-                        "short,7,9,12,9,1,3,0,0,ema_cross_below,ema_cross_above",
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            markers = paper_trade_markers("BTCUSDT", 0, 10, Path(tmp))
-
-            self.assertEqual(
-                [marker["type"] for marker in markers],
-                [
-                    "paper_entry_long",
-                    "paper_exit_long",
-                    "paper_entry_short",
-                    "paper_exit_short",
-                ],
-            )
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,6 +34,16 @@ class InfrastructureTests(unittest.TestCase):
         )
         self.assertIn("condition: service_healthy", compose)
         self.assertIn("postgres-data:", compose)
+        self.assertIn("MOEX_API_KEY: ${MOEX_API_KEY:-}", compose)
+        self.assertIn("MOEXALGO_API_KEY: ${MOEXALGO_API_KEY:-}", compose)
+
+    def test_env_template_is_tracked_while_local_env_is_ignored(self):
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+        self.assertIn(".env", gitignore.splitlines())
+        self.assertIn("MOEX_API_KEY=", env_example)
+        self.assertIn("ADMIN_EMAIL=", env_example)
 
     def test_compose_persists_market_breadth_historical_csvs(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
@@ -49,7 +59,10 @@ class InfrastructureTests(unittest.TestCase):
     def test_docker_smoke_authenticates_before_protected_api_checks(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
-        self.assertIn("/api/auth/register", makefile)
+        self.assertIn("/api/auth/login", makefile)
+        self.assertIn("cuiyeqing960904@gmail.com", makefile)
         self.assertIn('-c "$$cookie_jar"', makefile)
         self.assertIn('-b "$$cookie_jar"', makefile)
         self.assertIn("/api/strategies", makefile)
+        self.assertIn("/breadth", makefile)
+        self.assertNotIn("/lab", makefile)
