@@ -2,21 +2,27 @@
 import {
   CandlestickSeries,
   ColorType,
+  HistogramSeries,
+  LineSeries,
   createChart,
   createSeriesMarkers,
   type CandlestickData,
+  type HistogramData,
   type IChartApi,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
+  type LineData,
   type SeriesMarker,
+  type SeriesType,
   type Time,
 } from "lightweight-charts";
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
-import type { Candle, Marker } from "../types";
+import type { Candle, IndicatorDefinition, IndicatorSeries as IndicatorSeriesDefinition, Marker } from "../types";
 
 const props = withDefaults(defineProps<{
   candles: Candle[];
   signals: Marker[];
+  indicators?: IndicatorDefinition[];
   showSignals: boolean;
   resetKey: string;
   ariaLabel?: string;
@@ -24,16 +30,23 @@ const props = withDefaults(defineProps<{
   longSignalLabel?: string;
   shortSignalLabel?: string;
 }>(), {
+  indicators: () => [],
   ariaLabel: "TradingView live market chart",
   emptyLabel: "No candles returned",
   longSignalLabel: "Long",
   shortSignalLabel: "Short",
 });
 
+type IndicatorChartSeries = {
+  series: ISeriesApi<"Line", Time> | ISeriesApi<"Histogram", Time>;
+  type: IndicatorSeriesDefinition["type"];
+};
+
 const chartEl = ref<HTMLElement | null>(null);
 const chart = shallowRef<IChartApi | null>(null);
 const series = shallowRef<ISeriesApi<"Candlestick"> | null>(null);
 const markerApi = shallowRef<ISeriesMarkersPluginApi<Time> | null>(null);
+const indicatorSeries = new Map<string, IndicatorChartSeries>();
 const DEFAULT_CHART_HEIGHT = 560;
 let resizeObserver: ResizeObserver | null = null;
 let shouldFitContent = true;
@@ -47,7 +60,7 @@ watch(() => props.resetKey, () => {
 });
 
 watch(
-  () => [props.candles, visibleMarkers.value],
+  () => [props.candles, visibleMarkers.value, props.indicators],
   async () => {
     await nextTick();
     renderChart();
@@ -56,6 +69,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  clearIndicatorSeries();
   resizeObserver?.disconnect();
   chart.value?.remove();
 });
@@ -69,6 +83,7 @@ function renderChart() {
   const timeScale = chart.value?.timeScale();
   const visibleRange = shouldFitContent ? null : timeScale?.getVisibleLogicalRange();
   series.value?.setData(candleData);
+  syncIndicatorSeries();
   markerApi.value?.setMarkers(
     visibleMarkers.value
       .filter((marker): marker is SeriesMarker<Time> => marker !== null)
@@ -134,6 +149,130 @@ function toCandleData(candle: Candle): CandlestickData {
     low: Number(candle.low),
     close: Number(candle.close),
   };
+}
+
+function syncIndicatorSeries() {
+  if (!chart.value) {
+    return;
+  }
+  const visibleSeries = new Map<string, {
+    indicator: IndicatorDefinition;
+    series: IndicatorSeriesDefinition;
+  }>();
+  for (const indicator of props.indicators) {
+    for (const indicatorSeriesItem of indicator.series) {
+      visibleSeries.set(seriesKey(indicator, indicatorSeriesItem), {
+        indicator,
+        series: indicatorSeriesItem,
+      });
+    }
+  }
+
+  for (const [key, entry] of indicatorSeries.entries()) {
+    if (!visibleSeries.has(key)) {
+      chart.value.removeSeries(entry.series as unknown as ISeriesApi<SeriesType, Time>);
+      indicatorSeries.delete(key);
+    }
+  }
+
+  for (const [key, item] of visibleSeries.entries()) {
+    const entry = indicatorSeries.get(key) ?? createIndicatorSeries(item.indicator, item.series);
+    indicatorSeries.set(key, entry);
+    if (entry.type === "histogram") {
+      (entry.series as ISeriesApi<"Histogram", Time>).setData(toHistogramData(item.series));
+    } else {
+      (entry.series as ISeriesApi<"Line", Time>).setData(toLineData(item.series));
+    }
+  }
+  resizeIndicatorPanes();
+}
+
+function createIndicatorSeries(
+  indicator: IndicatorDefinition,
+  indicatorSeriesItem: IndicatorSeriesDefinition,
+): IndicatorChartSeries {
+  if (!chart.value) {
+    throw new Error("chart is not initialized");
+  }
+  const paneIndex = paneIndexForIndicator(indicator);
+  if (indicatorSeriesItem.type === "histogram") {
+    return {
+      type: "histogram",
+      series: chart.value.addSeries(HistogramSeries, {
+        color: indicatorSeriesItem.color,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        priceFormat: { type: "volume" },
+      }, paneIndex),
+    };
+  }
+  return {
+    type: "line",
+    series: chart.value.addSeries(LineSeries, {
+      color: indicatorSeriesItem.color,
+      lineWidth: indicator.pane === "price" ? 1 : 2,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    }, paneIndex),
+  };
+}
+
+function clearIndicatorSeries() {
+  if (!chart.value) {
+    indicatorSeries.clear();
+    return;
+  }
+  for (const entry of indicatorSeries.values()) {
+    chart.value.removeSeries(entry.series as unknown as ISeriesApi<SeriesType, Time>);
+  }
+  indicatorSeries.clear();
+}
+
+function resizeIndicatorPanes() {
+  const panes = chart.value?.panes() ?? [];
+  panes[0]?.setStretchFactor(props.indicators.some((indicator) => indicator.pane !== "price") ? 4 : 1);
+  panes[1]?.setStretchFactor(1.15);
+  panes[2]?.setStretchFactor(1.1);
+  panes[3]?.setStretchFactor(1.1);
+  panes[4]?.setStretchFactor(1.05);
+}
+
+function paneIndexForIndicator(indicator: IndicatorDefinition): number {
+  if (indicator.pane === "price") {
+    return 0;
+  }
+  if (indicator.id === "volume") {
+    return 1;
+  }
+  if (indicator.id === "rsi" || indicator.id === "stoch-rsi") {
+    return 2;
+  }
+  if (indicator.id === "macd") {
+    return 3;
+  }
+  return 4;
+}
+
+function seriesKey(
+  indicator: IndicatorDefinition,
+  indicatorSeriesItem: IndicatorSeriesDefinition,
+): string {
+  return `${indicator.id}:${indicatorSeriesItem.id}`;
+}
+
+function toLineData(indicatorSeriesItem: IndicatorSeriesDefinition): LineData[] {
+  return indicatorSeriesItem.points.map((point) => ({
+    time: toChartTime(point.time),
+    value: Number(point.value),
+  }));
+}
+
+function toHistogramData(indicatorSeriesItem: IndicatorSeriesDefinition): HistogramData[] {
+  return indicatorSeriesItem.points.map((point) => ({
+    time: toChartTime(point.time),
+    value: Number(point.value),
+    color: indicatorSeriesItem.color,
+  }));
 }
 
 function signalMarker(marker: Marker): SeriesMarker<Time> | null {

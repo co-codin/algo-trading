@@ -83,9 +83,9 @@ class UiTests(unittest.TestCase):
         self.assertIn("const liveSymbolsByMarket", source)
         self.assertIn("const liveIntervalOptions = [", source)
         self.assertIn("const liveCandleOptions = [", source)
-        self.assertIn("const liveStrategyOptions = computed(() => [", source)
-        self.assertIn('name: "all"', source)
-        self.assertIn('t("options.allStrategies")', source)
+        self.assertIn("const liveStrategyOptions = computed(() =>", source)
+        self.assertIn("const liveSelectedStrategies = ref<string[]>([\"ema-rsi\"]);", source)
+        self.assertIn("const liveStrategyRequest = computed(() =>", source)
         self.assertIn('value: "crypto_spot"', source)
         self.assertIn('t("options.cryptoSpot")', source)
         self.assertIn('value: "cme_futures"', source)
@@ -97,8 +97,8 @@ class UiTests(unittest.TestCase):
         self.assertIn('<select v-model="liveInterval"', source)
         self.assertIn('const liveInterval = ref("5m");', source)
         self.assertIn('<select v-model="liveLimit"', source)
-        self.assertIn('class="live-strategy-field"', source)
-        self.assertIn('<select v-model="settings.strategy"', source)
+        self.assertIn('class="strategy-multiselect live-strategy-field"', source)
+        self.assertIn("toggleLiveStrategy(strategy.name)", source)
         self.assertIn("v-for=\"strategy in liveStrategyOptions\"", source)
         self.assertIn('value: "BTCUSDT"', source)
         self.assertIn('value: "ETHUSDT"', source)
@@ -106,6 +106,62 @@ class UiTests(unittest.TestCase):
         self.assertIn('value: "1h"', source)
         self.assertIn("value: 180", source)
         self.assertIn("value: 500", source)
+
+    def test_live_page_uses_strategy_multiselect(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('class="strategy-multiselect live-strategy-field"', source)
+        self.assertIn("toggleLiveStrategy(strategy.name)", source)
+        self.assertIn("selectAllLiveStrategies", source)
+        self.assertIn("clearLiveStrategies", source)
+        self.assertIn(":checked=\"liveSelectedStrategies.includes(strategy.name)\"", source)
+        self.assertIn("strategy: liveStrategyRequest.value", source)
+        self.assertIn("watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], () => {", source)
+        self.assertNotIn('<select v-model="settings.strategy"', source)
+
+    def test_live_page_exposes_popular_indicator_controls(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        chart_source = (
+            root / "frontend" / "src" / "components" / "TradingViewChart.vue"
+        ).read_text(encoding="utf-8")
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        for indicator_id in (
+            "sma",
+            "ema",
+            "bollinger",
+            "vwap",
+            "donchian",
+            "volume",
+            "rsi",
+            "macd",
+            "atr",
+            "stoch-rsi",
+        ):
+            self.assertIn(f'value: "{indicator_id}"', app_source)
+
+        self.assertIn("const liveVisibleIndicators = ref<string[]>([", app_source)
+        self.assertIn("const visibleLiveIndicators = computed<IndicatorDefinition[]>(() =>", app_source)
+        self.assertIn('class="indicator-picker"', app_source)
+        self.assertIn("toggleLiveIndicator(String(option.value))", app_source)
+        self.assertIn(':indicators="visibleLiveIndicators"', app_source)
+        self.assertIn('"labels.indicators": "Indicators"', i18n_source)
+        self.assertIn("export type IndicatorDefinition", types_source)
+        self.assertIn("indicators: IndicatorDefinition[];", types_source)
+        self.assertIn("LineSeries", chart_source)
+        self.assertIn("HistogramSeries", chart_source)
+        self.assertIn("syncIndicatorSeries", chart_source)
+        self.assertIn("paneIndexForIndicator", chart_source)
 
     def test_live_crypto_spot_symbols_are_limited_to_btc_and_eth(self):
         source = (
@@ -131,7 +187,7 @@ class UiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";', source)
-        self.assertIn("watch([liveMarket, liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {", source)
+        self.assertIn("watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], () => {", source)
         self.assertIn('if (activeMode.value === "live") {', source)
         self.assertIn("refreshLiveChart();", source)
         self.assertIn("market: liveMarket.value", source)
@@ -162,8 +218,8 @@ class UiTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('if (nextMode !== "live" && settings.strategy === "all") {', source)
-        self.assertIn('settings.strategy = "ema-rsi";', source)
+        self.assertIn('if (nextMode !== "live") {', source)
+        self.assertIn("resetLiveStrategies();", source)
 
     def test_frontend_keeps_trading_modes_plus_account_management_modes(self):
         root = Path(__file__).resolve().parents[1]
@@ -402,7 +458,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('t("options.individualSignals")', source)
         self.assertIn("const consensusSignals = computed", source)
         self.assertIn("const displayedSignals = computed", source)
-        self.assertIn('settings.strategy !== "all"', source)
+        self.assertIn("!isMultiStrategyLive.value", source)
         self.assertIn("liveConsensusMinConfirmations.value", source)
         self.assertIn("groupSignalsByConsensus", source)
         self.assertIn("formatConsensusReason", source)
@@ -616,6 +672,64 @@ class UiTests(unittest.TestCase):
         signal_types = {marker["type"] for marker in payload["signals"]}
         self.assertIn("long_signal", signal_types)
         self.assertIn("short_signal", signal_types)
+        self.assertIn("indicators", payload)
+
+    def test_live_chart_payload_returns_ten_popular_indicators(self):
+        client = FakeClient()
+        client.candles = [
+            candle(index, float(100 + ((index % 8) * 2) - (index // 5)))
+            for index in range(40)
+        ]
+
+        payload = live_chart_payload(
+            {
+                "symbol": "BTCUSDT",
+                "interval": "5m",
+                "limit": 40,
+                "fast_ema": 3,
+                "slow_ema": 8,
+                "rsi_period": 5,
+                "macd_signal": 4,
+                "bollinger_period": 6,
+                "bollinger_stddev": 2,
+                "donchian_period": 6,
+                "atr_period": 5,
+                "vwap_period": 6,
+                "stoch_rsi_period": 5,
+            },
+            client=client,
+        )
+
+        indicators = payload["indicators"]
+        indicator_ids = [indicator["id"] for indicator in indicators]
+        self.assertEqual(
+            indicator_ids,
+            [
+                "sma",
+                "ema",
+                "bollinger",
+                "vwap",
+                "donchian",
+                "volume",
+                "rsi",
+                "macd",
+                "atr",
+                "stoch-rsi",
+            ],
+        )
+        self.assertEqual(len(indicators), 10)
+        indicator_by_id = {indicator["id"]: indicator for indicator in indicators}
+        self.assertEqual(indicator_by_id["ema"]["pane"], "price")
+        self.assertEqual(indicator_by_id["volume"]["pane"], "volume")
+        self.assertEqual(indicator_by_id["rsi"]["pane"], "oscillator")
+        self.assertEqual(indicator_by_id["macd"]["series"][2]["type"], "histogram")
+        for indicator in indicators:
+            self.assertTrue(indicator["label"])
+            self.assertTrue(indicator["series"])
+            for series in indicator["series"]:
+                self.assertEqual(len(series["points"]), 40)
+                self.assertEqual(series["points"][0]["time"], 0)
+                self.assertIsInstance(series["points"][0]["value"], float)
 
     def test_live_chart_payload_uses_selected_strategy_for_markers(self):
         client = FakeClient()
@@ -637,6 +751,36 @@ class UiTests(unittest.TestCase):
         self.assertTrue(
             any(marker["reason"].startswith("macd_") for marker in payload["signals"])
         )
+
+    def test_live_chart_payload_accepts_comma_separated_strategies_for_markers(self):
+        client = FakeClient()
+        client.candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])
+        ]
+
+        payload = live_chart_payload(
+            {
+                "symbol": "BTCUSDT",
+                "interval": "1h",
+                "limit": 7,
+                "strategy": "ema-rsi,macd",
+                "fast_ema": 2,
+                "slow_ema": 5,
+                "macd_signal": 2,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        strategy_names = {
+            str(marker["reason"]).split(": ", 1)[0] for marker in payload["signals"]
+        }
+        self.assertEqual(payload["strategy"], "ema-rsi,macd")
+        self.assertIn("ema-rsi", strategy_names)
+        self.assertIn("macd", strategy_names)
 
     def test_live_chart_payload_can_overlay_all_strategy_signals(self):
         client = FakeClient()

@@ -16,6 +16,7 @@ import type {
   AuthMePayload,
   AuthPayload,
   AuthUser,
+  IndicatorDefinition,
   LiveChartPayload,
   MarketBreadthBar,
   MarketBreadthPayload,
@@ -80,6 +81,8 @@ const liveCandleOptions = [
   { value: 500, label: "500" },
   { value: 1000, label: "1000" },
 ] satisfies SelectOption[];
+
+const defaultLiveIndicators = ["ema", "vwap", "volume", "rsi", "macd"];
 
 const settings = reactive<Record<string, string>>({
   interval: "1h",
@@ -174,6 +177,8 @@ const liveRefresh = ref("10");
 const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
 const liveConsensusMinConfirmations = ref(2);
 const liveMaxSignals = ref(80);
+const liveSelectedStrategies = ref<string[]>(["ema-rsi"]);
+const liveVisibleIndicators = ref<string[]>([...defaultLiveIndicators]);
 const showSignals = ref(true);
 let liveTimer = 0;
 
@@ -217,24 +222,66 @@ const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
   { value: "consensus", label: t("options.consensusSignals") },
   { value: "individual", label: t("options.individualSignals") },
 ]);
-const liveStrategyOptions = computed(() => [
-  { name: "all", description: t("options.allStrategies") },
-  ...strategies.value.map((strategy) => ({
+const popularIndicatorOptions = computed<SelectOption[]>(() => [
+  { value: "sma", label: t("indicators.sma") },
+  { value: "ema", label: t("indicators.ema") },
+  { value: "bollinger", label: t("indicators.bollinger") },
+  { value: "vwap", label: t("indicators.vwap") },
+  { value: "donchian", label: t("indicators.donchian") },
+  { value: "volume", label: t("indicators.volume") },
+  { value: "rsi", label: t("indicators.rsi") },
+  { value: "macd", label: t("indicators.macd") },
+  { value: "atr", label: t("indicators.atr") },
+  { value: "stoch-rsi", label: t("indicators.stochRsi") },
+]);
+const liveStrategyOptions = computed(() =>
+  strategies.value.map((strategy) => ({
     ...strategy,
     description: translateStrategyDescription(locale.value, strategy.name, strategy.description),
   })),
-]);
+);
 const activeLiveSymbolOptions = computed(
   () => liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions,
 );
+const selectedLiveStrategyNames = computed(() => {
+  const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
+  const selectedNames = liveSelectedStrategies.value.filter((name) => availableNames.has(name));
+  if (selectedNames.length) {
+    return selectedNames;
+  }
+  const fallback = strategies.value[0]?.name ?? "ema-rsi";
+  return [fallback];
+});
+const allLiveStrategiesSelected = computed(
+  () =>
+    strategies.value.length > 0 &&
+    selectedLiveStrategyNames.value.length === strategies.value.length,
+);
+const liveStrategyRequest = computed(() =>
+  allLiveStrategiesSelected.value ? "all" : selectedLiveStrategyNames.value.join(","),
+);
+const isMultiStrategyLive = computed(() => selectedLiveStrategyNames.value.length > 1);
 const liveChartResetKey = computed(() =>
   [liveMarket.value, liveSymbol.value, liveInterval.value, liveLimit.value].join(":"),
 );
-const activeLiveStrategyLabel = computed(() =>
-  settings.strategy === "all" ? t("options.allStrategies") : strategyLabel(settings.strategy),
-);
+const activeLiveStrategyLabel = computed(() => {
+  if (allLiveStrategiesSelected.value) {
+    return t("options.allStrategies");
+  }
+  const selectedNames = selectedLiveStrategyNames.value;
+  if (selectedNames.length === 1) {
+    return strategyLabel(selectedNames[0]);
+  }
+  return `${selectedNames.length} ${t("labels.strategiesSelected")}`;
+});
 const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
+const visibleLiveIndicators = computed<IndicatorDefinition[]>(() => {
+  const selectedIndicators = new Set(liveVisibleIndicators.value);
+  return (livePayload.value?.indicators ?? []).filter((indicator) =>
+    selectedIndicators.has(indicator.id),
+  );
+});
 const breadthGroups = computed(() => breadthPayload.value?.groups ?? []);
 const breadthSeriesCount = computed(() =>
   Object.keys(breadthPayload.value?.series ?? {}).length,
@@ -259,8 +306,8 @@ const consensusSignals = computed(() =>
 );
 const displayedSignals = computed(() => {
   const rawSignals = livePayload.value?.signals ?? [];
-  if (settings.strategy !== "all" || liveSignalDisplayMode.value === "individual") {
-    return settings.strategy === "all"
+  if (!isMultiStrategyLive.value || liveSignalDisplayMode.value === "individual") {
+    return isMultiStrategyLive.value
       ? limitRecentSignals(rawSignals, liveMaxSignals.value)
       : rawSignals;
   }
@@ -271,7 +318,15 @@ watch(liveMarket, () => {
   liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
 });
 
-watch([liveMarket, liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {
+watch(strategies, () => {
+  liveSelectedStrategies.value = selectedLiveStrategyNames.value;
+});
+
+watch(liveStrategyRequest, (strategyValue) => {
+  settings.strategy = strategyValue;
+});
+
+watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], () => {
   if (activeMode.value === "live") {
     refreshLiveChart();
   }
@@ -340,8 +395,8 @@ function setMode(mode: Mode, updateUrl = true) {
   stopLivePolling();
   const nextMode = permittedMode(mode);
   activeMode.value = nextMode;
-  if (nextMode !== "live" && settings.strategy === "all") {
-    settings.strategy = "ema-rsi";
+  if (nextMode !== "live") {
+    resetLiveStrategies();
   }
   if (updateUrl && window.location.pathname !== modeRoutes[nextMode]) {
     window.history.pushState({ mode: nextMode }, "", modeRoutes[nextMode]);
@@ -518,6 +573,7 @@ async function loadLiveChart() {
         symbol: liveSymbol.value,
         interval: liveInterval.value,
         limit: liveLimit.value,
+        strategy: liveStrategyRequest.value,
     });
     livePayload.value = await requestJson<LiveChartPayload>(`/api/live-chart?${query}`);
     setLiveStatus(`${t("status.updated")} ${new Date().toLocaleTimeString()}`);
@@ -525,6 +581,36 @@ async function loadLiveChart() {
     livePayload.value = null;
     setLiveStatus(errorMessage(error), "error");
   }
+}
+
+function toggleLiveStrategy(strategyName: string) {
+  if (liveSelectedStrategies.value.includes(strategyName)) {
+    if (liveSelectedStrategies.value.length > 1) {
+      liveSelectedStrategies.value = liveSelectedStrategies.value.filter((name) => name !== strategyName);
+    }
+    return;
+  }
+  liveSelectedStrategies.value = [...liveSelectedStrategies.value, strategyName];
+}
+
+function selectAllLiveStrategies() {
+  liveSelectedStrategies.value = strategies.value.map((strategy) => strategy.name);
+}
+
+function clearLiveStrategies() {
+  resetLiveStrategies();
+}
+
+function resetLiveStrategies() {
+  liveSelectedStrategies.value = [strategies.value[0]?.name ?? "ema-rsi"];
+}
+
+function toggleLiveIndicator(indicatorId: string) {
+  if (liveVisibleIndicators.value.includes(indicatorId)) {
+    liveVisibleIndicators.value = liveVisibleIndicators.value.filter((id) => id !== indicatorId);
+    return;
+  }
+  liveVisibleIndicators.value = [...liveVisibleIndicators.value, indicatorId];
 }
 
 function startLivePolling() {
@@ -864,15 +950,33 @@ function errorMessage(error: unknown): string {
             </option>
           </select>
         </label>
-        <label class="live-strategy-field">
+        <div class="strategy-multiselect live-strategy-field">
           <span>{{ t("labels.strategy") }}</span>
-          <select v-model="settings.strategy">
-            <option v-for="strategy in liveStrategyOptions" :key="strategy.name" :value="strategy.name">
-              {{ strategy.description }}
-            </option>
-          </select>
-        </label>
-        <label v-if="settings.strategy === 'all'">
+          <div class="strategy-actions">
+            <button class="secondary" type="button" @click="selectAllLiveStrategies">
+              {{ t("actions.selectAll") }}
+            </button>
+            <button class="secondary" type="button" @click="clearLiveStrategies">
+              {{ t("actions.clear") }}
+            </button>
+          </div>
+          <div class="strategy-options">
+            <label
+              v-for="strategy in liveStrategyOptions"
+              :key="strategy.name"
+              class="check-chip"
+              :class="{ 'is-active': liveSelectedStrategies.includes(strategy.name) }"
+            >
+              <input
+                type="checkbox"
+                :checked="liveSelectedStrategies.includes(strategy.name)"
+                @change="toggleLiveStrategy(strategy.name)"
+              >
+              <span>{{ strategy.description }}</span>
+            </label>
+          </div>
+        </div>
+        <label v-if="isMultiStrategyLive">
           <span>{{ t("labels.signalView") }}</span>
           <select v-model="liveSignalDisplayMode">
             <option
@@ -884,17 +988,33 @@ function errorMessage(error: unknown): string {
             </option>
           </select>
         </label>
-        <label v-if="settings.strategy === 'all' && liveSignalDisplayMode === 'consensus'">
+        <label v-if="isMultiStrategyLive && liveSignalDisplayMode === 'consensus'">
           <span>{{ t("labels.minConfirmations") }}</span>
           <input v-model.number="liveConsensusMinConfirmations" type="number" min="1" max="20">
         </label>
-        <label v-if="settings.strategy === 'all'">
+        <label v-if="isMultiStrategyLive">
           <span>{{ t("labels.maxMarkers") }}</span>
           <input v-model.number="liveMaxSignals" type="number" min="10" max="500">
         </label>
         <label><span>{{ t("labels.refreshSec") }}</span><input v-model="liveRefresh" type="number" min="2" max="300"></label>
         <label class="toggle-row"><input v-model="showSignals" type="checkbox"><span>{{ t("labels.strategyMarkers") }}</span></label>
         <button class="primary" type="button" @click="refreshLiveChart">{{ t("actions.refreshChart") }}</button>
+      </div>
+      <div class="indicator-picker">
+        <span>{{ t("labels.indicators") }}</span>
+        <label
+          v-for="option in popularIndicatorOptions"
+          :key="option.value"
+          class="check-chip"
+          :class="{ 'is-active': liveVisibleIndicators.includes(String(option.value)) }"
+        >
+          <input
+            type="checkbox"
+            :checked="liveVisibleIndicators.includes(String(option.value))"
+            @change="toggleLiveIndicator(String(option.value))"
+          >
+          <span>{{ option.label }}</span>
+        </label>
       </div>
       <div class="chart-shell">
         <div class="chart-legend">
@@ -906,6 +1026,7 @@ function errorMessage(error: unknown): string {
           v-if="livePayload"
           :candles="livePayload.candles"
           :signals="displayedSignals"
+          :indicators="visibleLiveIndicators"
           :show-signals="showSignals"
           :reset-key="liveChartResetKey"
           :aria-label="chartLabels.aria"

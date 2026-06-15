@@ -105,7 +105,7 @@ def live_chart_payload(
         raise ValueError("market-data client returned no candles")
     signals = (
         _all_strategy_signal_markers(candles, configs)
-        if strategy_value == ALL_STRATEGIES_VALUE
+        if len(configs) > 1
         else _strategy_signal_markers(candles, config)
     )
     return {
@@ -117,6 +117,7 @@ def live_chart_payload(
         "strategy": strategy_value,
         "candles": [_candle_payload(candle) for candle in candles],
         "signals": signals,
+        "indicators": _popular_indicator_payload(candles, config),
     }
 
 
@@ -286,11 +287,7 @@ def _live_strategy_configs_from_payload(
     strategy_value = str(
         payload.get("strategy") or StrategyName.EMA_RSI.value
     ).strip().lower()
-    strategies = (
-        [StrategyName(name) for name in list_strategy_names()]
-        if strategy_value == ALL_STRATEGIES_VALUE
-        else [StrategyName(strategy_value)]
-    )
+    strategies = _strategy_names_from_value(strategy_value)
     return [
         apply_strategy_preset(
             _strategy_config_from_payload(
@@ -301,6 +298,31 @@ def _live_strategy_configs_from_payload(
         )
         for strategy in strategies
     ]
+
+
+def _strategy_names_from_value(strategy_value: str) -> list[StrategyName]:
+    raw_value = strategy_value.strip().lower()
+    if raw_value == ALL_STRATEGIES_VALUE:
+        return [StrategyName(name) for name in list_strategy_names()]
+
+    raw_names = [item.strip() for item in raw_value.split(",") if item.strip()]
+    if not raw_names:
+        return [StrategyName.EMA_RSI]
+    if ALL_STRATEGIES_VALUE in raw_names:
+        return [StrategyName(name) for name in list_strategy_names()]
+
+    strategies: list[StrategyName] = []
+    seen: set[StrategyName] = set()
+    for raw_name in raw_names:
+        try:
+            strategy_name = StrategyName(raw_name)
+        except ValueError as exc:
+            raise ValueError(f"unsupported strategy: {raw_name}") from exc
+        if strategy_name in seen:
+            continue
+        strategies.append(strategy_name)
+        seen.add(strategy_name)
+    return strategies
 
 
 def _get_klines_with_retries(
@@ -376,6 +398,160 @@ def _all_strategy_signal_markers(
         markers,
         key=lambda item: (int(item["time"]), str(item["reason"]), str(item["type"])),
     )
+
+
+def _popular_indicator_payload(
+    candles: list[Candle],
+    config: StrategyConfig,
+) -> list[dict[str, Any]]:
+    context = build_strategy_context(candles, config)
+    return [
+        _indicator_payload(
+            indicator_id="sma",
+            label="SMA",
+            pane="price",
+            default_visible=False,
+            series=[
+                _indicator_series_payload("sma_fast", f"SMA {config.fast_ema}", "line", "#f59e0b", candles, context.fast_sma),
+                _indicator_series_payload("sma_slow", f"SMA {config.slow_ema}", "line", "#60a5fa", candles, context.slow_sma),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="ema",
+            label="EMA",
+            pane="price",
+            default_visible=True,
+            series=[
+                _indicator_series_payload("ema_fast", f"EMA {config.fast_ema}", "line", "#ffb020", candles, context.fast),
+                _indicator_series_payload("ema_slow", f"EMA {config.slow_ema}", "line", "#6ea8fe", candles, context.slow),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="bollinger",
+            label="Bollinger Bands",
+            pane="price",
+            default_visible=False,
+            series=[
+                _indicator_series_payload("bollinger_upper", "BB Upper", "line", "#9b8cff", candles, context.bollinger_upper),
+                _indicator_series_payload("bollinger_mid", "BB Mid", "line", "#c4b5fd", candles, context.bollinger_mid),
+                _indicator_series_payload("bollinger_lower", "BB Lower", "line", "#9b8cff", candles, context.bollinger_lower),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="vwap",
+            label="VWAP",
+            pane="price",
+            default_visible=True,
+            series=[
+                _indicator_series_payload("vwap", f"VWAP {config.vwap_period}", "line", "#2dd4bf", candles, context.vwap),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="donchian",
+            label="Donchian Channel",
+            pane="price",
+            default_visible=False,
+            series=[
+                _indicator_series_payload("donchian_high", "Donchian High", "line", "#38bdf8", candles, context.donchian_high),
+                _indicator_series_payload("donchian_low", "Donchian Low", "line", "#38bdf8", candles, context.donchian_low),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="volume",
+            label="Volume",
+            pane="volume",
+            default_visible=True,
+            series=[
+                _indicator_series_payload("volume", "Volume", "histogram", "#64748b", candles, [candle.volume for candle in candles]),
+                _indicator_series_payload("volume_mean", f"Volume MA {config.volume_period}", "line", "#f97316", candles, context.volume_mean),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="rsi",
+            label="RSI",
+            pane="oscillator",
+            default_visible=True,
+            series=[
+                _indicator_series_payload("rsi", f"RSI {config.rsi_period}", "line", "#a78bfa", candles, context.rsi_values),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="macd",
+            label="MACD",
+            pane="oscillator",
+            default_visible=True,
+            series=[
+                _indicator_series_payload("macd", "MACD", "line", "#60a5fa", candles, context.macd),
+                _indicator_series_payload("macd_signal", "MACD Signal", "line", "#f59e0b", candles, context.macd_signal),
+                _indicator_series_payload("macd_histogram", "MACD Histogram", "histogram", "#22ab94", candles, [macd_value - signal_value for macd_value, signal_value in zip(context.macd, context.macd_signal)]),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="atr",
+            label="ATR",
+            pane="oscillator",
+            default_visible=False,
+            series=[
+                _indicator_series_payload("atr", f"ATR {config.atr_period}", "line", "#f43f5e", candles, context.atr_values),
+            ],
+        ),
+        _indicator_payload(
+            indicator_id="stoch-rsi",
+            label="Stoch RSI",
+            pane="oscillator",
+            default_visible=False,
+            series=[
+                _indicator_series_payload("stoch_rsi", f"Stoch RSI {config.stoch_rsi_period}", "line", "#34d399", candles, context.stoch_rsi_values),
+            ],
+        ),
+    ]
+
+
+def _indicator_payload(
+    *,
+    indicator_id: str,
+    label: str,
+    pane: str,
+    default_visible: bool,
+    series: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "id": indicator_id,
+        "label": label,
+        "pane": pane,
+        "default_visible": default_visible,
+        "series": series,
+    }
+
+
+def _indicator_series_payload(
+    series_id: str,
+    label: str,
+    series_type: str,
+    color: str,
+    candles: list[Candle],
+    values: list[float],
+) -> dict[str, Any]:
+    return {
+        "id": series_id,
+        "label": label,
+        "type": series_type,
+        "color": color,
+        "points": _indicator_points(candles, values),
+    }
+
+
+def _indicator_points(
+    candles: list[Candle],
+    values: list[float],
+) -> list[dict[str, float | int]]:
+    return [
+        {
+            "time": candle.open_time,
+            "value": float(value),
+        }
+        for candle, value in zip(candles, values)
+    ]
 
 
 def _candle_payload(candle: Candle) -> dict[str, float | int]:

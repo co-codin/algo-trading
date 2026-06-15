@@ -61,6 +61,27 @@ export type Marker = {
   reason: string;
 };
 
+export type IndicatorPoint = {
+  time: number;
+  value: number;
+};
+
+export type IndicatorSeries = {
+  id: string;
+  label: string;
+  type: "line" | "histogram";
+  color: string;
+  points: IndicatorPoint[];
+};
+
+export type IndicatorDefinition = {
+  id: string;
+  label: string;
+  pane: "price" | "volume" | "oscillator";
+  default_visible: boolean;
+  series: IndicatorSeries[];
+};
+
 export type LiveChartPayload = {
   ok: true;
   market: string;
@@ -70,6 +91,7 @@ export type LiveChartPayload = {
   strategy: string;
   candles: Candle[];
   signals: Marker[];
+  indicators: IndicatorDefinition[];
 };
 
 export type MarketBreadthItem = {
