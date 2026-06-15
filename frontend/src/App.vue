@@ -132,9 +132,17 @@ const authForm = reactive({
   username: "",
   password: "",
 });
+const profileForm = reactive({
+  first_name: "",
+  last_name: "",
+  middle_name: "",
+});
 const authStatus = ref("");
 const authStatusType = ref<StatusType>("");
+const profileStatus = ref(t("status.ready"));
+const profileStatusType = ref<StatusType>("");
 const adminUsers = ref<AuthUser[]>([]);
+const adminSearch = ref("");
 const adminStatus = ref(t("status.ready"));
 const adminStatusType = ref<StatusType>("");
 
@@ -213,6 +221,13 @@ const tabs = computed(() => [
   ...(canUseFeatures.value ? featureTabs.value : []),
   ...accountTabs.value,
 ]);
+const filteredAdminUsers = computed(() => {
+  const query = adminSearch.value.trim().toLowerCase();
+  if (!query) {
+    return adminUsers.value;
+  }
+  return adminUsers.value.filter((user) => user.username.toLowerCase().includes(query));
+});
 const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "crypto_spot", label: t("options.cryptoSpot") },
   { value: "cme_futures", label: t("options.usIndexFutures") },
@@ -306,6 +321,9 @@ watch(locale, () => {
   if (!adminStatusType.value) {
     adminStatus.value = t("status.ready");
   }
+  if (!profileStatusType.value) {
+    profileStatus.value = t("status.ready");
+  }
   if (!authStatusType.value && authStatus.value) {
     authStatus.value = t("auth.ready");
   }
@@ -396,6 +414,11 @@ function setAdminStatus(message: string, type: StatusType = "") {
   adminStatusType.value = type;
 }
 
+function setProfileStatus(message: string, type: StatusType = "") {
+  profileStatus.value = message;
+  profileStatusType.value = type;
+}
+
 async function loadCurrentUser() {
   authChecked.value = false;
   try {
@@ -421,6 +444,7 @@ async function bootstrapAuthenticatedApp() {
 async function loadProfile() {
   const payload = await requestJson<AuthMePayload>("/api/profile");
   authUser.value = payload.user;
+  setProfileForm(payload.user);
 }
 
 async function loadAdminUsers() {
@@ -431,6 +455,44 @@ async function loadAdminUsers() {
     setAdminStatus(`${t("status.loadedUsers")} ${payload.users.length}`);
   } catch (error) {
     adminUsers.value = [];
+    setAdminStatus(errorMessage(error), "error");
+  }
+}
+
+async function saveProfile() {
+  setProfileStatus(t("status.savingProfile"), "busy");
+  try {
+    const payload = await requestJson<AuthPayload>("/api/profile", {
+      method: "PATCH",
+      body: JSON.stringify(profileForm),
+    });
+    authUser.value = payload.user;
+    setProfileForm(payload.user);
+    setProfileStatus(t("status.profileSaved"));
+  } catch (error) {
+    setProfileStatus(errorMessage(error), "error");
+  }
+}
+
+async function updateUserAccess(user: AuthUser, isActive: boolean) {
+  setAdminStatus(t("status.updatingAccess"), "busy");
+  try {
+    const payload = await requestJson<AuthPayload>(`/api/admin/users/${user.id}/access`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active: isActive }),
+    });
+    adminUsers.value = adminUsers.value.map((existingUser) =>
+      existingUser.id === payload.user.id ? payload.user : existingUser,
+    );
+    if (authUser.value?.id === payload.user.id) {
+      authUser.value = payload.user;
+      setProfileForm(payload.user);
+      if (payload.user.is_active && !strategies.value.length) {
+        await loadStrategies();
+      }
+    }
+    setAdminStatus(t("status.accessUpdated"));
+  } catch (error) {
     setAdminStatus(errorMessage(error), "error");
   }
 }
@@ -456,6 +518,12 @@ async function submitAuth() {
     authStatus.value = errorMessage(error);
     authStatusType.value = "error";
   }
+}
+
+function setProfileForm(user: AuthUser | null) {
+  profileForm.first_name = user?.first_name ?? "";
+  profileForm.last_name = user?.last_name ?? "";
+  profileForm.middle_name = user?.middle_name ?? "";
 }
 
 async function logout() {
@@ -1043,10 +1111,44 @@ function errorMessage(error: unknown): string {
         <h3>{{ t("auth.inactive") }}</h3>
         <p>{{ t("auth.inactiveHelp") }}</p>
       </div>
+      <form class="profile-form" @submit.prevent="saveProfile">
+        <div class="field-grid">
+          <label>
+            <span>{{ t("labels.firstName") }}</span>
+            <input v-model="profileForm.first_name" autocomplete="given-name">
+          </label>
+          <label>
+            <span>{{ t("labels.lastName") }}</span>
+            <input v-model="profileForm.last_name" autocomplete="family-name">
+          </label>
+          <label>
+            <span>{{ t("labels.middleName") }}</span>
+            <input v-model="profileForm.middle_name" autocomplete="additional-name">
+          </label>
+          <div class="profile-form-actions">
+            <button class="primary" type="submit">{{ t("actions.saveProfile") }}</button>
+            <div class="status" :class="profileStatusType ? `is-${profileStatusType}` : ''">
+              {{ profileStatus }}
+            </div>
+          </div>
+        </div>
+      </form>
       <div class="profile-grid">
         <div class="profile-field">
           <span>{{ t("labels.username") }}</span>
           <b>{{ authUser.username }}</b>
+        </div>
+        <div class="profile-field">
+          <span>{{ t("labels.firstName") }}</span>
+          <b>{{ authUser.first_name || "—" }}</b>
+        </div>
+        <div class="profile-field">
+          <span>{{ t("labels.lastName") }}</span>
+          <b>{{ authUser.last_name || "—" }}</b>
+        </div>
+        <div class="profile-field">
+          <span>{{ t("labels.middleName") }}</span>
+          <b>{{ authUser.middle_name || "—" }}</b>
         </div>
         <div class="profile-field">
           <span>{{ t("labels.status") }}</span>
@@ -1078,22 +1180,45 @@ function errorMessage(error: unknown): string {
           </div>
         </div>
       </div>
+      <div class="admin-toolbar">
+        <label>
+          <span>{{ t("labels.searchEmail") }}</span>
+          <input v-model.trim="adminSearch" autocomplete="off" type="search">
+        </label>
+      </div>
       <div v-if="!adminUsers.length" class="empty">{{ t("empty.noUsers") }}</div>
+      <div v-else-if="!filteredAdminUsers.length" class="empty">{{ t("empty.noMatchingUsers") }}</div>
       <table v-else>
         <thead>
           <tr>
             <th>{{ t("table.username") }}</th>
+            <th>{{ t("labels.firstName") }}</th>
+            <th>{{ t("labels.lastName") }}</th>
+            <th>{{ t("labels.middleName") }}</th>
             <th>{{ t("table.active") }}</th>
             <th>{{ t("table.activated") }}</th>
             <th>{{ t("table.expires") }}</th>
+            <th>{{ t("table.actions") }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="user in adminUsers" :key="user.id">
+          <tr v-for="user in filteredAdminUsers" :key="user.id">
             <td>{{ user.username }}</td>
+            <td>{{ user.first_name || "—" }}</td>
+            <td>{{ user.last_name || "—" }}</td>
+            <td>{{ user.middle_name || "—" }}</td>
             <td>{{ user.is_active ? t("auth.active") : t("auth.inactive") }}</td>
             <td>{{ formatDateTime(user.activated_at) }}</td>
             <td>{{ formatDateTime(user.expired_at) }}</td>
+            <td>
+              <button
+                class="secondary"
+                type="button"
+                @click="updateUserAccess(user, !user.is_active)"
+              >
+                {{ user.is_active ? t("actions.deactivateUser") : t("actions.activateUser") }}
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>

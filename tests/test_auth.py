@@ -21,6 +21,9 @@ class AuthTests(unittest.TestCase):
         self.assertFalse(user.is_active)
         self.assertIsNone(user.activated_at)
         self.assertIsNone(user.expired_at)
+        self.assertIsNone(user.first_name)
+        self.assertIsNone(user.last_name)
+        self.assertIsNone(user.middle_name)
         self.assertEqual(
             public_user(user),
             {
@@ -29,10 +32,29 @@ class AuthTests(unittest.TestCase):
                 "is_active": False,
                 "activated_at": None,
                 "expired_at": None,
+                "first_name": None,
+                "last_name": None,
+                "middle_name": None,
             },
         )
         with self.assertRaisesRegex(ValueError, "username already exists"):
             store.register_user("alice", "password123")
+
+    def test_memory_store_updates_profile_names(self):
+        store = InMemoryAuthStore()
+        user = store.register_user("alice", "password123")
+
+        updated = store.update_user_profile(
+            user.id,
+            first_name=" Alice ",
+            last_name=" Liddell ",
+            middle_name="  ",
+        )
+
+        self.assertEqual(updated.first_name, "Alice")
+        self.assertEqual(updated.last_name, "Liddell")
+        self.assertIsNone(updated.middle_name)
+        self.assertEqual(store.list_users()[0], updated)
 
     def test_memory_store_validates_usernames_and_passwords(self):
         store = InMemoryAuthStore()

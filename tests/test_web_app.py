@@ -54,6 +54,31 @@ class WebAppTests(unittest.TestCase):
         profile = client.get("/api/profile")
         self.assertEqual(profile.status_code, 200)
         self.assertEqual(profile.json()["user"]["username"], "alice")
+        self.assertIsNone(profile.json()["user"]["first_name"])
+
+    def test_profile_can_update_name_fields_for_inactive_user(self):
+        client = self.make_client()
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice", "password": "password123"},
+        )
+
+        response = client.patch(
+            "/api/profile",
+            json={
+                "first_name": " Alice ",
+                "last_name": " Liddell ",
+                "middle_name": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user = response.json()["user"]
+        self.assertEqual(user["first_name"], "Alice")
+        self.assertEqual(user["last_name"], "Liddell")
+        self.assertIsNone(user["middle_name"])
+        profile = client.get("/api/profile")
+        self.assertEqual(profile.json()["user"]["first_name"], "Alice")
 
     def test_active_user_can_access_trading_api(self):
         store = InMemoryAuthStore()
@@ -195,6 +220,42 @@ class WebAppTests(unittest.TestCase):
         )
         self.assertFalse(users[0]["is_active"])
         self.assertIsNone(users[0]["expired_at"])
+
+    def test_admin_can_update_user_active_flag(self):
+        store = InMemoryAuthStore()
+        client = self.make_client(auth_store=store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        alice = store.list_users()[0]
+        client.post("/api/auth/logout")
+        client.post(
+            "/api/auth/register",
+            json={"username": "cuiyeqing960904@gmail.com", "password": "password123"},
+        )
+
+        response = client.patch(
+            f"/api/admin/users/{alice.id}/access",
+            json={"is_active": True},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()["user"]
+        self.assertEqual(updated["username"], "alice@example.com")
+        self.assertTrue(updated["is_active"])
+        self.assertIsNotNone(updated["activated_at"])
+        users = client.get("/api/admin/users").json()["users"]
+        self.assertTrue(users[0]["is_active"])
+
+        deactivate = client.patch(
+            f"/api/admin/users/{alice.id}/access",
+            json={"is_active": False},
+        )
+
+        self.assertEqual(deactivate.status_code, 200)
+        self.assertFalse(deactivate.json()["user"]["is_active"])
+        self.assertIsNone(deactivate.json()["user"]["activated_at"])
 
     def test_expired_active_user_is_deactivated_before_feature_access(self):
         store = InMemoryAuthStore()

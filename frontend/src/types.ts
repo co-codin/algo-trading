@@ -6,6 +6,9 @@ export type AuthUser = {
   is_active: boolean;
   activated_at: string | null;
   expired_at: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  middle_name: string | null;
 };
 
 export type AuthMePayload = {

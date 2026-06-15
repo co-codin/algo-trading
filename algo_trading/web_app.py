@@ -196,10 +196,47 @@ def create_app(
     def get_profile(user: AuthUser = Depends(require_user)) -> dict[str, Any]:
         return {"ok": True, "user": public_user(user)}
 
+    @app.patch("/api/profile")
+    def update_profile(
+        payload: dict[str, Any] | None = Body(default=None),
+        user: AuthUser = Depends(require_user),
+    ) -> dict[str, Any]:
+        profile = payload or {}
+        updated = store.update_user_profile(
+            user.id,
+            first_name=optional_text(profile.get("first_name")),
+            last_name=optional_text(profile.get("last_name")),
+            middle_name=optional_text(profile.get("middle_name")),
+        )
+        return {"ok": True, "user": public_user(updated)}
+
     @app.get("/api/admin/users")
     def get_admin_users(_admin: AuthUser = Depends(require_admin_user)) -> dict[str, Any]:
         store.deactivate_expired_users()
         return {"ok": True, "users": [public_user(user) for user in store.list_users()]}
+
+    @app.patch("/api/admin/users/{user_id}/access")
+    def update_admin_user_access(
+        user_id: int,
+        payload: dict[str, Any] | None = Body(default=None),
+        _admin: AuthUser = Depends(require_admin_user),
+    ) -> dict[str, Any]:
+        access = payload or {}
+        is_active = access.get("is_active")
+        if not isinstance(is_active, bool):
+            raise ValueError("is_active must be a boolean")
+        existing_user = next(
+            (listed_user for listed_user in store.list_users() if listed_user.id == user_id),
+            None,
+        )
+        if existing_user is None:
+            raise ValueError("unknown user")
+        updated = store.set_user_access(
+            user_id,
+            is_active=is_active,
+            expired_at=existing_user.expired_at,
+        )
+        return {"ok": True, "user": public_user(updated)}
 
     @app.get("/api/symbols")
     def get_symbols(
@@ -321,3 +358,9 @@ def set_session_cookie(response: Response, token: str) -> None:
         path="/",
         samesite="lax",
     )
+
+
+def optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)

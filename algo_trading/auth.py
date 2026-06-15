@@ -25,6 +25,9 @@ class AuthUser:
     is_active: bool = False
     activated_at: datetime | None = None
     expired_at: datetime | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    middle_name: str | None = None
 
 
 class AuthStore(Protocol):
@@ -42,6 +45,14 @@ class AuthStore(Protocol):
         is_active: bool,
         activated_at: datetime | None = None,
         expired_at: datetime | None = None,
+    ) -> AuthUser: ...
+    def update_user_profile(
+        self,
+        user_id: int,
+        *,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        middle_name: str | None = None,
     ) -> AuthUser: ...
     def deactivate_expired_users(self, now: datetime | None = None) -> int: ...
 
@@ -146,6 +157,25 @@ class InMemoryAuthStore:
         )
         return record.user
 
+    def update_user_profile(
+        self,
+        user_id: int,
+        *,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        middle_name: str | None = None,
+    ) -> AuthUser:
+        record = self._users_by_id.get(user_id)
+        if record is None:
+            raise ValueError("unknown user")
+        record.user = replace(
+            record.user,
+            first_name=normalize_profile_name(first_name, "first name"),
+            last_name=normalize_profile_name(last_name, "last name"),
+            middle_name=normalize_profile_name(middle_name, "middle name"),
+        )
+        return record.user
+
     def deactivate_expired_users(self, now: datetime | None = None) -> int:
         current_time = now or utcnow()
         deactivated = 0
@@ -202,6 +232,24 @@ class PostgresAuthStore:
                 )
                 cursor.execute(
                     """
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS first_name TEXT
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS last_name TEXT
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS middle_name TEXT
+                    """
+                )
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS sessions (
                         token_hash TEXT PRIMARY KEY,
                         user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -240,7 +288,14 @@ class PostgresAuthStore:
                     INSERT INTO users (username, password_hash)
                     VALUES (%s, %s)
                     ON CONFLICT (username) DO NOTHING
-                    RETURNING id, username, is_active, activated_at, expired_at
+                    RETURNING id,
+                              username,
+                              is_active,
+                              activated_at,
+                              expired_at,
+                              first_name,
+                              last_name,
+                              middle_name
                     """,
                     (normalized, hash_password(password)),
                 )
@@ -255,14 +310,22 @@ class PostgresAuthStore:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT id, username, is_active, activated_at, expired_at, password_hash
+                    SELECT id,
+                           username,
+                           is_active,
+                           activated_at,
+                           expired_at,
+                           first_name,
+                           last_name,
+                           middle_name,
+                           password_hash
                     FROM users
                     WHERE username = %s
                     """,
                     (normalized,),
                 )
                 row = cursor.fetchone()
-        if row is None or not verify_password(password, str(row[5])):
+        if row is None or not verify_password(password, str(row[8])):
             raise ValueError("invalid username or password")
         return user_from_row(row)
 
@@ -294,7 +357,10 @@ class PostgresAuthStore:
                            users.username,
                            users.is_active,
                            users.activated_at,
-                           users.expired_at
+                           users.expired_at,
+                           users.first_name,
+                           users.last_name,
+                           users.middle_name
                     FROM sessions
                     JOIN users ON users.id = sessions.user_id
                     WHERE sessions.token_hash = %s
@@ -321,7 +387,14 @@ class PostgresAuthStore:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT id, username, is_active, activated_at, expired_at
+                    SELECT id,
+                           username,
+                           is_active,
+                           activated_at,
+                           expired_at,
+                           first_name,
+                           last_name,
+                           middle_name
                     FROM users
                     ORDER BY id
                     """
@@ -338,20 +411,66 @@ class PostgresAuthStore:
         expired_at: datetime | None = None,
     ) -> AuthUser:
         next_activated_at = activated_at if is_active else None
-        if is_active and next_activated_at is None:
-            next_activated_at = utcnow()
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
                     UPDATE users
                     SET is_active = %s,
-                        activated_at = %s,
+                        activated_at = CASE
+                            WHEN %s THEN COALESCE(%s, activated_at, now())
+                            ELSE NULL
+                        END,
                         expired_at = %s
                     WHERE id = %s
-                    RETURNING id, username, is_active, activated_at, expired_at
+                    RETURNING id,
+                              username,
+                              is_active,
+                              activated_at,
+                              expired_at,
+                              first_name,
+                              last_name,
+                              middle_name
                     """,
-                    (is_active, next_activated_at, expired_at, user_id),
+                    (is_active, is_active, next_activated_at, expired_at, user_id),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            raise ValueError("unknown user")
+        return user_from_row(row)
+
+    def update_user_profile(
+        self,
+        user_id: int,
+        *,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        middle_name: str | None = None,
+    ) -> AuthUser:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET first_name = %s,
+                        last_name = %s,
+                        middle_name = %s
+                    WHERE id = %s
+                    RETURNING id,
+                              username,
+                              is_active,
+                              activated_at,
+                              expired_at,
+                              first_name,
+                              last_name,
+                              middle_name
+                    """,
+                    (
+                        normalize_profile_name(first_name, "first name"),
+                        normalize_profile_name(last_name, "last name"),
+                        normalize_profile_name(middle_name, "middle name"),
+                        user_id,
+                    ),
                 )
                 row = cursor.fetchone()
         if row is None:
@@ -390,6 +509,9 @@ def user_from_row(row: Sequence[object]) -> AuthUser:
         is_active=bool(row[2]),
         activated_at=cast(datetime | None, row[3]),
         expired_at=cast(datetime | None, row[4]),
+        first_name=cast(str | None, row[5]),
+        last_name=cast(str | None, row[6]),
+        middle_name=cast(str | None, row[7]),
     )
 
 
@@ -405,6 +527,17 @@ def normalize_username(username: str) -> str:
 def validate_password(password: str) -> None:
     if len(password) < 8:
         raise ValueError("password must be at least 8 characters")
+
+
+def normalize_profile_name(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if len(normalized) > 80:
+        raise ValueError(f"{field_name} must be at most 80 characters")
+    return normalized
 
 
 def hash_password(password: str) -> str:
@@ -457,6 +590,9 @@ def public_user(user: AuthUser) -> dict[str, object]:
         "is_active": user.is_active,
         "activated_at": isoformat_or_none(user.activated_at),
         "expired_at": isoformat_or_none(user.expired_at),
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "middle_name": user.middle_name,
     }
 
 
