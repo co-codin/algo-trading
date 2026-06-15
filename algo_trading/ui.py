@@ -4,14 +4,10 @@ import argparse
 import csv
 import io
 import json
-import mimetypes
-import sys
 import time
 import urllib.parse
 from dataclasses import asdict
 from enum import Enum
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
@@ -685,152 +681,23 @@ def load_run_details(
     }
 
 
-def create_handler(
-    output_root: str | Path = "runs",
-    client_factory: Callable[[], MarketDataClient] = BinanceMarketDataClient,
-) -> type[BaseHTTPRequestHandler]:
-    output_path = Path(output_root)
-
-    class UiRequestHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self._handle_request("GET")
-
-        def do_POST(self) -> None:
-            self._handle_request("POST")
-
-        def log_message(self, format: str, *args: object) -> None:
-            print(f"{self.address_string()} - {format % args}", file=sys.stderr)
-
-        def _handle_request(self, method: str) -> None:
-            parsed = urllib.parse.urlparse(self.path)
-            try:
-                if method == "GET":
-                    self._handle_get(parsed)
-                    return
-                if method == "POST":
-                    self._handle_post(parsed)
-                    return
-                self._send_json(
-                    {"ok": False, "error": "method not allowed"},
-                    HTTPStatus.METHOD_NOT_ALLOWED,
-                )
-            except ValueError as exc:
-                self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
-            except Exception as exc:
-                self._send_json(
-                    {"ok": False, "error": str(exc)},
-                    HTTPStatus.INTERNAL_SERVER_ERROR,
-                )
-
-        def _handle_get(self, parsed: urllib.parse.ParseResult) -> None:
-            if is_frontend_route(parsed.path):
-                self._send_file(WEB_DIST_ROOT / "index.html", "text/html; charset=utf-8")
-                return
-            if is_vite_asset_route(parsed.path):
-                asset_path = WEB_DIST_ROOT / parsed.path.lstrip("/")
-                content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
-                self._send_file(asset_path, content_type)
-                return
-            if parsed.path == "/api/symbols":
-                query = urllib.parse.parse_qs(parsed.query)
-                top = int(query.get("top", ["10"])[0])
-                self._send_json(top_symbols_payload(client_factory(), top=top))
-                return
-            if parsed.path == "/api/strategies":
-                self._send_json(strategies_payload())
-                return
-            if parsed.path == "/api/runs":
-                self._send_json({"ok": True, "runs": list_runs(output_path)})
-                return
-            if parsed.path == "/api/live-chart":
-                query = urllib.parse.parse_qs(parsed.query)
-                payload = _query_payload(query)
-                self._send_json(
-                    live_chart_payload(
-                        payload,
-                        _live_client_for_handler(payload, client_factory),
-                        output_path,
-                    )
-                )
-                return
-            if parsed.path == "/api/run":
-                query = urllib.parse.parse_qs(parsed.query)
-                run_path = query.get("path", [""])[0]
-                self._send_json(load_run_details(run_path, output_path))
-                return
-            self._send_json({"ok": False, "error": "not found"}, HTTPStatus.NOT_FOUND)
-
-        def _handle_post(self, parsed: urllib.parse.ParseResult) -> None:
-            payload = self._read_json_body()
-            if parsed.path == "/api/backtest":
-                self._send_json(
-                    run_backtest_payload(payload, client_factory(), output_path)
-                )
-                return
-            if parsed.path == "/api/paper":
-                self._send_json(run_paper_payload(payload, client_factory(), output_path))
-                return
-            if parsed.path == "/api/strategy-lab":
-                self._send_json(strategy_lab_payload(payload, client_factory()))
-                return
-            if parsed.path == "/api/combination-signals":
-                self._send_json(
-                    combination_signals_payload(
-                        payload,
-                        _live_client_for_handler(payload, client_factory),
-                    )
-                )
-                return
-            self._send_json({"ok": False, "error": "not found"}, HTTPStatus.NOT_FOUND)
-
-        def _read_json_body(self) -> dict[str, Any]:
-            length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length).decode("utf-8") if length else "{}"
-            value = json.loads(body)
-            if not isinstance(value, dict):
-                raise ValueError("JSON payload must be an object")
-            return value
-
-        def _send_file(self, path: Path, content_type: str) -> None:
-            if not path.is_file():
-                self._send_json({"ok": False, "error": "not found"}, HTTPStatus.NOT_FOUND)
-                return
-            body = path.read_bytes()
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _send_json(
-            self,
-            value: dict[str, Any],
-            status: HTTPStatus = HTTPStatus.OK,
-        ) -> None:
-            body = (json.dumps(value, sort_keys=True) + "\n").encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    return UiRequestHandler
-
-
 def serve(
     host: str = "127.0.0.1",
     port: int = 8765,
     output_root: str | Path = "runs",
 ) -> None:
-    server = ThreadingHTTPServer((host, port), create_handler(output_root))
     display_host = "127.0.0.1" if host in ("", "0.0.0.0") else host
-    print(f"Serving algo-trading UI at http://{display_host}:{server.server_port}")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopping algo-trading UI")
-    finally:
-        server.server_close()
+    print(f"Serving algo-trading UI at http://{display_host}:{port}")
+    import uvicorn
+
+    from algo_trading.web_app import create_app
+
+    uvicorn.run(
+        create_app(output_root=output_root),
+        host=host,
+        port=port,
+        log_level="info",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

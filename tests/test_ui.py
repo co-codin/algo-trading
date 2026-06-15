@@ -1,12 +1,12 @@
 import json
 import tempfile
 import unittest
-from http.server import ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
 from unittest.mock import patch
-from urllib.request import urlopen
 
+from fastapi.testclient import TestClient
+
+from algo_trading.auth import InMemoryAuthStore
 import algo_trading.ui as ui
 from algo_trading.data import (
     BinanceMarketDataClient,
@@ -15,7 +15,6 @@ from algo_trading.data import (
 )
 from algo_trading.models import Candle
 from algo_trading.ui import (
-    create_handler,
     is_frontend_route,
     is_vite_asset_route,
     load_run_details,
@@ -29,6 +28,7 @@ from algo_trading.ui import (
     strategy_lab_payload,
     top_symbols_payload,
 )
+from algo_trading.web_app import create_app
 
 
 def candle(time: int, close: float) -> Candle:
@@ -774,29 +774,27 @@ class UiTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch("algo_trading.ui.YahooFuturesMarketDataClient", return_value=client):
-                server = ThreadingHTTPServer(
-                    ("127.0.0.1", 0),
-                    create_handler(output_root=Path(tmp)),
-                )
-                thread = Thread(target=server.serve_forever, daemon=True)
-                thread.start()
-                try:
-                    url = (
-                        f"http://127.0.0.1:{server.server_port}/api/live-chart"
-                        "?market=cme_futures&symbol=ES%3DF&interval=5m&limit=7"
-                        "&strategy=all&fast_ema=2&slow_ema=5&macd_signal=2"
-                        "&rsi_period=2&rsi_overbought=100&rsi_oversold=0"
-                        "&bollinger_period=3&donchian_period=3&atr_period=2"
-                        "&vwap_period=3&stoch_rsi_period=2"
-                        "&ema_ribbon_fast=2&ema_ribbon_mid=3&ema_ribbon_slow=5"
-                        "&momentum_period=2"
+                http = TestClient(
+                    create_app(
+                        output_root=Path(tmp),
+                        auth_store=InMemoryAuthStore(),
                     )
-                    with urlopen(url, timeout=5) as response:
-                        payload = json.loads(response.read().decode("utf-8"))
-                finally:
-                    server.shutdown()
-                    server.server_close()
-                    thread.join(timeout=1)
+                )
+                http.post(
+                    "/api/auth/register",
+                    json={"username": "alice", "password": "password123"},
+                )
+                response = http.get(
+                    "/api/live-chart"
+                    "?market=cme_futures&symbol=ES%3DF&interval=5m&limit=7"
+                    "&strategy=all&fast_ema=2&slow_ema=5&macd_signal=2"
+                    "&rsi_period=2&rsi_overbought=100&rsi_oversold=0"
+                    "&bollinger_period=3&donchian_period=3&atr_period=2"
+                    "&vwap_period=3&stoch_rsi_period=2"
+                    "&ema_ribbon_fast=2&ema_ribbon_mid=3&ema_ribbon_slow=5"
+                    "&momentum_period=2"
+                )
+                payload = response.json()
 
         self.assertEqual(payload["market"], "cme_futures")
         self.assertEqual(payload["symbol"], "ES=F")
