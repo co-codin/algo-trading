@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import mimetypes
 import sys
@@ -42,6 +43,48 @@ WEB_DIST_ROOT = WEB_ROOT / "dist"
 ALL_STRATEGIES_VALUE = "all"
 CRYPTO_SPOT_MARKET = "crypto_spot"
 CME_FUTURES_MARKET = "cme_futures"
+FUTURES_BENCHMARK_ALIASES = frozenset(
+    {
+        "ES",
+        "/ES",
+        "ES=F",
+        "SP500",
+        "SP500_FUTURE",
+        "SP500-FUTURE",
+        "NQ",
+        "/NQ",
+        "NQ=F",
+        "NASDAQ",
+        "NASDAQ100",
+        "NASDAQ_100",
+        "NASDAQ-100",
+        "NASDAQ_FUTURE",
+        "NASDAQ-FUTURE",
+    }
+)
+STRATEGY_LAB_CSV_FIELDS = [
+    "rank",
+    "symbol",
+    "strategy",
+    "preset",
+    "final_balance",
+    "total_return_pct",
+    "max_drawdown_pct",
+    "trades",
+    "win_rate",
+    "profit_factor",
+    "sharpe_ratio",
+    "sortino_ratio",
+    "max_drawdown_duration",
+    "average_trade_duration",
+    "exposure_pct",
+    "worst_trade",
+    "walk_forward_windows",
+    "walk_forward_avg_return_pct",
+    "walk_forward_worst_return_pct",
+    "walk_forward_best_return_pct",
+    "walk_forward_profitable_pct",
+]
 FRONTEND_ROUTES = frozenset(
     {
         "",
@@ -234,6 +277,7 @@ def strategies_payload() -> dict[str, Any]:
 def strategy_lab_payload(
     payload: dict[str, Any],
     client: MarketDataClient | None = None,
+    benchmark_client: MarketDataClient | None = None,
 ) -> dict[str, Any]:
     market_client = client or BinanceMarketDataClient()
     symbols = _resolve_symbols(
@@ -246,7 +290,10 @@ def strategy_lab_payload(
     limit = _int_value(payload, "limit", 300)
     retries = _int_value(payload, "market_data_retries", 2)
     retry_delay = _float_value(payload, "retry_delay", 0.5)
+    walk_forward_windows = _int_value(payload, "walk_forward_windows", 0)
+    walk_forward_min_candles = _int_value(payload, "walk_forward_min_candles", 30)
     rows: list[dict[str, Any]] = []
+    candles_by_symbol: dict[str, list[Candle]] = {}
 
     for symbol in symbols:
         interval = str(payload.get("interval") or "1h")
@@ -258,6 +305,7 @@ def strategy_lab_payload(
             retries,
             retry_delay,
         )
+        candles_by_symbol[symbol] = candles
         for strategy in strategies:
             for preset in presets:
                 config_payload = {
@@ -274,20 +322,53 @@ def strategy_lab_payload(
                 )
                 result = run_backtest(candles, config)
                 summary = result.summary
-                rows.append(
-                    {
-                        "rank": 0,
-                        "symbol": symbol,
-                        "strategy": strategy.value,
-                        "preset": preset.value,
-                        "final_balance": summary["final_balance"],
-                        "total_return_pct": summary["total_return_pct"],
-                        "max_drawdown_pct": summary["max_drawdown_pct"],
-                        "trades": summary["trades"],
-                        "win_rate": summary["win_rate"],
-                        "profit_factor": summary["profit_factor"],
-                    }
+                row = _strategy_lab_row(
+                    symbol=symbol,
+                    strategy=strategy.value,
+                    preset=preset.value,
+                    summary=summary,
                 )
+                if walk_forward_windows > 0:
+                    _enrich_row_with_walk_forward(
+                        row,
+                        candles,
+                        config,
+                        walk_forward_windows,
+                        walk_forward_min_candles,
+                    )
+                rows.append(row)
+
+        rows.append(
+            _benchmark_row(
+                symbol,
+                candles,
+                starting_balance=_float_value(payload, "starting_balance", 10000.0),
+            )
+        )
+
+    for symbol in _benchmark_symbols_from_payload(payload):
+        if symbol in candles_by_symbol:
+            continue
+        interval = str(payload.get("interval") or "1h")
+        if _is_futures_benchmark_symbol(symbol):
+            source_client = benchmark_client or YahooFuturesMarketDataClient()
+        else:
+            source_client = market_client
+        candles = _get_klines_with_retries(
+            source_client,
+            symbol,
+            interval,
+            limit,
+            retries,
+            retry_delay,
+        )
+        rows.append(
+            _benchmark_row(
+                symbol,
+                candles,
+                starting_balance=_float_value(payload, "starting_balance", 10000.0),
+            )
+        )
 
     rows.sort(
         key=lambda row: (
@@ -300,6 +381,160 @@ def strategy_lab_payload(
     for index, row in enumerate(rows, start=1):
         row["rank"] = index
     return {"ok": True, "mode": "strategy-lab", "rows": rows}
+
+
+def strategy_lab_csv(rows: list[dict[str, Any]]) -> str:
+    handle = io.StringIO()
+    writer = csv.DictWriter(handle, fieldnames=STRATEGY_LAB_CSV_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({field: row.get(field, "") for field in STRATEGY_LAB_CSV_FIELDS})
+    return handle.getvalue()
+
+
+def _strategy_lab_row(
+    symbol: str,
+    strategy: str,
+    preset: str,
+    summary: dict[str, float | int | str],
+) -> dict[str, Any]:
+    return {
+        "rank": 0,
+        "symbol": symbol,
+        "strategy": strategy,
+        "preset": preset,
+        "final_balance": summary["final_balance"],
+        "total_return_pct": summary["total_return_pct"],
+        "max_drawdown_pct": summary["max_drawdown_pct"],
+        "trades": summary["trades"],
+        "win_rate": summary["win_rate"],
+        "profit_factor": summary["profit_factor"],
+        "sharpe_ratio": summary.get("sharpe_ratio", 0.0),
+        "sortino_ratio": summary.get("sortino_ratio", 0.0),
+        "max_drawdown_duration": summary.get("max_drawdown_duration", 0),
+        "average_trade_duration": summary.get("average_trade_duration", 0.0),
+        "exposure_pct": summary.get("exposure_pct", 0.0),
+        "worst_trade": summary.get("worst_trade", 0.0),
+        "walk_forward_windows": 0,
+        "walk_forward_avg_return_pct": 0.0,
+        "walk_forward_worst_return_pct": 0.0,
+        "walk_forward_best_return_pct": 0.0,
+        "walk_forward_profitable_pct": 0.0,
+    }
+
+
+def _benchmark_row(
+    symbol: str,
+    candles: list[Candle],
+    starting_balance: float,
+) -> dict[str, Any]:
+    if not candles:
+        raise ValueError("benchmark requires at least one candle")
+    first_close = candles[0].close
+    last_close = candles[-1].close
+    final_balance = starting_balance * (last_close / first_close)
+    summary: dict[str, float | int | str] = {
+        "final_balance": round(final_balance, 8),
+        "total_return_pct": round(((final_balance / starting_balance) - 1.0) * 100.0, 8),
+        "max_drawdown_pct": round(_benchmark_max_drawdown(candles), 8),
+        "trades": 0,
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "sharpe_ratio": 0.0,
+        "sortino_ratio": 0.0,
+        "max_drawdown_duration": _benchmark_drawdown_duration(candles),
+        "average_trade_duration": 0.0,
+        "exposure_pct": 100.0,
+        "worst_trade": 0.0,
+    }
+    return _strategy_lab_row(symbol, "buy-and-hold", "benchmark", summary)
+
+
+def _benchmark_max_drawdown(candles: list[Candle]) -> float:
+    peak = 0.0
+    max_drawdown = 0.0
+    for candle in candles:
+        peak = max(peak, candle.close)
+        if peak > 0.0:
+            max_drawdown = max(max_drawdown, ((peak - candle.close) / peak) * 100.0)
+    return max_drawdown
+
+
+def _benchmark_drawdown_duration(candles: list[Candle]) -> int:
+    peak = 0.0
+    current_duration = 0
+    longest_duration = 0
+    for candle in candles:
+        if candle.close >= peak:
+            peak = candle.close
+            current_duration = 0
+        else:
+            current_duration += 1
+            longest_duration = max(longest_duration, current_duration)
+    return longest_duration
+
+
+def _benchmark_symbols_from_payload(payload: dict[str, Any]) -> list[str]:
+    value = str(payload.get("benchmark_symbols") or "").strip()
+    if not value:
+        return []
+    return [symbol.upper() for symbol in parse_symbol_list(value)]
+
+
+def _is_futures_benchmark_symbol(symbol: str) -> bool:
+    return symbol.upper() in FUTURES_BENCHMARK_ALIASES or symbol.upper().endswith("=F")
+
+
+def _enrich_row_with_walk_forward(
+    row: dict[str, Any],
+    candles: list[Candle],
+    config: StrategyConfig,
+    window_count: int,
+    min_candles: int,
+) -> None:
+    summaries = _walk_forward_summaries(candles, config, window_count, min_candles)
+    returns = [float(summary["total_return_pct"]) for summary in summaries]
+    if not returns:
+        return
+    row["walk_forward_windows"] = len(returns)
+    row["walk_forward_avg_return_pct"] = round(sum(returns) / len(returns), 8)
+    row["walk_forward_worst_return_pct"] = round(min(returns), 8)
+    row["walk_forward_best_return_pct"] = round(max(returns), 8)
+    profitable = sum(1 for value in returns if value > 0.0)
+    row["walk_forward_profitable_pct"] = round((profitable / len(returns)) * 100.0, 8)
+
+
+def _walk_forward_summaries(
+    candles: list[Candle],
+    config: StrategyConfig,
+    window_count: int,
+    min_candles: int,
+) -> list[dict[str, float | int | str]]:
+    summaries: list[dict[str, float | int | str]] = []
+    for window in _windowed_candles(candles, window_count, min_candles):
+        try:
+            summaries.append(run_backtest(window, config).summary)
+        except ValueError:
+            continue
+    return summaries
+
+
+def _windowed_candles(
+    candles: list[Candle],
+    window_count: int,
+    min_candles: int,
+) -> list[list[Candle]]:
+    if window_count <= 0 or min_candles <= 0:
+        return []
+    window_size = max(min_candles, len(candles) // window_count)
+    windows: list[list[Candle]] = []
+    for index in range(window_count):
+        start = index * window_size
+        end = len(candles) if index == window_count - 1 else start + window_size
+        window = candles[start:end]
+        if len(window) >= min_candles:
+            windows.append(window)
+    return windows
 
 
 def paper_trade_markers(

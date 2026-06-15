@@ -221,6 +221,12 @@ class _Account:
             "profit_factor": profit_factor,
             "fee_total": round(sum(trade.fees for trade in self.trades), 8),
             "slippage_estimate": round(sum(trade.slippage for trade in self.trades), 8),
+            "sharpe_ratio": round(_sharpe_ratio(self.equity), 8),
+            "sortino_ratio": round(_sortino_ratio(self.equity), 8),
+            "max_drawdown_duration": _max_drawdown_duration(self.equity),
+            "average_trade_duration": round(_average_trade_duration(self.trades), 8),
+            "exposure_pct": round(_exposure_pct(self.equity), 8),
+            "worst_trade": round(min((trade.realized_pnl for trade in self.trades), default=0.0), 8),
         }
 
 
@@ -250,6 +256,67 @@ def _max_drawdown(equity: list[EquityPoint]) -> float:
         if peak > 0.0:
             max_drawdown = max(max_drawdown, ((peak - point.equity) / peak) * 100.0)
     return max_drawdown
+
+
+def _period_returns(equity: list[EquityPoint]) -> list[float]:
+    returns: list[float] = []
+    for previous, current in zip(equity, equity[1:]):
+        if previous.equity > 0.0:
+            returns.append((current.equity / previous.equity) - 1.0)
+    return returns
+
+
+def _sharpe_ratio(equity: list[EquityPoint]) -> float:
+    returns = _period_returns(equity)
+    if not returns:
+        return 0.0
+    average = sum(returns) / len(returns)
+    stddev = _population_stddev(returns, average)
+    return (average / stddev) if stddev else 0.0
+
+
+def _sortino_ratio(equity: list[EquityPoint]) -> float:
+    returns = _period_returns(equity)
+    if not returns:
+        return 0.0
+    average = sum(returns) / len(returns)
+    downside = [min(value, 0.0) for value in returns]
+    downside_stddev = _population_stddev(downside, 0.0)
+    return (average / downside_stddev) if downside_stddev else 0.0
+
+
+def _population_stddev(values: list[float], mean: float) -> float:
+    if not values:
+        return 0.0
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return variance**0.5
+
+
+def _max_drawdown_duration(equity: list[EquityPoint]) -> int:
+    peak = 0.0
+    current_duration = 0
+    longest_duration = 0
+    for point in equity:
+        if point.equity >= peak:
+            peak = point.equity
+            current_duration = 0
+        else:
+            current_duration += 1
+            longest_duration = max(longest_duration, current_duration)
+    return longest_duration
+
+
+def _average_trade_duration(trades: list[Trade]) -> float:
+    if not trades:
+        return 0.0
+    return sum(trade.exit_time - trade.entry_time for trade in trades) / len(trades)
+
+
+def _exposure_pct(equity: list[EquityPoint]) -> float:
+    if not equity:
+        return 0.0
+    exposed = sum(1 for point in equity if point.position_side)
+    return (exposed / len(equity)) * 100.0
 
 
 def _validate_config(config: StrategyConfig) -> None:

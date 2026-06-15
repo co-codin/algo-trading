@@ -24,6 +24,7 @@ from algo_trading.ui import (
     paper_trade_markers,
     run_backtest_payload,
     strategies_payload,
+    strategy_lab_csv,
     strategy_lab_payload,
     top_symbols_payload,
 )
@@ -207,12 +208,151 @@ class UiTests(unittest.TestCase):
 
         self.assertEqual(payload["ok"], True)
         self.assertEqual(payload["mode"], "strategy-lab")
-        self.assertEqual(len(payload["rows"]), 2)
+        strategy_rows = [
+            row for row in payload["rows"] if row["strategy"] in {"ema-rsi", "macd"}
+        ]
+        self.assertEqual(len(strategy_rows), 2)
         self.assertEqual(payload["rows"][0]["rank"], 1)
-        self.assertGreaterEqual(
-            payload["rows"][0]["total_return_pct"],
-            payload["rows"][1]["total_return_pct"],
+        returns = [row["total_return_pct"] for row in payload["rows"]]
+        self.assertEqual(returns, sorted(returns, reverse=True))
+
+    def test_strategy_lab_payload_adds_buy_and_hold_benchmark_row(self):
+        client = FakeClient()
+        client.candles = trending_candles()
+
+        payload = strategy_lab_payload(
+            {
+                "symbols": "BTCUSDT",
+                "strategies": "ema-rsi",
+                "presets": "custom",
+                "interval": "1h",
+                "limit": 12,
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
         )
+
+        benchmark = next(
+            row for row in payload["rows"] if row["strategy"] == "buy-and-hold"
+        )
+        expected_return = ((client.candles[-1].close / client.candles[0].close) - 1.0) * 100.0
+        self.assertEqual(benchmark["symbol"], "BTCUSDT")
+        self.assertEqual(benchmark["preset"], "benchmark")
+        self.assertEqual(benchmark["trades"], 0)
+        self.assertEqual(benchmark["total_return_pct"], round(expected_return, 8))
+
+    def test_strategy_lab_payload_adds_market_benchmark_symbols(self):
+        client = FakeClient()
+        futures_client = FakeClient()
+        client.candles = trending_candles()
+        futures_client.candles = [
+            candle(index, price) for index, price in enumerate([100, 101, 102, 103])
+        ]
+
+        payload = strategy_lab_payload(
+            {
+                "symbols": "BTCUSDT",
+                "benchmark_symbols": "SP500,NASDAQ",
+                "strategies": "ema-rsi",
+                "presets": "custom",
+                "interval": "1h",
+                "limit": 12,
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+            benchmark_client=futures_client,
+        )
+
+        benchmark_symbols = {
+            row["symbol"]
+            for row in payload["rows"]
+            if row["strategy"] == "buy-and-hold"
+        }
+        self.assertIn("SP500", benchmark_symbols)
+        self.assertIn("NASDAQ", benchmark_symbols)
+        self.assertEqual(futures_client.kline_symbols, ["SP500", "NASDAQ"])
+
+    def test_strategy_lab_payload_adds_walk_forward_metrics(self):
+        client = FakeClient()
+        client.candles = trending_candles()
+
+        payload = strategy_lab_payload(
+            {
+                "symbols": "BTCUSDT",
+                "strategies": "ema-rsi",
+                "presets": "custom",
+                "interval": "1h",
+                "limit": 12,
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+                "walk_forward_windows": 2,
+                "walk_forward_min_candles": 4,
+            },
+            client=client,
+        )
+
+        strategy_row = next(row for row in payload["rows"] if row["strategy"] == "ema-rsi")
+        self.assertEqual(strategy_row["walk_forward_windows"], 2)
+        self.assertIn("walk_forward_avg_return_pct", strategy_row)
+        self.assertIn("walk_forward_worst_return_pct", strategy_row)
+        self.assertIn("walk_forward_best_return_pct", strategy_row)
+        self.assertIn("walk_forward_profitable_pct", strategy_row)
+
+    def test_strategy_lab_csv_exports_ranked_rows(self):
+        csv_text = strategy_lab_csv(
+            [
+                {
+                    "rank": 1,
+                    "symbol": "BTC,USDT",
+                    "strategy": "buy-and-hold",
+                    "preset": "benchmark",
+                    "final_balance": 11000.0,
+                    "total_return_pct": 10.0,
+                    "max_drawdown_pct": 2.0,
+                    "trades": 0,
+                    "win_rate": 0.0,
+                    "profit_factor": 0.0,
+                    "sharpe_ratio": 1.2,
+                    "sortino_ratio": 1.4,
+                    "max_drawdown_duration": 2,
+                    "average_trade_duration": 0.0,
+                    "exposure_pct": 100.0,
+                    "worst_trade": 0.0,
+                    "walk_forward_windows": 2,
+                    "walk_forward_avg_return_pct": 5.0,
+                    "walk_forward_worst_return_pct": -1.0,
+                    "walk_forward_best_return_pct": 11.0,
+                    "walk_forward_profitable_pct": 50.0,
+                }
+            ]
+        )
+
+        lines = csv_text.splitlines()
+        self.assertTrue(lines[0].startswith("rank,symbol,strategy,preset"))
+        self.assertIn('"BTC,USDT"', lines[1])
+        self.assertIn("walk_forward_profitable_pct", lines[0])
+
+    def test_strategy_lab_frontend_exposes_validation_and_csv_controls(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("labBenchmarkSymbols", source)
+        self.assertIn("walk_forward_windows", source)
+        self.assertIn("exportLabCsv", source)
+        self.assertIn("strategy-lab.csv", source)
+        self.assertIn("Export CSV", source)
 
     def test_run_backtest_payload_writes_one_run_per_symbol(self):
         client = FakeClient()

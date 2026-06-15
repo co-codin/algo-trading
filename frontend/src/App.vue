@@ -139,6 +139,8 @@ const settings = reactive<Record<string, string>>({
   trailing_stop_pct: "0",
   market_data_retries: "2",
   retry_delay: "0.5",
+  walk_forward_windows: "3",
+  walk_forward_min_candles: "30",
   iterations: "3",
   poll_seconds: "30",
 });
@@ -168,7 +170,32 @@ const showPaper = ref(true);
 const labSymbols = ref("BTCUSDT,ETHUSDT,SOLUSDT");
 const labStrategies = ref("all");
 const labPresets = ref("custom,balanced,aggressive");
+const labBenchmarkSymbols = ref("BTCUSDT,ES=F,NQ=F");
 let liveTimer = 0;
+
+const labCsvHeaders: (keyof StrategyLabRow)[] = [
+  "rank",
+  "symbol",
+  "strategy",
+  "preset",
+  "final_balance",
+  "total_return_pct",
+  "max_drawdown_pct",
+  "trades",
+  "win_rate",
+  "profit_factor",
+  "sharpe_ratio",
+  "sortino_ratio",
+  "max_drawdown_duration",
+  "average_trade_duration",
+  "exposure_pct",
+  "worst_trade",
+  "walk_forward_windows",
+  "walk_forward_avg_return_pct",
+  "walk_forward_worst_return_pct",
+  "walk_forward_best_return_pct",
+  "walk_forward_profitable_pct",
+];
 
 const strategyName = computed(() => strategyLabel(settings.strategy));
 const liveStrategyOptions = computed(() => [
@@ -360,6 +387,7 @@ async function runStrategyLab() {
         symbols: labSymbols.value,
         strategies: labStrategies.value,
         presets: labPresets.value,
+        benchmark_symbols: labBenchmarkSymbols.value,
       }),
     });
     labRows.value = payload.rows;
@@ -367,6 +395,33 @@ async function runStrategyLab() {
   } catch (error) {
     setLabStatus(errorMessage(error), "error");
   }
+}
+
+function exportLabCsv() {
+  if (!labRows.value.length) {
+    return;
+  }
+  const lines = [
+    labCsvHeaders.join(","),
+    ...labRows.value.map((row) =>
+      labCsvHeaders.map((field) => csvCell(row[field])).join(","),
+    ),
+  ];
+  const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "strategy-lab.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+  return text;
 }
 
 function appendSymbol(symbol: string) {
@@ -732,6 +787,9 @@ function errorMessage(error: unknown): string {
           <label><span>Symbols</span><input v-model="labSymbols" autocomplete="off"></label>
           <label><span>Strategies</span><input v-model="labStrategies" autocomplete="off"></label>
           <label><span>Presets</span><input v-model="labPresets" autocomplete="off"></label>
+          <label><span>Benchmarks</span><input v-model="labBenchmarkSymbols" autocomplete="off"></label>
+          <label><span>Walk Windows</span><input v-model="settings.walk_forward_windows" type="number" min="0"></label>
+          <label><span>Walk Min Candles</span><input v-model="settings.walk_forward_min_candles" type="number" min="1"></label>
           <label><span>Interval</span><input v-model="settings.interval" autocomplete="off"></label>
           <label><span>Candles</span><input v-model="settings.limit" type="number" min="30"></label>
           <label><span>Side</span>
@@ -746,7 +804,10 @@ function errorMessage(error: unknown): string {
       <section class="panel output">
         <div class="panel-heading">
           <h2>Ranking</h2>
-          <div class="status" :class="labStatusType ? `is-${labStatusType}` : ''">{{ labStatus }}</div>
+          <div class="actions">
+            <button type="button" :disabled="!labRows.length" @click="exportLabCsv">Export CSV</button>
+            <div class="status" :class="labStatusType ? `is-${labStatusType}` : ''">{{ labStatus }}</div>
+          </div>
         </div>
         <div v-if="!labRows.length" class="empty">Run the lab to rank strategy/preset combinations</div>
         <table v-else>
@@ -760,6 +821,12 @@ function errorMessage(error: unknown): string {
               <th>Max DD</th>
               <th>Trades</th>
               <th>PF</th>
+              <th>Sharpe</th>
+              <th>Sortino</th>
+              <th>Exposure</th>
+              <th>Worst</th>
+              <th>WF Avg</th>
+              <th>WF Win</th>
             </tr>
           </thead>
           <tbody>
@@ -772,6 +839,12 @@ function errorMessage(error: unknown): string {
               <td>{{ formatNumber(row.max_drawdown_pct) }}</td>
               <td>{{ row.trades }}</td>
               <td>{{ formatNumber(row.profit_factor) }}</td>
+              <td>{{ formatNumber(row.sharpe_ratio) }}</td>
+              <td>{{ formatNumber(row.sortino_ratio) }}</td>
+              <td>{{ formatNumber(row.exposure_pct) }}</td>
+              <td>{{ formatNumber(row.worst_trade) }}</td>
+              <td>{{ formatNumber(row.walk_forward_avg_return_pct) }}</td>
+              <td>{{ formatNumber(row.walk_forward_profitable_pct) }}</td>
             </tr>
           </tbody>
         </table>

@@ -31,7 +31,7 @@ The frontend is a Vue 3 control panel with direct URLs:
 
 The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST. The S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`. It overlays strategy long/short markers plus simulated paper entry/exit markers from local `runs/paper/` output. Choose `All strategies` in the live strategy selector to draw every strategy's long/short markers on one chart with strategy-prefixed labels.
 
-The `Strategy Lab` view ranks strategy and preset combinations across selected symbols using simulated backtests. Treat this as research support, not a profit guarantee.
+The `Strategy Lab` view ranks strategy and preset combinations across selected symbols using simulated backtests. It also adds buy-and-hold benchmark rows, optional market benchmark rows such as `ES=F` and `NQ=F`, walk-forward validation fields, and richer risk metrics including Sharpe, Sortino, drawdown duration, trade duration, exposure, and worst trade. Use `Export CSV` to download the current ranking table as `strategy-lab.csv`. Treat this as research support, not a profit guarantee.
 
 Build the Vue frontend manually when changing frontend source:
 
