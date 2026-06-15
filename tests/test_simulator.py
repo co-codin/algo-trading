@@ -77,6 +77,36 @@ class SimulatorTests(unittest.TestCase):
         self.assertIn("final_balance", result.summary)
         self.assertGreater(len(result.trades), 0)
 
+    def test_backtest_summary_includes_risk_and_exposure_metrics(self):
+        sample_candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 12, 14, 13, 11, 9, 10, 12])
+        ]
+        config = StrategyConfig(
+            fast_ema=1,
+            slow_ema=2,
+            rsi_period=2,
+            fee_rate=0.0,
+            slippage_rate=0.0,
+            stop_loss_pct=1.0,
+            take_profit_pct=1.0,
+        )
+
+        result = run_backtest(sample_candles, config)
+
+        self.assertIn("sharpe_ratio", result.summary)
+        self.assertIn("sortino_ratio", result.summary)
+        self.assertIn("max_drawdown_duration", result.summary)
+        self.assertIn("average_trade_duration", result.summary)
+        self.assertIn("exposure_pct", result.summary)
+        self.assertIn("worst_trade", result.summary)
+        self.assertGreater(result.summary["exposure_pct"], 0)
+        self.assertGreaterEqual(result.summary["max_drawdown_duration"], 0)
+        self.assertEqual(
+            result.summary["worst_trade"],
+            round(min(trade.realized_pnl for trade in result.trades), 8),
+        )
+
     def test_long_trade_can_profit_when_price_rises(self):
         candles = [candle(index, price) for index, price in enumerate([10, 12, 13, 14])]
         config = StrategyConfig(

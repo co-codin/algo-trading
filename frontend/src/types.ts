@@ -88,6 +88,17 @@ export type StrategyLabRow = {
   trades: number;
   win_rate: number;
   profit_factor: number | string;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  max_drawdown_duration: number;
+  average_trade_duration: number;
+  exposure_pct: number;
+  worst_trade: number;
+  walk_forward_windows: number;
+  walk_forward_avg_return_pct: number;
+  walk_forward_worst_return_pct: number;
+  walk_forward_best_return_pct: number;
+  walk_forward_profitable_pct: number;
 };
 
 export type StrategyLabPayload = {
