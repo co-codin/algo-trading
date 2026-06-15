@@ -170,18 +170,51 @@ class UiTests(unittest.TestCase):
         self.assertIn('if (mode !== "live" && settings.strategy === "all") {', source)
         self.assertIn('settings.strategy = "ema-rsi";', source)
 
-    def test_frontend_exposes_combination_signals_page(self):
+    def test_frontend_keeps_only_lab_live_and_breadth_modes(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('export type Mode = "live" | "breadth" | "lab";', types_source)
+        self.assertIn('"/": "lab"', source)
+        self.assertIn('return routeModes[window.location.pathname] ?? "lab";', source)
+        self.assertIn('{ mode: "lab" as const, label: t("tabs.lab") }', source)
+        self.assertIn('{ mode: "live" as const, label: t("tabs.live") }', source)
+        self.assertIn('{ mode: "breadth" as const, label: t("tabs.breadth") }', source)
+        self.assertNotIn('{ mode: "backtest" as const', source)
+        self.assertNotIn('{ mode: "paper" as const', source)
+        self.assertNotIn('{ mode: "combos" as const', source)
+        self.assertNotIn('{ mode: "runs" as const', source)
+        self.assertNotIn('"tabs.backtest"', i18n_source)
+        self.assertNotIn('"tabs.paper"', i18n_source)
+        self.assertNotIn('"tabs.combos"', i18n_source)
+        self.assertNotIn('"tabs.runs"', i18n_source)
+
+    def test_removed_frontend_pages_do_not_keep_client_functions(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('{ mode: "combos" as const, label: t("tabs.combos") }', source)
-        self.assertIn('t("pages.combinationSignals")', source)
-        self.assertIn("/api/combination-signals", source)
-        self.assertIn("combo_strategies", source)
-        self.assertIn("combo_entry_confirmations", source)
-        self.assertIn("combo_exit_confirmations", source)
-        self.assertIn("combo_lookback", source)
+        self.assertNotIn("activeMode === 'backtest'", source)
+        self.assertNotIn("activeMode === 'paper'", source)
+        self.assertNotIn('activeMode === "runs"', source)
+        self.assertNotIn('activeMode === "combos"', source)
+        self.assertNotIn("async function runCurrentMode()", source)
+        self.assertNotIn("async function runCombinationSignals()", source)
+        self.assertNotIn("async function loadRuns()", source)
+        self.assertNotIn("async function loadRunDetails(", source)
+        self.assertNotIn("/api/backtest", source)
+        self.assertNotIn("/api/paper", source)
+        self.assertNotIn("/api/combination-signals", source)
+        self.assertNotIn("/api/runs", source)
+        self.assertNotIn("/api/run?", source)
 
     def test_frontend_exposes_market_breadth_page(self):
         root = Path(__file__).resolve().parents[1]
@@ -330,7 +363,7 @@ class UiTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
         ).read_text(encoding="utf-8")
         live_section = source.split(
-            '<section v-else-if="activeMode === \'live\'" class="panel live-panel">',
+            '<section v-if="activeMode === \'live\'" class="panel live-panel">',
             1,
         )[1].split(
             "<section v-else-if='activeMode === \"breadth\"' class=\"panel breadth-panel\">",
@@ -372,15 +405,15 @@ class UiTests(unittest.TestCase):
 
     def test_frontend_routes_allow_direct_view_urls(self):
         self.assertTrue(is_frontend_route("/"))
-        self.assertTrue(is_frontend_route("/backtest"))
-        self.assertTrue(is_frontend_route("/paper"))
         self.assertTrue(is_frontend_route("/live"))
         self.assertTrue(is_frontend_route("/chart"))
         self.assertTrue(is_frontend_route("/breadth"))
-        self.assertTrue(is_frontend_route("/runs"))
-        self.assertTrue(is_frontend_route("/history"))
         self.assertTrue(is_frontend_route("/lab"))
-        self.assertTrue(is_frontend_route("/combos"))
+        self.assertFalse(is_frontend_route("/backtest"))
+        self.assertFalse(is_frontend_route("/paper"))
+        self.assertFalse(is_frontend_route("/runs"))
+        self.assertFalse(is_frontend_route("/history"))
+        self.assertFalse(is_frontend_route("/combos"))
 
     def test_frontend_routes_do_not_capture_api_or_unknown_paths(self):
         self.assertFalse(is_frontend_route("/api/runs"))
@@ -392,6 +425,33 @@ class UiTests(unittest.TestCase):
         self.assertTrue(is_vite_asset_route("/assets/index.css"))
         self.assertFalse(is_vite_asset_route("/api/runs"))
         self.assertFalse(is_vite_asset_route("/assets/../index.html"))
+
+    def test_tradingview_chart_resizes_to_rendered_container_height(self):
+        chart_source = (
+            Path(__file__).resolve().parents[1]
+            / "frontend"
+            / "src"
+            / "components"
+            / "TradingViewChart.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("const DEFAULT_CHART_HEIGHT = 560;", chart_source)
+        self.assertIn("function chartHeight(): number", chart_source)
+        self.assertIn("return chartEl.value?.clientHeight || DEFAULT_CHART_HEIGHT;", chart_source)
+        self.assertIn("height: chartHeight(),", chart_source)
+        self.assertIn("chart.value?.resize(chartEl.value.clientWidth, chartHeight());", chart_source)
+        self.assertNotIn("chart.value?.resize(chartEl.value.clientWidth, 560);", chart_source)
+
+    def test_breadth_page_uses_stacked_readable_group_layout(self):
+        style_source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "style.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(".breadth-grid {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);", style_source)
+        self.assertIn("padding: 14px;", style_source)
+        self.assertIn(".breadth-group {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));", style_source)
+        self.assertIn("grid-column: 1 / -1;", style_source)
+        self.assertIn(".breadth-card .tv-chart {\n  height: 220px;", style_source)
 
     def test_top_symbols_payload_filters_and_ranks(self):
         payload = top_symbols_payload(FakeClient(), top=2)

@@ -17,7 +17,7 @@ export const messages = {
   en: {
     "app.title": "Algo Trading",
     "app.subtitle":
-      "Vue control panel for read-only backtesting, paper trading, live charts, and strategy ranking.",
+      "Vue control panel for strategy ranking, live charts, and market breadth.",
     "app.safety": "Simulated only: no real orders",
     "auth.title": "Trading workspace",
     "auth.subtitle": "Log in or create an account to open the dashboard.",
@@ -34,12 +34,8 @@ export const messages = {
     "auth.switchToLogin": "Already registered?",
     "aria.language": "Language",
     "aria.modes": "Modes",
-    "tabs.backtest": "Backtest",
-    "tabs.paper": "Paper",
     "tabs.live": "Live",
     "tabs.breadth": "Breadth",
-    "tabs.combos": "Combinations",
-    "tabs.runs": "Runs",
     "tabs.lab": "Strategy Lab",
     "status.ready": "Ready",
     "status.loadingSymbols": "Loading symbols",
@@ -203,7 +199,7 @@ export const messages = {
   ru: {
     "app.title": "Algo Trading",
     "app.subtitle":
-      "Панель Vue для безопасного бэктеста, бумажной торговли, живых графиков и рейтинга стратегий.",
+      "Панель Vue для рейтинга стратегий, онлайн-графиков и ширины рынка.",
     "app.safety": "Только симуляция: реальных заявок нет",
     "auth.title": "Торговая панель",
     "auth.subtitle": "Войдите или создайте аккаунт, чтобы открыть дашборд.",
@@ -220,12 +216,8 @@ export const messages = {
     "auth.switchToLogin": "Уже зарегистрированы?",
     "aria.language": "Язык",
     "aria.modes": "Режимы",
-    "tabs.backtest": "Бэктест",
-    "tabs.paper": "Бумажная",
     "tabs.live": "Онлайн",
     "tabs.breadth": "Ширина",
-    "tabs.combos": "Комбинации",
-    "tabs.runs": "Запуски",
     "tabs.lab": "Лаборатория",
     "status.ready": "Готово",
     "status.loadingSymbols": "Загрузка символов",

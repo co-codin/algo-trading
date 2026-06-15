@@ -88,15 +88,10 @@ FRONTEND_ROUTES = frozenset(
         "",
         "/",
         "/index.html",
-        "/backtest",
-        "/paper",
         "/live",
         "/chart",
         "/breadth",
-        "/runs",
-        "/history",
         "/lab",
-        "/combos",
     }
 )
 

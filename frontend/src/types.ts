@@ -1,4 +1,4 @@
-export type Mode = "backtest" | "paper" | "live" | "breadth" | "runs" | "lab" | "combos";
+export type Mode = "live" | "breadth" | "lab";
 
 export type AuthUser = {
   id: number;

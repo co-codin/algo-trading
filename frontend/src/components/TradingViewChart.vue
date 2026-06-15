@@ -40,6 +40,7 @@ const chartEl = ref<HTMLElement | null>(null);
 const chart = shallowRef<IChartApi | null>(null);
 const series = shallowRef<ISeriesApi<"Candlestick"> | null>(null);
 const markerApi = shallowRef<ISeriesMarkersPluginApi<Time> | null>(null);
+const DEFAULT_CHART_HEIGHT = 560;
 let resizeObserver: ResizeObserver | null = null;
 let shouldFitContent = true;
 
@@ -93,7 +94,7 @@ function ensureChart() {
     return;
   }
   chart.value = createChart(chartEl.value, {
-    height: 560,
+    height: chartHeight(),
     width: chartEl.value.clientWidth || 900,
     layout: {
       background: { type: ColorType.Solid, color: "#131722" },
@@ -122,10 +123,14 @@ function ensureChart() {
   markerApi.value = createSeriesMarkers(series.value, []);
   resizeObserver = new ResizeObserver(() => {
     if (chartEl.value) {
-      chart.value?.resize(chartEl.value.clientWidth, 560);
+      chart.value?.resize(chartEl.value.clientWidth, chartHeight());
     }
   });
   resizeObserver.observe(chartEl.value);
+}
+
+function chartHeight(): number {
+  return chartEl.value?.clientHeight || DEFAULT_CHART_HEIGHT;
 }
 
 function toCandleData(candle: Candle): CandlestickData {
