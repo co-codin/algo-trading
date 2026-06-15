@@ -8,6 +8,7 @@ import {
   normalizeLocale,
   translate,
   translateStrategyDescription,
+  translateStrategyTitle,
   type Locale,
   type MessageKey,
 } from "./i18n";
@@ -32,6 +33,21 @@ type SelectOption = {
   value: string | number;
 };
 type SignalDisplayMode = "consensus" | "individual";
+type StrategyOption = StrategyInfo & {
+  title: string;
+  description: string;
+};
+type StrategyGroup = {
+  id: string;
+  label: string;
+  strategyNames: string[];
+  strategies: StrategyOption[];
+};
+type StrategyGroupDefinition = {
+  id: string;
+  labelKey: MessageKey;
+  strategyNames: string[];
+};
 
 const routeModes: Record<string, Mode> = {
   "/": "live",
@@ -83,6 +99,55 @@ const liveCandleOptions = [
 ] satisfies SelectOption[];
 
 const defaultLiveIndicators = ["ema", "vwap", "volume", "rsi", "macd"];
+const strategyGroupCatalog: StrategyGroupDefinition[] = [
+  {
+    id: "recommended",
+    labelKey: "strategyGroups.recommended",
+    strategyNames: ["ema-rsi", "macd", "supertrend", "vwap-trend-continuation"],
+  },
+  {
+    id: "trend",
+    labelKey: "strategyGroups.trend",
+    strategyNames: [
+      "ema-ribbon",
+      "ema-pullback",
+      "atr-trailing-trend",
+      "sma-crossover",
+    ],
+  },
+  {
+    id: "reversal",
+    labelKey: "strategyGroups.reversal",
+    strategyNames: [
+      "bollinger-reversion",
+      "rsi-reversal",
+      "vwap-reversion",
+      "stoch-rsi-reversal",
+      "cci-reversal",
+      "williams-r-reversal",
+    ],
+  },
+  {
+    id: "breakout",
+    labelKey: "strategyGroups.breakout",
+    strategyNames: [
+      "donchian-breakout",
+      "keltner-breakout",
+      "bollinger-squeeze-release",
+      "momentum-scalping",
+    ],
+  },
+  {
+    id: "volume",
+    labelKey: "strategyGroups.volume",
+    strategyNames: ["obv-trend", "volume-breakout"],
+  },
+  {
+    id: "ensemble",
+    labelKey: "strategyGroups.ensemble",
+    strategyNames: ["combined-signals"],
+  },
+];
 
 const settings = reactive<Record<string, string>>({
   interval: "1h",
@@ -234,12 +299,47 @@ const popularIndicatorOptions = computed<SelectOption[]>(() => [
   { value: "atr", label: t("indicators.atr") },
   { value: "stoch-rsi", label: t("indicators.stochRsi") },
 ]);
-const liveStrategyOptions = computed(() =>
+const liveStrategyOptions = computed<StrategyOption[]>(() =>
   strategies.value.map((strategy) => ({
     ...strategy,
+    title: translateStrategyTitle(locale.value, strategy.name, strategy.name),
     description: translateStrategyDescription(locale.value, strategy.name, strategy.description),
   })),
 );
+const liveStrategyGroups = computed<StrategyGroup[]>(() => {
+  const optionsByName = new Map(
+    liveStrategyOptions.value.map((strategy) => [strategy.name, strategy]),
+  );
+  const groupedNames = new Set<string>();
+  const groups = strategyGroupCatalog
+    .map((definition) => {
+      const groupedStrategies = definition.strategyNames
+        .map((strategyName) => optionsByName.get(strategyName))
+        .filter((strategy): strategy is StrategyOption => Boolean(strategy));
+
+      groupedStrategies.forEach((strategy) => groupedNames.add(strategy.name));
+      return {
+        id: definition.id,
+        label: t(definition.labelKey),
+        strategyNames: groupedStrategies.map((strategy) => strategy.name),
+        strategies: groupedStrategies,
+      };
+    })
+    .filter((group) => group.strategies.length > 0);
+
+  const ungroupedStrategies = liveStrategyOptions.value.filter(
+    (strategy) => !groupedNames.has(strategy.name),
+  );
+  if (ungroupedStrategies.length) {
+    groups.push({
+      id: "other",
+      label: t("strategyGroups.other"),
+      strategyNames: ungroupedStrategies.map((strategy) => strategy.name),
+      strategies: ungroupedStrategies,
+    });
+  }
+  return groups;
+});
 const activeLiveSymbolOptions = computed(
   () => liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions,
 );
@@ -270,9 +370,26 @@ const activeLiveStrategyLabel = computed(() => {
   }
   const selectedNames = selectedLiveStrategyNames.value;
   if (selectedNames.length === 1) {
-    return strategyLabel(selectedNames[0]);
+    return strategyTitle(selectedNames[0]);
   }
   return `${selectedNames.length} ${t("labels.strategiesSelected")}`;
+});
+const selectedLiveStrategyPreview = computed(() => {
+  if (allLiveStrategiesSelected.value) {
+    return `${strategies.value.length} ${t("labels.strategiesSelected")}`;
+  }
+  const selectedNames = selectedLiveStrategyNames.value;
+  if (selectedNames.length === 1) {
+    return (
+      liveStrategyOptions.value.find((strategy) => strategy.name === selectedNames[0])?.description ??
+      strategyTitle(selectedNames[0])
+    );
+  }
+  const titles = selectedNames.map((name) => strategyTitle(name));
+  if (titles.length <= 3) {
+    return titles.join(", ");
+  }
+  return `${titles.slice(0, 3).join(", ")} +${titles.length - 3}`;
 });
 const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
@@ -593,8 +710,18 @@ function toggleLiveStrategy(strategyName: string) {
   liveSelectedStrategies.value = [...liveSelectedStrategies.value, strategyName];
 }
 
+function setLiveStrategies(strategyNames: string[]) {
+  const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
+  const nextNames = strategyNames.filter((strategyName) => availableNames.has(strategyName));
+  liveSelectedStrategies.value = nextNames.length ? nextNames : [strategies.value[0]?.name ?? "ema-rsi"];
+}
+
+function selectLiveStrategyGroup(strategyNames: string[]) {
+  setLiveStrategies(strategyNames);
+}
+
 function selectAllLiveStrategies() {
-  liveSelectedStrategies.value = strategies.value.map((strategy) => strategy.name);
+  setLiveStrategies(strategies.value.map((strategy) => strategy.name));
 }
 
 function clearLiveStrategies() {
@@ -650,9 +777,8 @@ async function loadMarketBreadth() {
   }
 }
 
-function strategyLabel(name: string): string {
-  const strategy = strategies.value.find((item) => item.name === name);
-  return translateStrategyDescription(locale.value, name, strategy?.description ?? name);
+function strategyTitle(name: string): string {
+  return translateStrategyTitle(locale.value, name, name);
 }
 
 function groupSignalsByConsensus(signals: Marker[], minimumConfirmations: number): Marker[] {
@@ -950,31 +1076,58 @@ function errorMessage(error: unknown): string {
             </option>
           </select>
         </label>
-        <div class="strategy-multiselect live-strategy-field">
+        <div class="strategy-picker live-strategy-field">
           <span>{{ t("labels.strategy") }}</span>
-          <div class="strategy-actions">
-            <button class="secondary" type="button" @click="selectAllLiveStrategies">
-              {{ t("actions.selectAll") }}
-            </button>
-            <button class="secondary" type="button" @click="clearLiveStrategies">
-              {{ t("actions.clear") }}
-            </button>
-          </div>
-          <div class="strategy-options">
-            <label
-              v-for="strategy in liveStrategyOptions"
-              :key="strategy.name"
-              class="check-chip"
-              :class="{ 'is-active': liveSelectedStrategies.includes(strategy.name) }"
-            >
-              <input
-                type="checkbox"
-                :checked="liveSelectedStrategies.includes(strategy.name)"
-                @change="toggleLiveStrategy(strategy.name)"
+          <details class="strategy-menu" :aria-label="t('labels.strategyPickerHint')">
+            <summary class="strategy-summary">
+              <span>
+                <b>{{ activeLiveStrategyLabel }}</b>
+                <small>{{ selectedLiveStrategyPreview }}</small>
+              </span>
+            </summary>
+            <div class="strategy-menu-body">
+              <div class="strategy-actions">
+                <button class="secondary" type="button" @click="selectAllLiveStrategies">
+                  {{ t("actions.selectAll") }}
+                </button>
+                <button class="secondary" type="button" @click="clearLiveStrategies">
+                  {{ t("actions.clear") }}
+                </button>
+              </div>
+              <section
+                v-for="group in liveStrategyGroups"
+                :key="group.id"
+                class="strategy-group"
               >
-              <span>{{ strategy.description }}</span>
-            </label>
-          </div>
+                <div class="strategy-group-heading">
+                  <strong>{{ group.label }}</strong>
+                  <button
+                    class="secondary"
+                    type="button"
+                    @click="selectLiveStrategyGroup(group.strategyNames)"
+                  >
+                    {{ t("actions.selectAll") }}
+                  </button>
+                </div>
+                <label
+                  v-for="strategy in group.strategies"
+                  :key="strategy.name"
+                  class="strategy-row"
+                  :class="{ 'is-active': liveSelectedStrategies.includes(strategy.name) }"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="liveSelectedStrategies.includes(strategy.name)"
+                    @change="toggleLiveStrategy(strategy.name)"
+                  >
+                  <span class="strategy-row-copy">
+                    <b>{{ strategyTitle(strategy.name) }}</b>
+                    <small>{{ strategy.description }}</small>
+                  </span>
+                </label>
+              </section>
+            </div>
+          </details>
         </div>
         <label v-if="isMultiStrategyLive">
           <span>{{ t("labels.signalView") }}</span>

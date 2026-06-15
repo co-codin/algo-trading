@@ -64,7 +64,7 @@ export const messages = {
     "actions.activateUser": "Activate",
     "actions.deactivateUser": "Deactivate",
     "actions.selectAll": "All",
-    "actions.clear": "Clear",
+    "actions.clear": "Default",
     "labels.symbol": "Symbol",
     "labels.username": "Username",
     "labels.firstName": "First name",
@@ -90,6 +90,14 @@ export const messages = {
     "labels.strategyMarkers": "Strategy markers",
     "labels.indicators": "Indicators",
     "labels.strategiesSelected": "strategies selected",
+    "labels.strategyPickerHint": "Pick one preset or combine strategies by group.",
+    "strategyGroups.recommended": "Recommended",
+    "strategyGroups.trend": "Trend following",
+    "strategyGroups.reversal": "Mean reversion",
+    "strategyGroups.breakout": "Breakout",
+    "strategyGroups.volume": "Volume confirmation",
+    "strategyGroups.ensemble": "Ensemble",
+    "strategyGroups.other": "Other",
     "options.both": "Both",
     "options.longOnly": "Long only",
     "options.shortOnly": "Short only",
@@ -177,7 +185,7 @@ export const messages = {
     "actions.activateUser": "Активировать",
     "actions.deactivateUser": "Деактивировать",
     "actions.selectAll": "Все",
-    "actions.clear": "Очистить",
+    "actions.clear": "По умолчанию",
     "labels.symbol": "Символ",
     "labels.username": "Имя пользователя",
     "labels.firstName": "Имя",
@@ -203,6 +211,14 @@ export const messages = {
     "labels.strategyMarkers": "Метки стратегии",
     "labels.indicators": "Индикаторы",
     "labels.strategiesSelected": "стратегий выбрано",
+    "labels.strategyPickerHint": "Выберите пресет или соберите набор по группам.",
+    "strategyGroups.recommended": "Рекомендуемые",
+    "strategyGroups.trend": "Следование тренду",
+    "strategyGroups.reversal": "Возврат к среднему",
+    "strategyGroups.breakout": "Пробой",
+    "strategyGroups.volume": "Подтверждение объемом",
+    "strategyGroups.ensemble": "Ансамбль",
+    "strategyGroups.other": "Другие",
     "options.both": "Обе",
     "options.longOnly": "Только long",
     "options.shortOnly": "Только short",
@@ -243,6 +259,55 @@ export const messages = {
 } as const;
 
 export type MessageKey = keyof typeof messages.en;
+
+export const strategyTitles: Record<Locale, Record<string, string>> = {
+  en: {
+    "ema-rsi": "EMA + RSI",
+    macd: "MACD cross",
+    "bollinger-reversion": "Bollinger reversion",
+    "donchian-breakout": "Donchian breakout",
+    "rsi-reversal": "RSI reversal",
+    supertrend: "SuperTrend",
+    "vwap-reversion": "VWAP reversion",
+    "stoch-rsi-reversal": "Stoch RSI reversal",
+    "ema-ribbon": "EMA ribbon",
+    "momentum-scalping": "Momentum scalping",
+    "keltner-breakout": "Keltner breakout",
+    "ema-pullback": "EMA pullback",
+    "atr-trailing-trend": "ATR trailing trend",
+    "cci-reversal": "CCI reversal",
+    "williams-r-reversal": "Williams %R reversal",
+    "bollinger-squeeze-release": "Bollinger squeeze",
+    "obv-trend": "OBV trend",
+    "volume-breakout": "Volume breakout",
+    "vwap-trend-continuation": "VWAP trend",
+    "sma-crossover": "SMA crossover",
+    "combined-signals": "Combined signals",
+  },
+  ru: {
+    "ema-rsi": "EMA + RSI",
+    macd: "MACD пересечение",
+    "bollinger-reversion": "Возврат Боллинджера",
+    "donchian-breakout": "Пробой Дончиана",
+    "rsi-reversal": "Разворот RSI",
+    supertrend: "SuperTrend",
+    "vwap-reversion": "Возврат VWAP",
+    "stoch-rsi-reversal": "Разворот Stoch RSI",
+    "ema-ribbon": "Лента EMA",
+    "momentum-scalping": "Импульсный скальпинг",
+    "keltner-breakout": "Пробой Кельтнера",
+    "ema-pullback": "Откат к EMA",
+    "atr-trailing-trend": "ATR трейлинг",
+    "cci-reversal": "Разворот CCI",
+    "williams-r-reversal": "Разворот Williams %R",
+    "bollinger-squeeze-release": "Сжатие Боллинджера",
+    "obv-trend": "OBV тренд",
+    "volume-breakout": "Пробой объема",
+    "vwap-trend-continuation": "VWAP тренд",
+    "sma-crossover": "SMA пересечение",
+    "combined-signals": "Комбо-сигналы",
+  },
+};
 
 export const strategyDescriptions: Record<Locale, Record<string, string>> = {
   en: {
@@ -299,6 +364,14 @@ export function normalizeLocale(value: string | null | undefined): Locale {
 
 export function translate(locale: Locale, key: MessageKey): string {
   return messages[locale][key] ?? messages.en[key] ?? key;
+}
+
+export function translateStrategyTitle(
+  locale: Locale,
+  name: string,
+  fallback: string,
+): string {
+  return strategyTitles[locale][name] ?? strategyTitles.en[name] ?? fallback;
 }
 
 export function translateStrategyDescription(

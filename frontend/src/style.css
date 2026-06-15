@@ -531,9 +531,87 @@ button:focus {
   grid-column: span 2;
 }
 
-.strategy-multiselect {
+.strategy-picker {
+  position: relative;
+  display: grid;
+  gap: 5px;
+}
+
+.strategy-picker > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.strategy-menu {
+  position: relative;
+}
+
+.strategy-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--field);
+  color: var(--ink);
+  padding: 7px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.strategy-summary::-webkit-details-marker {
+  display: none;
+}
+
+.strategy-summary::after {
+  content: "v";
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.strategy-menu[open] .strategy-summary::after {
+  transform: rotate(180deg);
+}
+
+.strategy-summary b,
+.strategy-summary small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strategy-summary b {
+  max-width: 100%;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.strategy-summary small {
+  max-width: 100%;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.strategy-menu-body {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
   display: grid;
   gap: 8px;
+  max-height: min(520px, 70vh);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  padding: 10px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
 }
 
 .strategy-actions {
@@ -541,19 +619,81 @@ button:focus {
   gap: 6px;
 }
 
-.strategy-actions button {
+.strategy-actions button,
+.strategy-group-heading button {
   min-height: 28px;
   padding: 0 9px;
   font-size: 12px;
 }
 
-.strategy-options {
+.strategy-group {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 6px;
-  max-height: 132px;
-  overflow-y: auto;
-  padding-right: 4px;
+  gap: 5px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.strategy-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.strategy-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-height: 50px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--field);
+  padding: 8px;
+}
+
+.strategy-row.is-active {
+  border-color: rgba(41, 98, 255, 0.65);
+  background: rgba(41, 98, 255, 0.14);
+}
+
+.strategy-row input {
+  width: auto;
+  min-height: 0;
+  margin: 2px 0 0;
+}
+
+.strategy-row-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-transform: none;
+}
+
+.strategy-row-copy b,
+.strategy-row-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.strategy-row-copy b {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.strategy-row-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .indicator-picker {

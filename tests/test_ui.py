@@ -83,7 +83,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("const liveSymbolsByMarket", source)
         self.assertIn("const liveIntervalOptions = [", source)
         self.assertIn("const liveCandleOptions = [", source)
-        self.assertIn("const liveStrategyOptions = computed(() =>", source)
+        self.assertIn("const liveStrategyOptions = computed<StrategyOption[]>(() =>", source)
         self.assertIn("const liveSelectedStrategies = ref<string[]>([\"ema-rsi\"]);", source)
         self.assertIn("const liveStrategyRequest = computed(() =>", source)
         self.assertIn('value: "crypto_spot"', source)
@@ -97,9 +97,9 @@ class UiTests(unittest.TestCase):
         self.assertIn('<select v-model="liveInterval"', source)
         self.assertIn('const liveInterval = ref("5m");', source)
         self.assertIn('<select v-model="liveLimit"', source)
-        self.assertIn('class="strategy-multiselect live-strategy-field"', source)
+        self.assertIn('class="strategy-picker live-strategy-field"', source)
         self.assertIn("toggleLiveStrategy(strategy.name)", source)
-        self.assertIn("v-for=\"strategy in liveStrategyOptions\"", source)
+        self.assertIn('v-for="group in liveStrategyGroups"', source)
         self.assertIn('value: "BTCUSDT"', source)
         self.assertIn('value: "ETHUSDT"', source)
         self.assertIn('value: "1m"', source)
@@ -112,14 +112,41 @@ class UiTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('class="strategy-multiselect live-strategy-field"', source)
+        self.assertIn('class="strategy-picker live-strategy-field"', source)
+        self.assertIn('<summary class="strategy-summary">', source)
+        self.assertIn("selectedLiveStrategyPreview", source)
+        self.assertIn("const liveStrategyGroups = computed<StrategyGroup[]>(() =>", source)
+        self.assertIn("const strategyGroupCatalog", source)
         self.assertIn("toggleLiveStrategy(strategy.name)", source)
+        self.assertIn("selectLiveStrategyGroup(group.strategyNames)", source)
         self.assertIn("selectAllLiveStrategies", source)
         self.assertIn("clearLiveStrategies", source)
         self.assertIn(":checked=\"liveSelectedStrategies.includes(strategy.name)\"", source)
         self.assertIn("strategy: liveStrategyRequest.value", source)
         self.assertIn("watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], () => {", source)
         self.assertNotIn('<select v-model="settings.strategy"', source)
+
+    def test_frontend_defines_human_strategy_titles_and_groups(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("translateStrategyTitle", app_source)
+        self.assertIn("strategyTitle(strategy.name)", app_source)
+        self.assertIn("strategyTitles", i18n_source)
+        self.assertIn("translateStrategyTitle", i18n_source)
+        self.assertIn('"strategyGroups.recommended": "Recommended"', i18n_source)
+        self.assertIn('"strategyGroups.trend": "Trend following"', i18n_source)
+        self.assertIn('"strategyGroups.reversal": "Mean reversion"', i18n_source)
+        self.assertIn('"strategyGroups.breakout": "Breakout"', i18n_source)
+        self.assertIn('"strategyGroups.volume": "Volume confirmation"', i18n_source)
+        self.assertIn('"labels.strategyPickerHint": "Pick one preset or combine strategies by group."', i18n_source)
+        self.assertIn('"strategyGroups.recommended": "Рекомендуемые"', i18n_source)
+        self.assertIn('"labels.strategyPickerHint": "Выберите пресет или соберите набор по группам."', i18n_source)
 
     def test_live_page_exposes_popular_indicator_controls(self):
         root = Path(__file__).resolve().parents[1]
