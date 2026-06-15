@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { requestJson, toQuery } from "./api";
 import TradingViewChart from "./components/TradingViewChart.vue";
 import type {
+  CombinationSignalsPayload,
   LiveChartPayload,
   Mode,
   RunCard,
@@ -29,6 +30,7 @@ const routeModes: Record<string, Mode> = {
   "/runs": "runs",
   "/history": "runs",
   "/lab": "lab",
+  "/combos": "combos",
 };
 
 const modeRoutes: Record<Mode, string> = {
@@ -37,12 +39,14 @@ const modeRoutes: Record<Mode, string> = {
   live: "/live",
   runs: "/runs",
   lab: "/lab",
+  combos: "/combos",
 };
 
 const tabs: { mode: Mode; label: string }[] = [
   { mode: "backtest", label: "Backtest" },
   { mode: "paper", label: "Paper" },
   { mode: "live", label: "Live" },
+  { mode: "combos", label: "Combinations" },
   { mode: "runs", label: "Runs" },
   { mode: "lab", label: "Strategy Lab" },
 ];
@@ -134,6 +138,10 @@ const settings = reactive<Record<string, string>>({
   volume_period: "20",
   volume_multiplier: "1.5",
   squeeze_threshold_pct: "0.05",
+  combo_strategies: "ema-rsi,macd,supertrend,sma-crossover",
+  combo_entry_confirmations: "2",
+  combo_exit_confirmations: "2",
+  combo_lookback: "3",
   stop_loss_pct: "0.03",
   take_profit_pct: "0.06",
   trailing_stop_pct: "0",
@@ -153,11 +161,14 @@ const runs = ref<RunCard[]>([]);
 const runDetails = ref<RunDetails | null>(null);
 const outputRuns = ref<RunCard[]>([]);
 const livePayload = ref<LiveChartPayload | null>(null);
+const comboPayload = ref<CombinationSignalsPayload | null>(null);
 const labRows = ref<StrategyLabRow[]>([]);
 const status = ref("Ready");
 const statusType = ref<StatusType>("");
 const liveStatus = ref("Ready");
 const liveStatusType = ref<StatusType>("");
+const comboStatus = ref("Ready");
+const comboStatusType = ref<StatusType>("");
 const labStatus = ref("Ready");
 const labStatusType = ref<StatusType>("");
 const liveMarket = ref("crypto_spot");
@@ -167,6 +178,9 @@ const liveLimit = ref<string | number>(180);
 const liveRefresh = ref("10");
 const showSignals = ref(true);
 const showPaper = ref(true);
+const comboSymbol = ref("BTCUSDT");
+const comboInterval = ref("1h");
+const comboLimit = ref<string | number>(300);
 const labSymbols = ref("BTCUSDT,ETHUSDT,SOLUSDT");
 const labStrategies = ref("all");
 const labPresets = ref("custom,balanced,aggressive");
@@ -216,6 +230,12 @@ const livePaperMarkerCount = computed(() => livePayload.value?.paper_markers.len
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
 const filteredSignals = computed(() => livePayload.value?.signals ?? []);
 const filteredPaperMarkers = computed(() => livePayload.value?.paper_markers ?? []);
+const comboSignals = computed(() => comboPayload.value?.signals ?? []);
+const comboSignalCount = computed(() => comboPayload.value?.signals.length ?? 0);
+const comboCandleCount = computed(() => comboPayload.value?.candles.length ?? 0);
+const comboChartResetKey = computed(() =>
+  [comboSymbol.value, comboInterval.value, comboLimit.value, settings.combo_strategies].join(":"),
+);
 
 watch(liveMarket, () => {
   liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
@@ -271,6 +291,11 @@ function setStatus(message: string, type: StatusType = "") {
 function setLiveStatus(message: string, type: StatusType = "") {
   liveStatus.value = message;
   liveStatusType.value = type;
+}
+
+function setComboStatus(message: string, type: StatusType = "") {
+  comboStatus.value = message;
+  comboStatusType.value = type;
 }
 
 function setLabStatus(message: string, type: StatusType = "") {
@@ -359,6 +384,26 @@ function refreshLiveChart() {
     return;
   }
   void loadLiveChart();
+}
+
+async function runCombinationSignals() {
+  setComboStatus("Running combination signals", "busy");
+  comboPayload.value = null;
+  try {
+    comboPayload.value = await requestJson<CombinationSignalsPayload>("/api/combination-signals", {
+      method: "POST",
+      body: JSON.stringify({
+        ...settings,
+        strategy: "combined-signals",
+        symbol: comboSymbol.value,
+        interval: comboInterval.value,
+        limit: comboLimit.value,
+      }),
+    });
+    setComboStatus(`Updated ${comboPayload.value.signals.length} signals`);
+  } catch (error) {
+    setComboStatus(errorMessage(error), "error");
+  }
 }
 
 async function loadRuns() {
@@ -729,6 +774,83 @@ function errorMessage(error: unknown): string {
         />
         <div v-else class="empty">Load a chart to start</div>
       </div>
+    </section>
+
+    <section v-else-if="activeMode === 'combos'" class="workspace combo-layout">
+      <form class="panel settings" @submit.prevent="runCombinationSignals">
+        <div class="panel-heading">
+          <div>
+            <h2>Combination Signals</h2>
+            <p>{{ settings.combo_strategies }}</p>
+          </div>
+          <button class="primary" type="submit">Run Combo</button>
+        </div>
+        <div class="field-grid">
+          <label><span>Symbol</span><input v-model="comboSymbol" autocomplete="off"></label>
+          <label><span>Interval</span><input v-model="comboInterval" autocomplete="off"></label>
+          <label><span>Candles</span><input v-model="comboLimit" type="number" min="30"></label>
+          <label><span>Side</span>
+            <select v-model="settings.allowed_side">
+              <option value="both">Both</option>
+              <option value="long-only">Long only</option>
+              <option value="short-only">Short only</option>
+            </select>
+          </label>
+          <label><span>Member Strategies</span><input v-model="settings.combo_strategies" autocomplete="off"></label>
+          <label><span>Entry Confirms</span><input v-model="settings.combo_entry_confirmations" type="number" min="1"></label>
+          <label><span>Exit Confirms</span><input v-model="settings.combo_exit_confirmations" type="number" min="1"></label>
+          <label><span>Lookback</span><input v-model="settings.combo_lookback" type="number" min="1"></label>
+          <label>
+            <span>Preset</span>
+            <select v-model="settings.preset">
+              <option v-for="preset in presets" :key="preset" :value="preset">{{ preset }}</option>
+            </select>
+          </label>
+          <label><span>Starting USDT</span><input v-model="settings.starting_balance" type="number" min="1" step="0.01"></label>
+          <label><span>Position Fraction</span><input v-model="settings.position_fraction" type="number" min="0.01" max="1" step="0.01"></label>
+          <label><span>Fast Period</span><input v-model="settings.fast_ema" type="number" min="1"></label>
+          <label><span>Slow Period</span><input v-model="settings.slow_ema" type="number" min="1"></label>
+          <label><span>RSI Period</span><input v-model="settings.rsi_period" type="number" min="1"></label>
+          <label><span>RSI Overbought</span><input v-model="settings.rsi_overbought" type="number" min="1" max="100" step="0.1"></label>
+          <label><span>RSI Oversold</span><input v-model="settings.rsi_oversold" type="number" min="0" max="99" step="0.1"></label>
+          <label><span>MACD Signal</span><input v-model="settings.macd_signal" type="number" min="1"></label>
+          <label><span>Fee Rate</span><input v-model="settings.fee_rate" type="number" min="0" step="0.0001"></label>
+          <label><span>Slippage</span><input v-model="settings.slippage_rate" type="number" min="0" step="0.0001"></label>
+          <label><span>Stop Loss</span><input v-model="settings.stop_loss_pct" type="number" min="0" step="0.001"></label>
+          <label><span>Take Profit</span><input v-model="settings.take_profit_pct" type="number" min="0" step="0.001"></label>
+          <label><span>Trailing Stop</span><input v-model="settings.trailing_stop_pct" type="number" min="0" step="0.001"></label>
+        </div>
+      </form>
+      <section class="panel output">
+        <div class="panel-heading">
+          <h2>Combo Result</h2>
+          <div class="status" :class="comboStatusType ? `is-${comboStatusType}` : ''">{{ comboStatus }}</div>
+        </div>
+        <div v-if="comboPayload" class="metric-row">
+          <div class="metric"><b>Final</b><span>{{ formatNumber(comboPayload.summary.final_balance) }}</span></div>
+          <div class="metric"><b>Return</b><span>{{ formatNumber(comboPayload.summary.total_return_pct) }}</span></div>
+          <div class="metric"><b>Trades</b><span>{{ formatNumber(comboPayload.summary.trades) }}</span></div>
+          <div class="metric"><b>Signals</b><span>{{ formatNumber(comboSignalCount) }}</span></div>
+          <div class="metric"><b>Candles</b><span>{{ formatNumber(comboCandleCount) }}</span></div>
+        </div>
+        <div class="chart-shell">
+          <div class="chart-legend">
+            <span><i class="legend-dot long"></i>Long signal</span>
+            <span><i class="legend-dot short"></i>Short signal</span>
+            <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a>
+          </div>
+          <TradingViewChart
+            v-if="comboPayload"
+            :candles="comboPayload.candles"
+            :signals="comboSignals"
+            :paper-markers="[]"
+            :show-signals="true"
+            :show-paper="false"
+            :reset-key="comboChartResetKey"
+          />
+          <div v-else class="empty">Run a combination to load the chart</div>
+        </div>
+      </section>
     </section>
 
     <section v-else-if="activeMode === 'runs'" class="panel runs-panel">

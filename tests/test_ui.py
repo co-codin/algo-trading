@@ -7,6 +7,7 @@ from threading import Thread
 from unittest.mock import patch
 from urllib.request import urlopen
 
+import algo_trading.ui as ui
 from algo_trading.data import (
     BinanceMarketDataClient,
     TransientMarketDataError,
@@ -149,6 +150,19 @@ class UiTests(unittest.TestCase):
         self.assertIn('if (mode !== "live" && settings.strategy === "all") {', source)
         self.assertIn('settings.strategy = "ema-rsi";', source)
 
+    def test_frontend_exposes_combination_signals_page(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('{ mode: "combos", label: "Combinations" }', source)
+        self.assertIn("Combination Signals", source)
+        self.assertIn("/api/combination-signals", source)
+        self.assertIn("combo_strategies", source)
+        self.assertIn("combo_entry_confirmations", source)
+        self.assertIn("combo_exit_confirmations", source)
+        self.assertIn("combo_lookback", source)
+
     def test_live_ui_uses_trading_terminal_visual_language(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
@@ -178,6 +192,7 @@ class UiTests(unittest.TestCase):
         self.assertTrue(is_frontend_route("/runs"))
         self.assertTrue(is_frontend_route("/history"))
         self.assertTrue(is_frontend_route("/lab"))
+        self.assertTrue(is_frontend_route("/combos"))
 
     def test_frontend_routes_do_not_capture_api_or_unknown_paths(self):
         self.assertFalse(is_frontend_route("/api/runs"))
@@ -204,7 +219,50 @@ class UiTests(unittest.TestCase):
         strategy_names = [strategy["name"] for strategy in payload["strategies"]]
         self.assertIn("supertrend", strategy_names)
         self.assertIn("vwap-reversion", strategy_names)
+        self.assertIn("sma-crossover", strategy_names)
+        self.assertIn("combined-signals", strategy_names)
         self.assertTrue(all(strategy["description"] for strategy in payload["strategies"]))
+
+    def test_combination_signals_payload_returns_summary_and_markers(self):
+        client = FakeClient()
+        client.candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])
+        ]
+
+        payload = ui.combination_signals_payload(
+            {
+                "symbol": "BTCUSDT",
+                "interval": "1h",
+                "limit": 7,
+                "fast_ema": 2,
+                "slow_ema": 5,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "macd_signal": 2,
+                "combo_strategies": "ema-rsi,macd",
+                "combo_entry_confirmations": 2,
+                "combo_exit_confirmations": 2,
+                "combo_lookback": 2,
+                "fee_rate": 0,
+                "slippage_rate": 0,
+                "stop_loss_pct": 1,
+                "take_profit_pct": 1,
+            },
+            client=client,
+        )
+
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(payload["mode"], "combination-signals")
+        self.assertEqual(payload["config"]["strategy"], "combined-signals")
+        self.assertEqual(payload["config"]["combo_strategies"], "ema-rsi,macd")
+        self.assertIn("final_balance", payload["summary"])
+        self.assertTrue(
+            any(
+                marker["reason"] == "combined_long:2/2:ema-rsi,macd"
+                for marker in payload["signals"]
+            )
+        )
 
     def test_strategy_lab_payload_ranks_strategy_results(self):
         client = FakeClient()
@@ -236,6 +294,42 @@ class UiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["rank"], 1)
         returns = [row["total_return_pct"] for row in payload["rows"]]
         self.assertEqual(returns, sorted(returns, reverse=True))
+
+    def test_strategy_lab_payload_accepts_combined_signals(self):
+        client = FakeClient()
+        client.candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])
+        ]
+
+        payload = strategy_lab_payload(
+            {
+                "symbols": "BTCUSDT",
+                "strategies": "combined-signals",
+                "presets": "custom",
+                "interval": "1h",
+                "limit": 7,
+                "fast_ema": 2,
+                "slow_ema": 5,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "macd_signal": 2,
+                "combo_strategies": "ema-rsi,macd",
+                "combo_entry_confirmations": 2,
+                "combo_exit_confirmations": 2,
+                "combo_lookback": 2,
+                "fee_rate": 0,
+                "slippage_rate": 0,
+                "stop_loss_pct": 1,
+                "take_profit_pct": 1,
+            },
+            client=client,
+        )
+
+        strategy_rows = [
+            row for row in payload["rows"] if row["strategy"] == "combined-signals"
+        ]
+        self.assertEqual(len(strategy_rows), 1)
 
     def test_strategy_lab_payload_adds_buy_and_hold_benchmark_row(self):
         client = FakeClient()

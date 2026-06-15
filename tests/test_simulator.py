@@ -354,6 +354,22 @@ class SimulatorTests(unittest.TestCase):
                 strategy=StrategyName("bollinger-squeeze-release"),
                 squeeze_threshold_pct=-0.01,
             ),
+            StrategyConfig(
+                strategy=StrategyName("combined-signals"),
+                combo_entry_confirmations=0,
+            ),
+            StrategyConfig(
+                strategy=StrategyName("combined-signals"),
+                combo_exit_confirmations=0,
+            ),
+            StrategyConfig(
+                strategy=StrategyName("combined-signals"),
+                combo_lookback=0,
+            ),
+            StrategyConfig(
+                strategy=StrategyName("combined-signals"),
+                combo_strategies="combined-signals",
+            ),
         ]:
             with self.subTest(config=config):
                 with self.assertRaisesRegex(ValueError, "strategy"):
@@ -475,6 +491,31 @@ class SimulatorTests(unittest.TestCase):
                 ),
                 candles([10, 11, 12, 11, 13, 14]),
                 "vwap_trend_continuation_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("sma-crossover"),
+                    fast_ema=2,
+                    slow_ema=4,
+                ),
+                candles([10, 9, 8, 9, 11, 13]),
+                "sma_cross_above",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("combined-signals"),
+                    fast_ema=2,
+                    slow_ema=5,
+                    rsi_period=2,
+                    rsi_overbought=100.0,
+                    macd_signal=2,
+                    combo_strategies="ema-rsi,macd",
+                    combo_entry_confirmations=2,
+                    combo_exit_confirmations=2,
+                    combo_lookback=2,
+                ),
+                candles([10, 9, 8, 9, 11, 13, 15]),
+                "combined_long:2/2:ema-rsi,macd",
             ),
         ]
 

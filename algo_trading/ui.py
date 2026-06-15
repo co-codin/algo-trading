@@ -8,6 +8,8 @@ import mimetypes
 import sys
 import time
 import urllib.parse
+from dataclasses import asdict
+from enum import Enum
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -97,6 +99,7 @@ FRONTEND_ROUTES = frozenset(
         "/runs",
         "/history",
         "/lab",
+        "/combos",
     }
 )
 
@@ -248,6 +251,46 @@ def live_chart_payload(
             end_time,
             output_root,
         ),
+    }
+
+
+def combination_signals_payload(
+    payload: dict[str, Any],
+    client: MarketDataClient | None = None,
+) -> dict[str, Any]:
+    market = _market_from_payload(payload)
+    market_client = client or market_data_client_from_payload(payload)
+    symbol = _live_symbol_from_payload(payload, market)
+    limit = _int_value(payload, "limit", 180)
+    retries = _int_value(payload, "market_data_retries", 2)
+    retry_delay = _float_value(payload, "retry_delay", 0.5)
+    config = apply_strategy_preset(
+        _strategy_config_from_payload(
+            {**payload, "strategy": StrategyName.COMBINED_SIGNALS.value},
+            symbol=symbol,
+            default_interval="1h",
+        )
+    )
+    candles = _get_klines_with_retries(
+        market_client,
+        config.symbol,
+        config.interval,
+        limit,
+        retries,
+        retry_delay,
+    )
+    result = run_backtest(candles, config)
+    return {
+        "ok": True,
+        "mode": "combination-signals",
+        "market": market,
+        "data_source": _data_source_label(market),
+        "symbol": config.symbol,
+        "interval": config.interval,
+        "config": _jsonable(asdict(config)),
+        "summary": result.summary,
+        "candles": [_candle_payload(candle) for candle in candles],
+        "signals": _strategy_signal_markers(candles, config),
     }
 
 
@@ -730,6 +773,14 @@ def create_handler(
             if parsed.path == "/api/strategy-lab":
                 self._send_json(strategy_lab_payload(payload, client_factory()))
                 return
+            if parsed.path == "/api/combination-signals":
+                self._send_json(
+                    combination_signals_payload(
+                        payload,
+                        _live_client_for_handler(payload, client_factory),
+                    )
+                )
+                return
             self._send_json({"ok": False, "error": "not found"}, HTTPStatus.NOT_FOUND)
 
         def _read_json_body(self) -> dict[str, Any]:
@@ -894,6 +945,10 @@ def _strategy_config_from_payload(
         volume_period=_int_value(payload, "volume_period", 20),
         volume_multiplier=_float_value(payload, "volume_multiplier", 1.5),
         squeeze_threshold_pct=_float_value(payload, "squeeze_threshold_pct", 0.05),
+        combo_strategies=str(payload.get("combo_strategies") or "all"),
+        combo_entry_confirmations=_int_value(payload, "combo_entry_confirmations", 2),
+        combo_exit_confirmations=_int_value(payload, "combo_exit_confirmations", 2),
+        combo_lookback=_int_value(payload, "combo_lookback", 3),
         stop_loss_pct=_float_value(payload, "stop_loss_pct", 0.03),
         take_profit_pct=_float_value(payload, "take_profit_pct", 0.06),
         trailing_stop_pct=_float_value(payload, "trailing_stop_pct", 0.0),
@@ -1023,6 +1078,16 @@ def _candle_payload(candle: Candle) -> dict[str, float | int]:
         "close": candle.close,
         "volume": candle.volume,
     }
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {key: _jsonable(inner) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [_jsonable(inner) for inner in value]
+    return value
 
 
 def _run_payload(

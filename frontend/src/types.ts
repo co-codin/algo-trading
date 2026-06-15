@@ -1,4 +1,4 @@
-export type Mode = "backtest" | "paper" | "live" | "runs" | "lab";
+export type Mode = "backtest" | "paper" | "live" | "runs" | "lab" | "combos";
 
 export type StrategyInfo = {
   name: string;
@@ -105,4 +105,17 @@ export type StrategyLabPayload = {
   ok: true;
   mode: "strategy-lab";
   rows: StrategyLabRow[];
+};
+
+export type CombinationSignalsPayload = {
+  ok: true;
+  mode: "combination-signals";
+  market: string;
+  data_source: string;
+  symbol: string;
+  interval: string;
+  config: Record<string, string | number | boolean>;
+  summary: RunSummary;
+  candles: Candle[];
+  signals: Marker[];
 };

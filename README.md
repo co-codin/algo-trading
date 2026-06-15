@@ -28,10 +28,13 @@ The frontend is a Vue 3 control panel with direct URLs:
 - `http://127.0.0.1:8765/chart`
 - `http://127.0.0.1:8765/runs`
 - `http://127.0.0.1:8765/lab`
+- `http://127.0.0.1:8765/combos`
 
 The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST. The S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`. It overlays strategy long/short markers plus simulated paper entry/exit markers from local `runs/paper/` output. Choose `All strategies` in the live strategy selector to draw every strategy's long/short markers on one chart with strategy-prefixed labels.
 
 The `Strategy Lab` view ranks strategy and preset combinations across selected symbols using simulated backtests. It also adds buy-and-hold benchmark rows, optional market benchmark rows such as `ES=F` and `NQ=F`, walk-forward validation fields, and richer risk metrics including Sharpe, Sortino, drawdown duration, trade duration, exposure, and worst trade. Use `Export CSV` to download the current ranking table as `strategy-lab.csv`. Treat this as research support, not a profit guarantee.
+
+The `Combinations` view runs the `combined-signals` strategy on its own page. Set member strategies, entry/exit confirmation counts, and the lookback window, then inspect the combined markers on a chart with the simulated backtest summary.
 
 Build the Vue frontend manually when changing frontend source:
 
@@ -61,6 +64,8 @@ The UI strategy dropdown supports:
 - `obv-trend`: OBV confirmation aligned with price trend.
 - `volume-breakout`: Donchian breakout confirmed by above-average volume.
 - `vwap-trend-continuation`: VWAP reclaim with EMA trend confirmation.
+- `sma-crossover`: simple moving average crossover baseline using the fast/slow period settings.
+- `combined-signals`: configurable confirmation ensemble over selected member strategies.
 
 Presets are `custom`, `conservative`, `balanced`, and `aggressive`. Presets replace the related risk and indicator values with deterministic settings that are written into each run's `config.json`.
 
@@ -157,6 +162,6 @@ Paper trading is intentionally single-symbol in v1. Use separate bounded session
 
 Use `--allowed-side long-only` or `--allowed-side short-only` to focus a run on one side. The default is `both`.
 
-Strategy-specific CLI options include the shared EMA/RSI knobs plus MACD, Bollinger, Donchian, ATR/SuperTrend, VWAP, stochastic RSI, EMA ribbon, momentum, Keltner, CCI, Williams %R, volume, and squeeze-threshold settings. All strategies still use read-only public market data and only write simulated backtest or paper-trading outputs.
+Strategy-specific CLI options include the shared EMA/RSI knobs plus MACD, Bollinger, Donchian, ATR/SuperTrend, VWAP, stochastic RSI, EMA ribbon, momentum, Keltner, CCI, Williams %R, volume, squeeze-threshold, and combination-signal settings. For `combined-signals`, use `--combo-strategies`, `--combo-entry-confirmations`, `--combo-exit-confirmations`, and `--combo-lookback`. All strategies still use read-only public market data and only write simulated backtest or paper-trading outputs.
 
 Outputs are written under `runs/backtests/<timestamp>/` or `runs/paper/<timestamp>/` and include `config.json`, `trades.csv`, `equity.csv`, and `summary.json`.

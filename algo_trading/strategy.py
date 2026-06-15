@@ -41,6 +41,8 @@ class StrategyContext:
     lows: list[float]
     fast: list[float]
     slow: list[float]
+    fast_sma: list[float]
+    slow_sma: list[float]
     rsi_values: list[float]
     macd: list[float]
     macd_signal: list[float]
@@ -100,6 +102,23 @@ def get_strategy(name: StrategyName | str) -> TradingStrategy:
         return _STRATEGIES[strategy_name]
     except KeyError as exc:
         raise ValueError(f"unsupported strategy: {name}") from exc
+
+
+def combo_member_strategy_names(config: StrategyConfig) -> list[StrategyName]:
+    value = config.combo_strategies.strip().lower()
+    raw_names = list_strategy_names() if value == "all" else _parse_combo_strategy_names(value)
+    members: list[StrategyName] = []
+    seen: set[StrategyName] = set()
+    for raw_name in raw_names:
+        try:
+            strategy_name = StrategyName(raw_name)
+        except ValueError as exc:
+            raise ValueError(f"unsupported combo strategy: {raw_name}") from exc
+        if strategy_name is StrategyName.COMBINED_SIGNALS or strategy_name in seen:
+            continue
+        members.append(strategy_name)
+        seen.add(strategy_name)
+    return members
 
 
 def apply_strategy_preset(config: StrategyConfig) -> StrategyConfig:
@@ -236,6 +255,8 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
     lows = [candle.low for candle in candles]
     fast = ema(closes, config.fast_ema)
     slow = ema(closes, config.slow_ema)
+    fast_sma = rolling_mean(closes, config.fast_ema)
+    slow_sma = rolling_mean(closes, config.slow_ema)
     rsi_values = rsi(closes, config.rsi_period)
     macd = [fast_value - slow_value for fast_value, slow_value in zip(fast, slow)]
     macd_signal = ema(macd, config.macd_signal)
@@ -262,6 +283,8 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         lows=lows,
         fast=fast,
         slow=slow,
+        fast_sma=fast_sma,
+        slow_sma=slow_sma,
         rsi_values=rsi_values,
         macd=macd,
         macd_signal=macd_signal,
@@ -1136,6 +1159,114 @@ class VwapTrendContinuationStrategy:
         return Signal(SignalType.HOLD, "no_signal")
 
 
+class SmaCrossoverStrategy:
+    name = StrategyName.SMA_CROSSOVER
+    description = "Simple moving average crossover baseline"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.slow_ema or index >= min(len(context.fast_sma), len(context.slow_sma)):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        if _crossed_above(context.fast_sma, context.slow_sma, index) and _side_allowed(
+            config,
+            PositionSide.LONG,
+        ):
+            return Signal(SignalType.ENTER_LONG, "sma_cross_above")
+        if _crossed_below(context.fast_sma, context.slow_sma, index) and _side_allowed(
+            config,
+            PositionSide.SHORT,
+        ):
+            return Signal(SignalType.ENTER_SHORT, "sma_cross_below")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= min(len(context.fast_sma), len(context.slow_sma)):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        if side is PositionSide.LONG and _crossed_below(context.fast_sma, context.slow_sma, index):
+            return Signal(SignalType.EXIT_LONG, "sma_cross_below")
+        if side is PositionSide.SHORT and _crossed_above(context.fast_sma, context.slow_sma, index):
+            return Signal(SignalType.EXIT_SHORT, "sma_cross_above")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class CombinedSignalsStrategy:
+    name = StrategyName.COMBINED_SIGNALS
+    description = "Configurable strategy confirmation ensemble"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        members = combo_member_strategy_names(config)
+        long_names, short_names = _combo_entry_vote_names(config, context, index, members)
+        required = config.combo_entry_confirmations
+        if (
+            len(long_names) >= required
+            and len(long_names) > len(short_names)
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(
+                SignalType.ENTER_LONG,
+                _combo_reason("combined_long", long_names, members),
+            )
+        if (
+            len(short_names) >= required
+            and len(short_names) > len(long_names)
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(
+                SignalType.ENTER_SHORT,
+                _combo_reason("combined_short", short_names, members),
+            )
+        if len(long_names) >= required and len(short_names) >= required:
+            return Signal(SignalType.HOLD, "conflicting_combo_confirmations")
+        return Signal(SignalType.HOLD, "insufficient_combo_confirmations")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        members = combo_member_strategy_names(config)
+        exit_names, opposite_names = _combo_exit_vote_names(config, context, index, side, members)
+        required = config.combo_exit_confirmations
+        if len(exit_names) >= required:
+            if side is PositionSide.LONG:
+                return Signal(
+                    SignalType.EXIT_LONG,
+                    _combo_reason("combined_exit_long", exit_names, members),
+                )
+            return Signal(
+                SignalType.EXIT_SHORT,
+                _combo_reason("combined_exit_short", exit_names, members),
+            )
+        if len(opposite_names) >= required:
+            if side is PositionSide.LONG:
+                return Signal(
+                    SignalType.EXIT_LONG,
+                    _combo_reason("combined_opposite_short", opposite_names, members),
+                )
+            return Signal(
+                SignalType.EXIT_SHORT,
+                _combo_reason("combined_opposite_long", opposite_names, members),
+            )
+        return Signal(SignalType.HOLD, "insufficient_combo_exit_confirmations")
+
+
 def _side_allowed(config: StrategyConfig, side: PositionSide) -> bool:
     if side is PositionSide.LONG:
         return config.allowed_side in {AllowedSide.BOTH, AllowedSide.LONG_ONLY}
@@ -1148,6 +1279,92 @@ def _crossed_above(first: list[float], second: list[float], index: int) -> bool:
 
 def _crossed_below(first: list[float], second: list[float], index: int) -> bool:
     return first[index - 1] >= second[index - 1] and first[index] < second[index]
+
+
+def _parse_combo_strategy_names(value: str) -> list[str]:
+    return [name.strip().lower() for name in value.split(",") if name.strip()]
+
+
+def _combo_entry_vote_names(
+    config: StrategyConfig,
+    context: StrategyContext,
+    index: int,
+    members: list[StrategyName],
+) -> tuple[list[str], list[str]]:
+    long_names: list[str] = []
+    short_names: list[str] = []
+    for member in members:
+        signal = _latest_entry_signal(replace(config, strategy=member), context, index)
+        if signal.type is SignalType.ENTER_LONG:
+            long_names.append(member.value)
+        elif signal.type is SignalType.ENTER_SHORT:
+            short_names.append(member.value)
+    return long_names, short_names
+
+
+def _combo_exit_vote_names(
+    config: StrategyConfig,
+    context: StrategyContext,
+    index: int,
+    side: PositionSide,
+    members: list[StrategyName],
+) -> tuple[list[str], list[str]]:
+    exit_names: list[str] = []
+    opposite_names: list[str] = []
+    for member in members:
+        member_config = replace(config, strategy=member)
+        exit_signal = _latest_exit_signal(member_config, context, index, side)
+        if side is PositionSide.LONG and exit_signal.type is SignalType.EXIT_LONG:
+            exit_names.append(member.value)
+        elif side is PositionSide.SHORT and exit_signal.type is SignalType.EXIT_SHORT:
+            exit_names.append(member.value)
+
+        opposite_config = replace(member_config, allowed_side=AllowedSide.BOTH)
+        entry_signal = _latest_entry_signal(opposite_config, context, index)
+        if side is PositionSide.LONG and entry_signal.type is SignalType.ENTER_SHORT:
+            opposite_names.append(member.value)
+        elif side is PositionSide.SHORT and entry_signal.type is SignalType.ENTER_LONG:
+            opposite_names.append(member.value)
+    return exit_names, opposite_names
+
+
+def _latest_entry_signal(
+    config: StrategyConfig,
+    context: StrategyContext,
+    index: int,
+) -> Signal:
+    strategy = get_strategy(config.strategy)
+    latest = Signal(SignalType.HOLD, "no_signal")
+    for signal_index in _combo_lookback_indexes(config, index):
+        signal = strategy.entry_signal(config, context, signal_index)
+        if signal.type in {SignalType.ENTER_LONG, SignalType.ENTER_SHORT}:
+            latest = signal
+    return latest
+
+
+def _latest_exit_signal(
+    config: StrategyConfig,
+    context: StrategyContext,
+    index: int,
+    side: PositionSide,
+) -> Signal:
+    strategy = get_strategy(config.strategy)
+    expected_type = SignalType.EXIT_LONG if side is PositionSide.LONG else SignalType.EXIT_SHORT
+    latest = Signal(SignalType.HOLD, "no_signal")
+    for signal_index in _combo_lookback_indexes(config, index):
+        signal = strategy.exit_signal(side, config, context, signal_index)
+        if signal.type is expected_type:
+            latest = signal
+    return latest
+
+
+def _combo_lookback_indexes(config: StrategyConfig, index: int) -> range:
+    start = max(0, index - config.combo_lookback + 1)
+    return range(start, index + 1)
+
+
+def _combo_reason(prefix: str, names: list[str], members: list[StrategyName]) -> str:
+    return f"{prefix}:{len(names)}/{len(members)}:{','.join(names)}"
 
 
 def _ribbon_bullish(context: StrategyContext, index: int) -> bool:
@@ -1268,4 +1485,6 @@ _STRATEGIES: dict[StrategyName, TradingStrategy] = {
     StrategyName.OBV_TREND: ObvTrendStrategy(),
     StrategyName.VOLUME_BREAKOUT: VolumeBreakoutStrategy(),
     StrategyName.VWAP_TREND_CONTINUATION: VwapTrendContinuationStrategy(),
+    StrategyName.SMA_CROSSOVER: SmaCrossoverStrategy(),
+    StrategyName.COMBINED_SIGNALS: CombinedSignalsStrategy(),
 }

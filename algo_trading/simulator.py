@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from algo_trading.models import (
     BacktestResult,
     Candle,
@@ -15,6 +17,7 @@ from algo_trading.strategy import (
     StrategyContext,
     apply_strategy_preset,
     build_strategy_context,
+    combo_member_strategy_names,
     entry_signal_for_index,
     exit_signal_for_position,
 )
@@ -361,6 +364,22 @@ def _validate_config(config: StrategyConfig) -> None:
         raise ValueError("strategy ema ribbon periods must satisfy fast < mid < slow")
     if not 0 <= config.rsi_midline <= 100:
         raise ValueError("strategy rsi_midline must be between 0 and 100")
+    if (
+        config.combo_entry_confirmations <= 0
+        or config.combo_exit_confirmations <= 0
+        or config.combo_lookback <= 0
+    ):
+        raise ValueError("strategy combo confirmations and lookback must be positive")
+    try:
+        combo_members = combo_member_strategy_names(config)
+    except ValueError as exc:
+        raise ValueError(str(exc).replace("combo", "strategy combo")) from exc
+    if not combo_members:
+        raise ValueError("strategy combo_strategies must include at least one standalone strategy")
+    if config.combo_entry_confirmations > len(combo_members):
+        raise ValueError("strategy combo_entry_confirmations cannot exceed combo member count")
+    if config.combo_exit_confirmations > len(combo_members):
+        raise ValueError("strategy combo_exit_confirmations cannot exceed combo member count")
     for name, value in [
         ("stop_loss_pct", config.stop_loss_pct),
         ("take_profit_pct", config.take_profit_pct),
@@ -414,4 +433,11 @@ def _required_candles(config: StrategyConfig) -> int:
         return max(config.donchian_period, config.volume_period) + 1
     if strategy is StrategyName.VWAP_TREND_CONTINUATION:
         return max(config.slow_ema, config.vwap_period) + 1
+    if strategy is StrategyName.SMA_CROSSOVER:
+        return config.slow_ema + 1
+    if strategy is StrategyName.COMBINED_SIGNALS:
+        return max(
+            _required_candles(replace(config, strategy=member))
+            for member in combo_member_strategy_names(config)
+        )
     return max(config.slow_ema, config.rsi_period + 1)

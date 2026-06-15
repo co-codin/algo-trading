@@ -286,6 +286,10 @@ def _config_from_args(args: argparse.Namespace, symbol: str | None = None) -> St
         volume_period=args.volume_period,
         volume_multiplier=args.volume_multiplier,
         squeeze_threshold_pct=args.squeeze_threshold_pct,
+        combo_strategies=args.combo_strategies,
+        combo_entry_confirmations=args.combo_entry_confirmations,
+        combo_exit_confirmations=args.combo_exit_confirmations,
+        combo_lookback=args.combo_lookback,
         stop_loss_pct=args.stop_loss_pct,
         take_profit_pct=args.take_profit_pct,
         trailing_stop_pct=args.trailing_stop_pct,
@@ -438,6 +442,10 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--volume-period", type=int, default=20)
     parser.add_argument("--volume-multiplier", type=float, default=1.5)
     parser.add_argument("--squeeze-threshold-pct", type=float, default=0.05)
+    parser.add_argument("--combo-strategies", default="all")
+    parser.add_argument("--combo-entry-confirmations", type=int, default=2)
+    parser.add_argument("--combo-exit-confirmations", type=int, default=2)
+    parser.add_argument("--combo-lookback", type=int, default=3)
     parser.add_argument("--stop-loss-pct", type=float, default=0.03)
     parser.add_argument("--take-profit-pct", type=float, default=0.06)
     parser.add_argument("--trailing-stop-pct", type=float, default=0.0)

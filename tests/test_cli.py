@@ -451,6 +451,73 @@ class CliTests(unittest.TestCase):
             self.assertEqual(config["volume_period"], 3)
             self.assertEqual(config["volume_multiplier"], 1.25)
 
+    def test_backtest_command_records_combined_signal_parameters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fixture = tmp_path / "candles.csv"
+            fixture.write_text(
+                "\n".join(
+                    [
+                        "open_time,open,high,low,close,volume",
+                        "1,10,11,9,10,100",
+                        "2,9,10,8,9,100",
+                        "3,8,9,7,8,100",
+                        "4,9,10,8,9,100",
+                        "5,11,12,10,11,100",
+                        "6,13,14,12,13,100",
+                        "7,15,16,14,15,100",
+                    ]
+                )
+            )
+
+            exit_code = main(
+                [
+                    "backtest",
+                    "--fixture",
+                    str(fixture),
+                    "--output-root",
+                    str(tmp_path),
+                    "--strategy",
+                    "combined-signals",
+                    "--combo-strategies",
+                    "ema-rsi,macd",
+                    "--combo-entry-confirmations",
+                    "2",
+                    "--combo-exit-confirmations",
+                    "2",
+                    "--combo-lookback",
+                    "2",
+                    "--fast-ema",
+                    "2",
+                    "--slow-ema",
+                    "5",
+                    "--rsi-period",
+                    "2",
+                    "--rsi-overbought",
+                    "100",
+                    "--macd-signal",
+                    "2",
+                    "--fee-rate",
+                    "0",
+                    "--slippage-rate",
+                    "0",
+                    "--stop-loss-pct",
+                    "1",
+                    "--take-profit-pct",
+                    "1",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            configs = list(tmp_path.glob("backtests/*/config.json"))
+            self.assertEqual(len(configs), 1)
+            config = json.loads(configs[0].read_text())
+            self.assertEqual(config["strategy"], "combined-signals")
+            self.assertEqual(config["combo_strategies"], "ema-rsi,macd")
+            self.assertEqual(config["combo_entry_confirmations"], 2)
+            self.assertEqual(config["combo_exit_confirmations"], 2)
+            self.assertEqual(config["combo_lookback"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -75,6 +75,8 @@ class StrategyTests(unittest.TestCase):
                 "obv-trend",
                 "volume-breakout",
                 "vwap-trend-continuation",
+                "sma-crossover",
+                "combined-signals",
             ],
         )
 
@@ -375,6 +377,85 @@ class StrategyTests(unittest.TestCase):
         self.assertIsNotNone(signal)
         self.assertEqual(signal.type, SignalType.ENTER_LONG)
         self.assertEqual(signal.reason, "vwap_trend_continuation_long")
+
+    def test_sma_crossover_enters_long_on_fast_sma_cross_above_slow_sma(self):
+        config = StrategyConfig(
+            strategy=StrategyName("sma-crossover"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=4,
+        )
+
+        signal = first_entry_signal(config, [10, 9, 8, 9, 11, 13])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "sma_cross_above")
+
+    def test_combined_signals_enters_when_members_confirm_within_lookback(self):
+        config = StrategyConfig(
+            strategy=StrategyName("combined-signals"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=5,
+            rsi_period=2,
+            rsi_overbought=100.0,
+            macd_signal=2,
+            combo_strategies="ema-rsi,macd",
+            combo_entry_confirmations=2,
+            combo_exit_confirmations=2,
+            combo_lookback=2,
+        )
+        context = build_strategy_context(candles([10, 9, 8, 9, 11, 13, 15]), config)
+
+        signal = entry_signal_for_index(config, context, 4)
+
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "combined_long:2/2:ema-rsi,macd")
+
+    def test_combined_signals_ignores_itself_in_member_list(self):
+        config = StrategyConfig(
+            strategy=StrategyName("combined-signals"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=5,
+            rsi_period=2,
+            rsi_overbought=100.0,
+            combo_strategies="combined-signals,ema-rsi",
+            combo_entry_confirmations=2,
+            combo_exit_confirmations=2,
+            combo_lookback=2,
+        )
+        context = build_strategy_context(candles([10, 9, 8, 9, 11, 13, 15]), config)
+
+        signal = entry_signal_for_index(config, context, 4)
+
+        self.assertEqual(signal.type, SignalType.HOLD)
+        self.assertEqual(signal.reason, "insufficient_combo_confirmations")
+
+    def test_combined_signals_exits_when_members_confirm_exit(self):
+        config = StrategyConfig(
+            strategy=StrategyName("combined-signals"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=5,
+            rsi_period=2,
+            rsi_overbought=100.0,
+            macd_signal=2,
+            combo_strategies="ema-rsi,macd",
+            combo_entry_confirmations=2,
+            combo_exit_confirmations=2,
+            combo_lookback=3,
+        )
+        context = build_strategy_context(
+            candles([10, 9, 8, 9, 11, 13, 15, 14, 12, 10, 8]),
+            config,
+        )
+
+        signal = exit_signal_for_position(PositionSide.LONG, config, context, 9)
+
+        self.assertEqual(signal.type, SignalType.EXIT_LONG)
+        self.assertEqual(signal.reason, "combined_exit_long:2/2:ema-rsi,macd")
 
     def test_allowed_side_blocks_disallowed_entries(self):
         config = StrategyConfig(

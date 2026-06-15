@@ -43,6 +43,8 @@ class StrategyName(str, Enum):
     OBV_TREND = "obv-trend"
     VOLUME_BREAKOUT = "volume-breakout"
     VWAP_TREND_CONTINUATION = "vwap-trend-continuation"
+    SMA_CROSSOVER = "sma-crossover"
+    COMBINED_SIGNALS = "combined-signals"
 
 
 class StrategyPreset(str, Enum):
@@ -112,6 +114,10 @@ class StrategyConfig:
     volume_period: int = 20
     volume_multiplier: float = 1.5
     squeeze_threshold_pct: float = 0.05
+    combo_strategies: str = "all"
+    combo_entry_confirmations: int = 2
+    combo_exit_confirmations: int = 2
+    combo_lookback: int = 3
     stop_loss_pct: float = 0.03
     take_profit_pct: float = 0.06
     trailing_stop_pct: float = 0.0
