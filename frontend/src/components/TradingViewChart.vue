@@ -67,36 +67,36 @@ function ensureChart() {
     return;
   }
   chart.value = createChart(chartEl.value, {
-    height: 460,
+    height: 560,
     width: chartEl.value.clientWidth || 900,
     layout: {
-      background: { type: ColorType.Solid, color: "#fbfcfc" },
-      textColor: "#5f6965",
+      background: { type: ColorType.Solid, color: "#131722" },
+      textColor: "#d1d4dc",
     },
     grid: {
-      vertLines: { color: "#e2e8e5" },
-      horzLines: { color: "#e2e8e5" },
+      vertLines: { color: "#2a2e39" },
+      horzLines: { color: "#2a2e39" },
     },
     rightPriceScale: {
-      borderColor: "#d9dfdd",
+      borderColor: "#2a2e39",
     },
     timeScale: {
-      borderColor: "#d9dfdd",
+      borderColor: "#2a2e39",
       timeVisible: true,
       secondsVisible: false,
     },
   });
   series.value = chart.value.addSeries(CandlestickSeries, {
-    upColor: "#2f8f5b",
-    downColor: "#b35c2e",
+    upColor: "#22ab94",
+    downColor: "#f23645",
     borderVisible: false,
-    wickUpColor: "#2f8f5b",
-    wickDownColor: "#b35c2e",
+    wickUpColor: "#22ab94",
+    wickDownColor: "#f23645",
   });
   markerApi.value = createSeriesMarkers(series.value, []);
   resizeObserver = new ResizeObserver(() => {
     if (chartEl.value) {
-      chart.value?.resize(chartEl.value.clientWidth, 460);
+      chart.value?.resize(chartEl.value.clientWidth, 560);
     }
   });
   resizeObserver.observe(chartEl.value);
@@ -118,7 +118,7 @@ function signalMarker(marker: Marker): SeriesMarker<Time> | null {
     return {
       time,
       position: "belowBar",
-      color: "#2f8f5b",
+      color: "#22ab94",
       shape: "arrowUp",
       text: markerLabel("Long", marker.reason),
     };
@@ -127,7 +127,7 @@ function signalMarker(marker: Marker): SeriesMarker<Time> | null {
     return {
       time,
       position: "aboveBar",
-      color: "#b35c2e",
+      color: "#f23645",
       shape: "arrowDown",
       text: markerLabel("Short", marker.reason),
     };
@@ -141,7 +141,7 @@ function paperMarker(marker: Marker): SeriesMarker<Time> | null {
   return {
     time: toChartTime(marker.time),
     position: isShort ? "aboveBar" : "belowBar",
-    color: isEntry ? "#246aa8" : "#6d5cae",
+    color: isEntry ? "#2962ff" : "#7c3aed",
     shape: isEntry ? (isShort ? "arrowDown" : "arrowUp") : "square",
     text: markerLabel(isEntry ? "Paper" : "Exit", marker.reason),
   };

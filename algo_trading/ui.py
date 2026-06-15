@@ -38,6 +38,7 @@ from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
 WEB_ROOT = Path(__file__).with_name("web")
 WEB_DIST_ROOT = WEB_ROOT / "dist"
+ALL_STRATEGIES_VALUE = "all"
 FRONTEND_ROUTES = frozenset(
     {
         "",
@@ -157,20 +158,41 @@ def live_chart_payload(
     market_client = client or BinanceMarketDataClient()
     symbol = str(payload.get("symbol") or "BTCUSDT").upper()
     limit = _int_value(payload, "limit", 180)
-    config = apply_strategy_preset(
-        _strategy_config_from_payload(payload, symbol=symbol, default_interval="1m")
+    retries = _int_value(payload, "market_data_retries", 2)
+    retry_delay = _float_value(payload, "retry_delay", 0.5)
+    strategy_value = str(
+        payload.get("strategy") or StrategyName.EMA_RSI.value
+    ).strip().lower()
+    configs = _live_strategy_configs_from_payload(
+        payload,
+        symbol=symbol,
+        default_interval="1m",
     )
-    candles = market_client.get_klines(config.symbol, config.interval, limit)
+    config = configs[0]
+    candles = _get_klines_with_retries(
+        market_client,
+        config.symbol,
+        config.interval,
+        limit,
+        retries,
+        retry_delay,
+    )
     if not candles:
         raise ValueError("market-data client returned no candles")
     start_time = candles[0].open_time
     end_time = candles[-1].open_time
+    signals = (
+        _all_strategy_signal_markers(candles, configs)
+        if strategy_value == ALL_STRATEGIES_VALUE
+        else _strategy_signal_markers(candles, config)
+    )
     return {
         "ok": True,
         "symbol": config.symbol,
         "interval": config.interval,
+        "strategy": strategy_value,
         "candles": [_candle_payload(candle) for candle in candles],
-        "signals": _strategy_signal_markers(candles, config),
+        "signals": signals,
         "paper_markers": paper_trade_markers(
             config.symbol,
             start_time,
@@ -579,6 +601,31 @@ def _strategy_config_from_payload(
     )
 
 
+def _live_strategy_configs_from_payload(
+    payload: dict[str, Any],
+    symbol: str,
+    default_interval: str,
+) -> list[StrategyConfig]:
+    strategy_value = str(
+        payload.get("strategy") or StrategyName.EMA_RSI.value
+    ).strip().lower()
+    strategies = (
+        [StrategyName(name) for name in list_strategy_names()]
+        if strategy_value == ALL_STRATEGIES_VALUE
+        else [StrategyName(strategy_value)]
+    )
+    return [
+        apply_strategy_preset(
+            _strategy_config_from_payload(
+                {**payload, "strategy": strategy.value},
+                symbol=symbol,
+                default_interval=default_interval,
+            )
+        )
+        for strategy in strategies
+    ]
+
+
 def _get_klines_with_retries(
     client: MarketDataClient,
     symbol: str,
@@ -621,18 +668,24 @@ def _preset_names_from_payload(payload: dict[str, Any]) -> list[StrategyPreset]:
 def _strategy_signal_markers(
     candles: list[Candle],
     config: StrategyConfig,
+    include_strategy_name: bool = False,
 ) -> list[dict[str, Any]]:
     context = build_strategy_context(candles, config)
     markers: list[dict[str, Any]] = []
     for index, candle in enumerate(candles):
         signal = entry_signal_for_index(config, context, index)
+        reason = (
+            f"{config.strategy.value}: {signal.reason}"
+            if include_strategy_name
+            else signal.reason
+        )
         if signal.type.value == "enter_long":
             markers.append(
                 {
                     "time": candle.open_time,
                     "price": candle.close,
                     "type": "long_signal",
-                    "reason": signal.reason,
+                    "reason": reason,
                 }
             )
         elif signal.type.value == "enter_short":
@@ -641,10 +694,25 @@ def _strategy_signal_markers(
                     "time": candle.open_time,
                     "price": candle.close,
                     "type": "short_signal",
-                    "reason": signal.reason,
+                    "reason": reason,
                 }
             )
     return markers
+
+
+def _all_strategy_signal_markers(
+    candles: list[Candle],
+    configs: list[StrategyConfig],
+) -> list[dict[str, Any]]:
+    markers: list[dict[str, Any]] = []
+    for config in configs:
+        markers.extend(
+            _strategy_signal_markers(candles, config, include_strategy_name=True)
+        )
+    return sorted(
+        markers,
+        key=lambda item: (int(item["time"]), str(item["reason"]), str(item["type"])),
+    )
 
 
 def _candle_payload(candle: Candle) -> dict[str, float | int]:

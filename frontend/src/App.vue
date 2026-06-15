@@ -146,6 +146,16 @@ const labPresets = ref("custom,balanced,aggressive");
 let liveTimer = 0;
 
 const strategyName = computed(() => strategyLabel(settings.strategy));
+const liveStrategyOptions = computed(() => [
+  { name: "all", description: "All strategies" },
+  ...strategies.value,
+]);
+const activeLiveStrategyLabel = computed(() =>
+  settings.strategy === "all" ? "All strategies" : strategyLabel(settings.strategy),
+);
+const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
+const livePaperMarkerCount = computed(() => livePayload.value?.paper_markers.length ?? 0);
+const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
 const filteredSignals = computed(() => livePayload.value?.signals ?? []);
 const filteredPaperMarkers = computed(() => livePayload.value?.paper_markers ?? []);
 
@@ -177,6 +187,9 @@ function modeFromLocation(): Mode {
 function setMode(mode: Mode, updateUrl = true) {
   stopLivePolling();
   activeMode.value = mode;
+  if (mode !== "live" && settings.strategy === "all") {
+    settings.strategy = "ema-rsi";
+  }
   if (updateUrl && window.location.pathname !== modeRoutes[mode]) {
     window.history.pushState({ mode }, "", modeRoutes[mode]);
   }
@@ -502,8 +515,33 @@ function errorMessage(error: unknown): string {
 
     <section v-else-if="activeMode === 'live'" class="panel live-panel">
       <div class="panel-heading">
-        <h2>Live Market</h2>
+        <div>
+          <h2>Live Market</h2>
+          <p>{{ activeLiveStrategyLabel }}</p>
+        </div>
         <div class="status" :class="liveStatusType ? `is-${liveStatusType}` : ''">{{ liveStatus }}</div>
+      </div>
+      <div class="live-market-strip">
+        <div class="ticker-pill">
+          <span>Market</span>
+          <b>{{ livePayload?.symbol ?? liveSymbol }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>Interval</span>
+          <b>{{ livePayload?.interval ?? liveInterval }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>Candles</span>
+          <b>{{ formatNumber(liveCandleCount) }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>Signals</span>
+          <b>{{ formatNumber(liveSignalCount) }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>Paper</span>
+          <b>{{ formatNumber(livePaperMarkerCount) }}</b>
+        </div>
       </div>
       <div class="live-controls">
         <label>
@@ -545,8 +583,8 @@ function errorMessage(error: unknown): string {
         <label class="live-strategy-field">
           <span>Strategy</span>
           <select v-model="settings.strategy">
-            <option v-for="strategy in strategies" :key="strategy.name" :value="strategy.name">
-              {{ strategy.name }}
+            <option v-for="strategy in liveStrategyOptions" :key="strategy.name" :value="strategy.name">
+              {{ strategy.description }}
             </option>
           </select>
         </label>

@@ -38,6 +38,7 @@ export type LiveChartPayload = {
   ok: true;
   symbol: string;
   interval: string;
+  strategy: string;
   candles: Candle[];
   signals: Marker[];
   paper_markers: Marker[];

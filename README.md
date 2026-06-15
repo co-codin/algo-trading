@@ -29,7 +29,7 @@ The frontend is a Vue 3 control panel with direct URLs:
 - `http://127.0.0.1:8765/runs`
 - `http://127.0.0.1:8765/lab`
 
-The `Live` / `Chart` view uses TradingView Lightweight Charts for public Binance candles. It overlays strategy long/short markers plus simulated paper entry/exit markers from local `runs/paper/` output.
+The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts for public Binance candles. It overlays strategy long/short markers plus simulated paper entry/exit markers from local `runs/paper/` output. Choose `All strategies` in the live strategy selector to draw every strategy's long/short markers on one chart with strategy-prefixed labels.
 
 The `Strategy Lab` view ranks strategy and preset combinations across selected symbols using simulated backtests. Treat this as research support, not a profit guarantee.
 

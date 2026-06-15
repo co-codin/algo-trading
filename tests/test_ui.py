@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from algo_trading.data import TransientMarketDataError
 from algo_trading.models import Candle
 from algo_trading.ui import (
     is_frontend_route,
@@ -48,6 +49,18 @@ class FakeClient:
         return [candle(index, price) for index, price in enumerate([10, 12, 13, 14])]
 
 
+class FlakyLiveClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures_remaining = 1
+
+    def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+        if self.failures_remaining:
+            self.failures_remaining -= 1
+            raise TransientMarketDataError("temporary market data outage")
+        return super().get_klines(symbol, interval, limit)
+
+
 def trending_candles() -> list[Candle]:
     prices = [10, 9, 8, 9, 11, 13, 12, 10, 8, 7, 9, 11]
     return [candle(index, price) for index, price in enumerate(prices)]
@@ -62,12 +75,15 @@ class UiTests(unittest.TestCase):
         self.assertIn("const liveSymbolOptions = [", source)
         self.assertIn("const liveIntervalOptions = [", source)
         self.assertIn("const liveCandleOptions = [", source)
+        self.assertIn("const liveStrategyOptions = computed(() => [", source)
+        self.assertIn('name: "all"', source)
+        self.assertIn("All strategies", source)
         self.assertIn('<select v-model="liveSymbol"', source)
         self.assertIn('<select v-model="liveInterval"', source)
         self.assertIn('<select v-model="liveLimit"', source)
         self.assertIn('class="live-strategy-field"', source)
         self.assertIn('<select v-model="settings.strategy"', source)
-        self.assertIn("v-for=\"strategy in strategies\"", source)
+        self.assertIn("v-for=\"strategy in liveStrategyOptions\"", source)
         self.assertIn('value: "BTCUSDT"', source)
         self.assertIn('value: "ETHUSDT"', source)
         self.assertIn('value: "1m"', source)
@@ -84,6 +100,34 @@ class UiTests(unittest.TestCase):
         self.assertIn("watch([liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {", source)
         self.assertIn('if (activeMode.value === "live") {', source)
         self.assertIn("refreshLiveChart();", source)
+
+    def test_all_strategies_selection_stays_live_only(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('if (mode !== "live" && settings.strategy === "all") {', source)
+        self.assertIn('settings.strategy = "ema-rsi";', source)
+
+    def test_live_ui_uses_trading_terminal_visual_language(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        style_source = (root / "frontend" / "src" / "style.css").read_text(
+            encoding="utf-8"
+        )
+        chart_source = (
+            root / "frontend" / "src" / "components" / "TradingViewChart.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('class="live-market-strip"', app_source)
+        self.assertIn('class="ticker-pill"', app_source)
+        self.assertIn("--bg: #0f1318;", style_source)
+        self.assertIn("--chart-bg: #131722;", style_source)
+        self.assertIn(".live-market-strip", style_source)
+        self.assertIn('textColor: "#d1d4dc"', chart_source)
+        self.assertIn('color: "#131722"', chart_source)
 
     def test_frontend_routes_allow_direct_view_urls(self):
         self.assertTrue(is_frontend_route("/"))
@@ -240,6 +284,75 @@ class UiTests(unittest.TestCase):
         self.assertTrue(
             any(marker["reason"].startswith("macd_") for marker in payload["signals"])
         )
+
+    def test_live_chart_payload_can_overlay_all_strategy_signals(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])]
+
+        payload = live_chart_payload(
+            {
+                "symbol": "BTCUSDT",
+                "interval": "1h",
+                "limit": 7,
+                "strategy": "all",
+                "fast_ema": 2,
+                "slow_ema": 5,
+                "macd_signal": 2,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+                "rsi_midline": 50,
+                "bollinger_period": 3,
+                "bollinger_stddev": 1,
+                "donchian_period": 3,
+                "atr_period": 2,
+                "supertrend_multiplier": 1,
+                "vwap_period": 3,
+                "vwap_threshold_pct": 0,
+                "stoch_rsi_period": 2,
+                "stoch_rsi_oversold": 20,
+                "stoch_rsi_overbought": 80,
+                "ema_ribbon_fast": 2,
+                "ema_ribbon_mid": 3,
+                "ema_ribbon_slow": 5,
+                "momentum_period": 2,
+            },
+            client=client,
+        )
+
+        strategy_names = {
+            str(marker["reason"]).split(": ", 1)[0] for marker in payload["signals"]
+        }
+        self.assertEqual(client.kline_symbols, ["BTCUSDT"])
+        self.assertIn("ema-rsi", strategy_names)
+        self.assertIn("macd", strategy_names)
+        self.assertIn("supertrend", strategy_names)
+        self.assertIn("momentum-scalping", strategy_names)
+        self.assertEqual(payload["strategy"], "all")
+
+    def test_live_chart_payload_retries_transient_market_data_failures(self):
+        client = FlakyLiveClient()
+        client.candles = trending_candles()
+
+        payload = live_chart_payload(
+            {
+                "symbol": "BTCUSDT",
+                "interval": "1h",
+                "limit": 12,
+                "market_data_retries": 1,
+                "retry_delay": 0,
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(len(client.kline_symbols), 1)
+        self.assertEqual(payload["symbol"], "BTCUSDT")
+        self.assertEqual(len(payload["candles"]), 12)
 
     def test_paper_trade_markers_reads_entry_and_exit_markers(self):
         with tempfile.TemporaryDirectory() as tmp:
