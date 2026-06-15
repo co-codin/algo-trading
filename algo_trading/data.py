@@ -6,7 +6,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Sequence as RuntimeSequence
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 from urllib.error import HTTPError, URLError
 
 from algo_trading.models import Candle
@@ -74,6 +74,72 @@ class BinanceMarketDataClient:
         return payload
 
 
+class YahooFuturesMarketDataClient:
+    def __init__(
+        self,
+        base_url: str = "https://query2.finance.yahoo.com",
+        opener: Callable[..., Any] = urllib.request.urlopen,
+        timeout: int = 20,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.opener = opener
+        self.timeout = timeout
+
+    def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        yahoo_symbol = _yahoo_futures_symbol(symbol)
+        yahoo_interval, yahoo_range, aggregate_minutes = _yahoo_interval(interval)
+        query = urllib.parse.urlencode(
+            {
+                "interval": yahoo_interval,
+                "range": yahoo_range,
+                "events": "history",
+            }
+        )
+        encoded_symbol = urllib.parse.quote(yahoo_symbol, safe="")
+        url = f"{self.base_url}/v8/finance/chart/{encoded_symbol}?{query}"
+        request = urllib.request.Request(url, headers=_YAHOO_HEADERS)
+        try:
+            with self.opener(request, timeout=self.timeout) as response:
+                response_text = response.read().decode("utf-8")
+        except HTTPError as exc:
+            if exc.code == 429 or exc.code >= 500:
+                raise TransientMarketDataError(
+                    f"transient Yahoo Finance HTTP {exc.code}"
+                ) from exc
+            raise ValueError(f"Yahoo Finance HTTP {exc.code}") from exc
+        except (TimeoutError, URLError) as exc:
+            raise TransientMarketDataError(
+                "transient Yahoo Finance market-data failure"
+            ) from exc
+        try:
+            payload = json.loads(response_text)
+        except json.JSONDecodeError as exc:
+            if "Too Many Requests" in response_text:
+                raise TransientMarketDataError(
+                    "transient Yahoo Finance rate limit"
+                ) from exc
+            raise ValueError("unexpected Yahoo Finance chart response") from exc
+        candles = _candles_from_yahoo_chart(payload)
+        if aggregate_minutes is not None:
+            candles = _aggregate_candles(candles, aggregate_minutes)
+        return candles[-limit:]
+
+    def get_24h_tickers(self) -> list[dict[str, object]]:
+        candles = self.get_klines("ES=F", "1d", 1)
+        if not candles:
+            return []
+        latest = candles[-1]
+        return [
+            {
+                "symbol": "ES=F",
+                "quoteVolume": latest.volume,
+                "lastPrice": latest.close,
+            }
+        ]
+
+
 def load_candles_from_csv(path: str | Path) -> list[Candle]:
     with Path(path).open(newline="") as handle:
         reader = csv.DictReader(handle)
@@ -106,3 +172,113 @@ def _candle_from_kline(row: Sequence[Any]) -> Candle:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid kline row") from exc
+
+
+_YAHOO_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _yahoo_futures_symbol(symbol: str) -> str:
+    value = symbol.strip().upper()
+    aliases = {
+        "ES": "ES=F",
+        "/ES": "ES=F",
+        "ES=F": "ES=F",
+        "SP500": "ES=F",
+        "SP500_FUTURE": "ES=F",
+        "SP500-FUTURE": "ES=F",
+    }
+    try:
+        return aliases[value]
+    except KeyError as exc:
+        raise ValueError(f"unsupported futures symbol: {symbol}") from exc
+
+
+def _yahoo_interval(interval: str) -> tuple[str, str, int | None]:
+    intervals = {
+        "1m": ("1m", "1d", None),
+        "3m": ("1m", "1d", 3),
+        "5m": ("5m", "5d", None),
+        "15m": ("15m", "5d", None),
+        "30m": ("30m", "1mo", None),
+        "1h": ("60m", "1mo", None),
+        "4h": ("60m", "3mo", 240),
+        "1d": ("1d", "1y", None),
+    }
+    try:
+        return intervals[interval.strip().lower()]
+    except KeyError as exc:
+        raise ValueError(f"unsupported futures interval: {interval}") from exc
+
+
+def _candles_from_yahoo_chart(payload: Any) -> list[Candle]:
+    if not isinstance(payload, dict):
+        raise ValueError("unexpected Yahoo Finance chart response")
+    try:
+        chart = payload["chart"]
+        error = chart.get("error")
+        if error:
+            raise ValueError(f"Yahoo Finance chart error: {error}")
+        result = chart["result"][0]
+        timestamps = result["timestamp"]
+        quote = result["indicators"]["quote"][0]
+        opens = quote["open"]
+        highs = quote["high"]
+        lows = quote["low"]
+        closes = quote["close"]
+        volumes = quote.get("volume", [])
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("unexpected Yahoo Finance chart response") from exc
+
+    candles: list[Candle] = []
+    for index, timestamp in enumerate(timestamps):
+        try:
+            open_value = opens[index]
+            high_value = highs[index]
+            low_value = lows[index]
+            close_value = closes[index]
+        except IndexError as exc:
+            raise ValueError("unexpected Yahoo Finance chart response") from exc
+        if any(
+            value is None for value in (timestamp, open_value, high_value, low_value, close_value)
+        ):
+            continue
+        volume_value = volumes[index] if index < len(volumes) else 0
+        candles.append(
+            Candle(
+                open_time=int(timestamp) * 1000,
+                open=float(open_value),
+                high=float(high_value),
+                low=float(low_value),
+                close=float(close_value),
+                volume=0.0 if volume_value is None else float(volume_value),
+            )
+        )
+    if not candles:
+        raise ValueError("Yahoo Finance chart response returned no usable candles")
+    return candles
+
+
+def _aggregate_candles(candles: list[Candle], minutes: int) -> list[Candle]:
+    bucket_ms = minutes * 60 * 1000
+    buckets: dict[int, list[Candle]] = {}
+    for candle in candles:
+        bucket_open = (candle.open_time // bucket_ms) * bucket_ms
+        buckets.setdefault(bucket_open, []).append(candle)
+    aggregated: list[Candle] = []
+    for bucket_open in sorted(buckets):
+        bucket = sorted(buckets[bucket_open], key=lambda candle: candle.open_time)
+        aggregated.append(
+            Candle(
+                open_time=bucket_open,
+                open=bucket[0].open,
+                high=max(candle.high for candle in bucket),
+                low=min(candle.low for candle in bucket),
+                close=bucket[-1].close,
+                volume=sum(candle.volume for candle in bucket),
+            )
+        )
+    return aggregated

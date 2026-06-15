@@ -47,6 +47,11 @@ const tabs: { mode: Mode; label: string }[] = [
   { mode: "lab", label: "Strategy Lab" },
 ];
 
+const liveMarketOptions = [
+  { value: "crypto_spot", label: "Crypto Spot" },
+  { value: "cme_futures", label: "US Index Futures" },
+] satisfies SelectOption[];
+
 const liveSymbolOptions = [
   { value: "BTCUSDT", label: "BTCUSDT" },
   { value: "ETHUSDT", label: "ETHUSDT" },
@@ -57,6 +62,15 @@ const liveSymbolOptions = [
   { value: "ADAUSDT", label: "ADAUSDT" },
   { value: "AVAXUSDT", label: "AVAXUSDT" },
 ] satisfies SelectOption[];
+
+const liveFuturesSymbolOptions = [
+  { value: "ES=F", label: "S&P 500 Future" },
+] satisfies SelectOption[];
+
+const liveSymbolsByMarket: Record<string, SelectOption[]> = {
+  crypto_spot: liveSymbolOptions,
+  cme_futures: liveFuturesSymbolOptions,
+};
 
 const liveIntervalOptions = [
   { value: "1m", label: "1m" },
@@ -134,6 +148,7 @@ const liveStatus = ref("Ready");
 const liveStatusType = ref<StatusType>("");
 const labStatus = ref("Ready");
 const labStatusType = ref<StatusType>("");
+const liveMarket = ref("crypto_spot");
 const liveSymbol = ref("BTCUSDT");
 const liveInterval = ref("1m");
 const liveLimit = ref<string | number>(180);
@@ -150,6 +165,9 @@ const liveStrategyOptions = computed(() => [
   { name: "all", description: "All strategies" },
   ...strategies.value,
 ]);
+const activeLiveSymbolOptions = computed(
+  () => liveSymbolsByMarket[liveMarket.value] ?? liveSymbolOptions,
+);
 const activeLiveStrategyLabel = computed(() =>
   settings.strategy === "all" ? "All strategies" : strategyLabel(settings.strategy),
 );
@@ -159,7 +177,11 @@ const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
 const filteredSignals = computed(() => livePayload.value?.signals ?? []);
 const filteredPaperMarkers = computed(() => livePayload.value?.paper_markers ?? []);
 
-watch([liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {
+watch(liveMarket, () => {
+  liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
+});
+
+watch([liveMarket, liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {
   if (activeMode.value === "live") {
     refreshLiveChart();
   }
@@ -262,11 +284,12 @@ async function runCurrentMode() {
 async function loadLiveChart() {
   setLiveStatus("Loading chart", "busy");
   try {
-    const query = toQuery({
-      ...settings,
-      symbol: liveSymbol.value,
-      interval: liveInterval.value,
-      limit: liveLimit.value,
+      const query = toQuery({
+        ...settings,
+        market: liveMarket.value,
+        symbol: liveSymbol.value,
+        interval: liveInterval.value,
+        limit: liveLimit.value,
     });
     livePayload.value = await requestJson<LiveChartPayload>(`/api/live-chart?${query}`);
     setLiveStatus(`Updated ${new Date().toLocaleTimeString()}`);
@@ -523,6 +546,10 @@ function errorMessage(error: unknown): string {
       </div>
       <div class="live-market-strip">
         <div class="ticker-pill">
+          <span>Source</span>
+          <b>{{ livePayload?.data_source ?? "Binance Spot public REST" }}</b>
+        </div>
+        <div class="ticker-pill">
           <span>Market</span>
           <b>{{ livePayload?.symbol ?? liveSymbol }}</b>
         </div>
@@ -545,10 +572,22 @@ function errorMessage(error: unknown): string {
       </div>
       <div class="live-controls">
         <label>
+          <span>Market</span>
+          <select v-model="liveMarket">
+            <option
+              v-for="option in liveMarketOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label>
           <span>Symbol</span>
           <select v-model="liveSymbol">
             <option
-              v-for="option in liveSymbolOptions"
+              v-for="option in activeLiveSymbolOptions"
               :key="option.value"
               :value="option.value"
             >

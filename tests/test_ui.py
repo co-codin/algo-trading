@@ -1,16 +1,26 @@
 import json
 import tempfile
 import unittest
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
+from unittest.mock import patch
+from urllib.request import urlopen
 
-from algo_trading.data import TransientMarketDataError
+from algo_trading.data import (
+    BinanceMarketDataClient,
+    TransientMarketDataError,
+    YahooFuturesMarketDataClient,
+)
 from algo_trading.models import Candle
 from algo_trading.ui import (
+    create_handler,
     is_frontend_route,
     is_vite_asset_route,
     load_run_details,
     list_runs,
     live_chart_payload,
+    market_data_client_from_payload,
     paper_trade_markers,
     run_backtest_payload,
     strategies_payload,
@@ -73,11 +83,18 @@ class UiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("const liveSymbolOptions = [", source)
+        self.assertIn("const liveMarketOptions = [", source)
+        self.assertIn("const liveSymbolsByMarket", source)
         self.assertIn("const liveIntervalOptions = [", source)
         self.assertIn("const liveCandleOptions = [", source)
         self.assertIn("const liveStrategyOptions = computed(() => [", source)
         self.assertIn('name: "all"', source)
         self.assertIn("All strategies", source)
+        self.assertIn('value: "crypto_spot"', source)
+        self.assertIn('value: "cme_futures"', source)
+        self.assertIn('value: "ES=F"', source)
+        self.assertIn("S&P 500 Future", source)
+        self.assertIn('<select v-model="liveMarket"', source)
         self.assertIn('<select v-model="liveSymbol"', source)
         self.assertIn('<select v-model="liveInterval"', source)
         self.assertIn('<select v-model="liveLimit"', source)
@@ -97,9 +114,10 @@ class UiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";', source)
-        self.assertIn("watch([liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {", source)
+        self.assertIn("watch([liveMarket, liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {", source)
         self.assertIn('if (activeMode.value === "live") {', source)
         self.assertIn("refreshLiveChart();", source)
+        self.assertIn("market: liveMarket.value", source)
 
     def test_all_strategies_selection_stays_live_only(self):
         source = (
@@ -329,6 +347,99 @@ class UiTests(unittest.TestCase):
         self.assertIn("supertrend", strategy_names)
         self.assertIn("momentum-scalping", strategy_names)
         self.assertEqual(payload["strategy"], "all")
+
+    def test_live_chart_payload_accepts_sp500_future_with_all_strategy_signals(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])]
+
+        payload = live_chart_payload(
+            {
+                "market": "cme_futures",
+                "symbol": "ES=F",
+                "interval": "5m",
+                "limit": 7,
+                "strategy": "all",
+                "fast_ema": 2,
+                "slow_ema": 5,
+                "macd_signal": 2,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+                "rsi_midline": 50,
+                "bollinger_period": 3,
+                "bollinger_stddev": 1,
+                "donchian_period": 3,
+                "atr_period": 2,
+                "supertrend_multiplier": 1,
+                "vwap_period": 3,
+                "vwap_threshold_pct": 0,
+                "stoch_rsi_period": 2,
+                "stoch_rsi_oversold": 20,
+                "stoch_rsi_overbought": 80,
+                "ema_ribbon_fast": 2,
+                "ema_ribbon_mid": 3,
+                "ema_ribbon_slow": 5,
+                "momentum_period": 2,
+            },
+            client=client,
+        )
+
+        strategy_names = {
+            str(marker["reason"]).split(": ", 1)[0] for marker in payload["signals"]
+        }
+        self.assertEqual(client.kline_symbols, ["ES=F"])
+        self.assertEqual(payload["market"], "cme_futures")
+        self.assertEqual(payload["symbol"], "ES=F")
+        self.assertEqual(payload["strategy"], "all")
+        self.assertIn("ema-rsi", strategy_names)
+        self.assertIn("macd", strategy_names)
+
+    def test_market_data_client_from_payload_selects_futures_provider(self):
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "cme_futures"}),
+            YahooFuturesMarketDataClient,
+        )
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "crypto_spot"}),
+            BinanceMarketDataClient,
+        )
+
+    def test_live_chart_route_uses_market_provider_from_query(self):
+        client = FakeClient()
+        client.candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("algo_trading.ui.YahooFuturesMarketDataClient", return_value=client):
+                server = ThreadingHTTPServer(
+                    ("127.0.0.1", 0),
+                    create_handler(output_root=Path(tmp)),
+                )
+                thread = Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    url = (
+                        f"http://127.0.0.1:{server.server_port}/api/live-chart"
+                        "?market=cme_futures&symbol=ES%3DF&interval=5m&limit=7"
+                        "&strategy=all&fast_ema=2&slow_ema=5&macd_signal=2"
+                        "&rsi_period=2&rsi_overbought=100&rsi_oversold=0"
+                        "&bollinger_period=3&donchian_period=3&atr_period=2"
+                        "&vwap_period=3&stoch_rsi_period=2"
+                        "&ema_ribbon_fast=2&ema_ribbon_mid=3&ema_ribbon_slow=5"
+                        "&momentum_period=2"
+                    )
+                    with urlopen(url, timeout=5) as response:
+                        payload = json.loads(response.read().decode("utf-8"))
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=1)
+
+        self.assertEqual(payload["market"], "cme_futures")
+        self.assertEqual(payload["symbol"], "ES=F")
+        self.assertEqual(client.kline_symbols, ["ES=F"])
 
     def test_live_chart_payload_retries_transient_market_data_failures(self):
         client = FlakyLiveClient()

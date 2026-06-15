@@ -36,6 +36,8 @@ export type Marker = {
 
 export type LiveChartPayload = {
   ok: true;
+  market: string;
+  data_source: string;
   symbol: string;
   interval: string;
   strategy: string;

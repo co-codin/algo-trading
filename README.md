@@ -1,8 +1,8 @@
 # Algo Trading
 
-Local crypto backtesting and paper trading.
+Local market backtesting and paper trading.
 
-Safety boundary: this project uses read-only public market data only. It does not accept Binance API keys and cannot place real orders.
+Safety boundary: this project uses read-only public market data only. It does not accept exchange API keys and cannot place real orders.
 
 ## Usage
 
@@ -29,7 +29,7 @@ The frontend is a Vue 3 control panel with direct URLs:
 - `http://127.0.0.1:8765/runs`
 - `http://127.0.0.1:8765/lab`
 
-The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts for public Binance candles. It overlays strategy long/short markers plus simulated paper entry/exit markers from local `runs/paper/` output. Choose `All strategies` in the live strategy selector to draw every strategy's long/short markers on one chart with strategy-prefixed labels.
+The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST. The S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`. It overlays strategy long/short markers plus simulated paper entry/exit markers from local `runs/paper/` output. Choose `All strategies` in the live strategy selector to draw every strategy's long/short markers on one chart with strategy-prefixed labels.
 
 The `Strategy Lab` view ranks strategy and preset combinations across selected symbols using simulated backtests. Treat this as research support, not a profit guarantee.
 

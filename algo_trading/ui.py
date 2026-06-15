@@ -16,6 +16,7 @@ from algo_trading.data import (
     BinanceMarketDataClient,
     MarketDataClient,
     TransientMarketDataError,
+    YahooFuturesMarketDataClient,
 )
 from algo_trading.models import (
     AllowedSide,
@@ -39,6 +40,8 @@ from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 WEB_ROOT = Path(__file__).with_name("web")
 WEB_DIST_ROOT = WEB_ROOT / "dist"
 ALL_STRATEGIES_VALUE = "all"
+CRYPTO_SPOT_MARKET = "crypto_spot"
+CME_FUTURES_MARKET = "cme_futures"
 FRONTEND_ROUTES = frozenset(
     {
         "",
@@ -155,8 +158,9 @@ def live_chart_payload(
     client: MarketDataClient | None = None,
     output_root: str | Path = "runs",
 ) -> dict[str, Any]:
-    market_client = client or BinanceMarketDataClient()
-    symbol = str(payload.get("symbol") or "BTCUSDT").upper()
+    market = _market_from_payload(payload)
+    market_client = client or market_data_client_from_payload(payload)
+    symbol = _live_symbol_from_payload(payload, market)
     limit = _int_value(payload, "limit", 180)
     retries = _int_value(payload, "market_data_retries", 2)
     retry_delay = _float_value(payload, "retry_delay", 0.5)
@@ -188,6 +192,8 @@ def live_chart_payload(
     )
     return {
         "ok": True,
+        "market": market,
+        "data_source": _data_source_label(market),
         "symbol": config.symbol,
         "interval": config.interval,
         "strategy": strategy_value,
@@ -200,6 +206,15 @@ def live_chart_payload(
             output_root,
         ),
     }
+
+
+def market_data_client_from_payload(payload: dict[str, Any]) -> MarketDataClient:
+    market = _market_from_payload(payload)
+    if market == CME_FUTURES_MARKET:
+        return YahooFuturesMarketDataClient()
+    if market == CRYPTO_SPOT_MARKET:
+        return BinanceMarketDataClient()
+    raise ValueError(f"unsupported market: {market}")
 
 
 def strategies_payload() -> dict[str, Any]:
@@ -451,10 +466,11 @@ def create_handler(
                 return
             if parsed.path == "/api/live-chart":
                 query = urllib.parse.parse_qs(parsed.query)
+                payload = _query_payload(query)
                 self._send_json(
                     live_chart_payload(
-                        _query_payload(query),
-                        client_factory(),
+                        payload,
+                        _live_client_for_handler(payload, client_factory),
                         output_path,
                     )
                 )
@@ -553,6 +569,44 @@ def _resolve_symbols(
         limit = int(parts[1]) if len(parts) > 1 else top
         return [item.symbol for item in ranked_usdt_symbols(client.get_24h_tickers(), limit)]
     return parse_symbol_list(text)
+
+
+def _market_from_payload(payload: dict[str, Any]) -> str:
+    market = str(payload.get("market") or CRYPTO_SPOT_MARKET).strip().lower()
+    aliases = {
+        "spot": CRYPTO_SPOT_MARKET,
+        "crypto": CRYPTO_SPOT_MARKET,
+        "crypto_spot": CRYPTO_SPOT_MARKET,
+        "binance": CRYPTO_SPOT_MARKET,
+        "futures": CME_FUTURES_MARKET,
+        "cme": CME_FUTURES_MARKET,
+        "cme_futures": CME_FUTURES_MARKET,
+        "us_index_futures": CME_FUTURES_MARKET,
+    }
+    try:
+        return aliases[market]
+    except KeyError as exc:
+        raise ValueError(f"unsupported market: {market}") from exc
+
+
+def _live_symbol_from_payload(payload: dict[str, Any], market: str) -> str:
+    default_symbol = "ES=F" if market == CME_FUTURES_MARKET else "BTCUSDT"
+    return str(payload.get("symbol") or default_symbol).upper()
+
+
+def _data_source_label(market: str) -> str:
+    if market == CME_FUTURES_MARKET:
+        return "Yahoo Finance delayed CME futures"
+    return "Binance Spot public REST"
+
+
+def _live_client_for_handler(
+    payload: dict[str, Any],
+    client_factory: Callable[[], MarketDataClient],
+) -> MarketDataClient:
+    if client_factory is BinanceMarketDataClient:
+        return market_data_client_from_payload(payload)
+    return client_factory()
 
 
 def _query_payload(query: dict[str, list[str]]) -> dict[str, Any]:
