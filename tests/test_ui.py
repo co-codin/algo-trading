@@ -101,6 +101,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('<select v-model="liveMarket"', source)
         self.assertIn('<select v-model="liveSymbol"', source)
         self.assertIn('<select v-model="liveInterval"', source)
+        self.assertIn('const liveInterval = ref("5m");', source)
         self.assertIn('<select v-model="liveLimit"', source)
         self.assertIn('class="live-strategy-field"', source)
         self.assertIn('<select v-model="settings.strategy"', source)
