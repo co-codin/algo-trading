@@ -52,6 +52,15 @@ The UI strategy dropdown supports:
 - `stoch-rsi-reversal`: stochastic RSI leaving extreme levels.
 - `ema-ribbon`: EMA ribbon alignment trend following.
 - `momentum-scalping`: short-term momentum with RSI and MACD confirmation.
+- `keltner-breakout`: breakout through ATR-width Keltner channels.
+- `ema-pullback`: trend continuation after price reclaims the fast EMA.
+- `atr-trailing-trend`: ATR trailing trend direction flips.
+- `cci-reversal`: CCI leaving overbought or oversold extremes.
+- `williams-r-reversal`: Williams %R leaving overbought or oversold extremes.
+- `bollinger-squeeze-release`: Bollinger band squeeze expansion breakout.
+- `obv-trend`: OBV confirmation aligned with price trend.
+- `volume-breakout`: Donchian breakout confirmed by above-average volume.
+- `vwap-trend-continuation`: VWAP reclaim with EMA trend confirmation.
 
 Presets are `custom`, `conservative`, `balanced`, and `aggressive`. Presets replace the related risk and indicator values with deterministic settings that are written into each run's `config.json`.
 
@@ -148,6 +157,6 @@ Paper trading is intentionally single-symbol in v1. Use separate bounded session
 
 Use `--allowed-side long-only` or `--allowed-side short-only` to focus a run on one side. The default is `both`.
 
-Strategy-specific CLI options include `--macd-signal`, `--bollinger-period`, `--bollinger-stddev`, `--donchian-period`, and `--rsi-midline`. All strategies still use read-only public market data and only write simulated backtest or paper-trading outputs.
+Strategy-specific CLI options include the shared EMA/RSI knobs plus MACD, Bollinger, Donchian, ATR/SuperTrend, VWAP, stochastic RSI, EMA ribbon, momentum, Keltner, CCI, Williams %R, volume, and squeeze-threshold settings. All strategies still use read-only public market data and only write simulated backtest or paper-trading outputs.
 
 Outputs are written under `runs/backtests/<timestamp>/` or `runs/paper/<timestamp>/` and include `config.json`, `trades.csv`, `equity.csv`, and `summary.json`.

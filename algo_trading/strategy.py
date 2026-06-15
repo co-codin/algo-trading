@@ -5,15 +5,21 @@ from typing import Protocol
 
 from algo_trading.indicators import (
     atr,
+    bollinger_width,
+    commodity_channel_index,
     ema,
+    keltner_channels,
     momentum,
+    on_balance_volume,
     previous_rolling_high,
     previous_rolling_low,
     rolling_mean,
     rolling_stddev,
+    rolling_volume_mean,
     rolling_vwap,
     rsi,
     stochastic_rsi,
+    williams_r,
 )
 from algo_trading.models import (
     AllowedSide,
@@ -51,6 +57,15 @@ class StrategyContext:
     ema_ribbon_mid_values: list[float]
     ema_ribbon_slow_values: list[float]
     momentum_values: list[float]
+    keltner_mid: list[float]
+    keltner_upper: list[float]
+    keltner_lower: list[float]
+    cci_values: list[float]
+    williams_r_values: list[float]
+    bollinger_width_values: list[float]
+    obv_values: list[float]
+    obv_signal_values: list[float]
+    volume_mean: list[float]
 
 
 class TradingStrategy(Protocol):
@@ -123,6 +138,16 @@ def apply_strategy_preset(config: StrategyConfig) -> StrategyConfig:
             ema_ribbon_mid=34,
             ema_ribbon_slow=89,
             momentum_period=14,
+            keltner_multiplier=2.4,
+            cci_period=30,
+            cci_oversold=-120.0,
+            cci_overbought=120.0,
+            williams_period=21,
+            williams_oversold=-85.0,
+            williams_overbought=-15.0,
+            volume_period=30,
+            volume_multiplier=1.8,
+            squeeze_threshold_pct=0.04,
         )
     if preset is StrategyPreset.BALANCED:
         return replace(
@@ -152,6 +177,16 @@ def apply_strategy_preset(config: StrategyConfig) -> StrategyConfig:
             ema_ribbon_mid=21,
             ema_ribbon_slow=55,
             momentum_period=10,
+            keltner_multiplier=2.0,
+            cci_period=20,
+            cci_oversold=-100.0,
+            cci_overbought=100.0,
+            williams_period=14,
+            williams_oversold=-80.0,
+            williams_overbought=-20.0,
+            volume_period=20,
+            volume_multiplier=1.5,
+            squeeze_threshold_pct=0.05,
         )
     if preset is StrategyPreset.AGGRESSIVE:
         return replace(
@@ -181,6 +216,16 @@ def apply_strategy_preset(config: StrategyConfig) -> StrategyConfig:
             ema_ribbon_mid=13,
             ema_ribbon_slow=34,
             momentum_period=5,
+            keltner_multiplier=1.4,
+            cci_period=10,
+            cci_oversold=-90.0,
+            cci_overbought=90.0,
+            williams_period=7,
+            williams_oversold=-75.0,
+            williams_overbought=-25.0,
+            volume_period=10,
+            volume_multiplier=1.25,
+            squeeze_threshold_pct=0.08,
         )
     raise ValueError(f"unsupported preset: {config.preset}")
 
@@ -204,6 +249,12 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         middle - (stddev * config.bollinger_stddev)
         for middle, stddev in zip(bollinger_mid, bollinger_stddev)
     ]
+    keltner_mid, keltner_upper, keltner_lower = keltner_channels(
+        candles,
+        config.atr_period,
+        config.keltner_multiplier,
+    )
+    obv_values = on_balance_volume(candles)
     return StrategyContext(
         candles=candles,
         closes=closes,
@@ -227,6 +278,19 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         ema_ribbon_mid_values=ema(closes, config.ema_ribbon_mid),
         ema_ribbon_slow_values=ema(closes, config.ema_ribbon_slow),
         momentum_values=momentum(closes, config.momentum_period),
+        keltner_mid=keltner_mid,
+        keltner_upper=keltner_upper,
+        keltner_lower=keltner_lower,
+        cci_values=commodity_channel_index(candles, config.cci_period),
+        williams_r_values=williams_r(candles, config.williams_period),
+        bollinger_width_values=bollinger_width(
+            bollinger_upper,
+            bollinger_lower,
+            bollinger_mid,
+        ),
+        obv_values=obv_values,
+        obv_signal_values=rolling_mean(obv_values, config.volume_period),
+        volume_mean=rolling_volume_mean(candles, config.volume_period),
     )
 
 
@@ -682,6 +746,396 @@ class MomentumScalpingStrategy:
         return Signal(SignalType.HOLD, "no_signal")
 
 
+class KeltnerBreakoutStrategy:
+    name = StrategyName.KELTNER_BREAKOUT
+    description = "Keltner channel breakout using ATR width"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.atr_period or index >= len(context.keltner_upper):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous_close = context.closes[index - 1]
+        current_close = context.closes[index]
+        if (
+            previous_close <= context.keltner_upper[index - 1]
+            and current_close > context.keltner_upper[index]
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "keltner_breakout_long")
+        if (
+            previous_close >= context.keltner_lower[index - 1]
+            and current_close < context.keltner_lower[index]
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "keltner_breakout_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.keltner_mid):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current_close = context.closes[index]
+        if side is PositionSide.LONG and current_close <= context.keltner_mid[index]:
+            return Signal(SignalType.EXIT_LONG, "keltner_midline_cross")
+        if side is PositionSide.SHORT and current_close >= context.keltner_mid[index]:
+            return Signal(SignalType.EXIT_SHORT, "keltner_midline_cross")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class EmaPullbackStrategy:
+    name = StrategyName.EMA_PULLBACK
+    description = "Trend continuation when price reclaims the fast EMA"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.slow_ema or index >= len(context.fast):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        bullish_trend = context.fast[index] > context.slow[index]
+        bearish_trend = context.fast[index] < context.slow[index]
+        if (
+            bullish_trend
+            and context.closes[index - 1] < context.fast[index - 1]
+            and context.closes[index] >= context.fast[index]
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "ema_pullback_long")
+        if (
+            bearish_trend
+            and context.closes[index - 1] > context.fast[index - 1]
+            and context.closes[index] <= context.fast[index]
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "ema_pullback_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= min(len(context.fast), len(context.slow)):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        if side is PositionSide.LONG and context.fast[index] <= context.slow[index]:
+            return Signal(SignalType.EXIT_LONG, "ema_pullback_trend_lost")
+        if side is PositionSide.SHORT and context.fast[index] >= context.slow[index]:
+            return Signal(SignalType.EXIT_SHORT, "ema_pullback_trend_lost")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class AtrTrailingTrendStrategy:
+    name = StrategyName.ATR_TRAILING_TREND
+    description = "ATR trailing trend following on direction flips"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.atr_period or index >= len(context.supertrend_direction):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous = context.supertrend_direction[index - 1]
+        current = context.supertrend_direction[index]
+        if previous <= 0 < current and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "atr_trailing_trend_long")
+        if previous >= 0 > current and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "atr_trailing_trend_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.supertrend_direction):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.supertrend_direction[index]
+        if side is PositionSide.LONG and current < 0:
+            return Signal(SignalType.EXIT_LONG, "atr_trailing_trend_short")
+        if side is PositionSide.SHORT and current > 0:
+            return Signal(SignalType.EXIT_SHORT, "atr_trailing_trend_long")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class CciReversalStrategy:
+    name = StrategyName.CCI_REVERSAL
+    description = "CCI reversal after leaving extreme levels"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.cci_period or index >= len(context.cci_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous = context.cci_values[index - 1]
+        current = context.cci_values[index]
+        if previous <= config.cci_oversold < current and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "cci_reversal_long")
+        if previous >= config.cci_overbought > current and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "cci_reversal_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.cci_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.cci_values[index]
+        if side is PositionSide.LONG and current >= 0.0:
+            return Signal(SignalType.EXIT_LONG, "cci_zero_line")
+        if side is PositionSide.SHORT and current <= 0.0:
+            return Signal(SignalType.EXIT_SHORT, "cci_zero_line")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class WilliamsRReversalStrategy:
+    name = StrategyName.WILLIAMS_R_REVERSAL
+    description = "Williams %R reversal after leaving extreme levels"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.williams_period or index >= len(context.williams_r_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous = context.williams_r_values[index - 1]
+        current = context.williams_r_values[index]
+        if previous <= config.williams_oversold < current and _side_allowed(
+            config,
+            PositionSide.LONG,
+        ):
+            return Signal(SignalType.ENTER_LONG, "williams_r_reversal_long")
+        if previous >= config.williams_overbought > current and _side_allowed(
+            config,
+            PositionSide.SHORT,
+        ):
+            return Signal(SignalType.ENTER_SHORT, "williams_r_reversal_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.williams_r_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.williams_r_values[index]
+        if side is PositionSide.LONG and current >= -50.0:
+            return Signal(SignalType.EXIT_LONG, "williams_r_midline")
+        if side is PositionSide.SHORT and current <= -50.0:
+            return Signal(SignalType.EXIT_SHORT, "williams_r_midline")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class BollingerSqueezeReleaseStrategy:
+    name = StrategyName.BOLLINGER_SQUEEZE_RELEASE
+    description = "Bollinger squeeze expansion breakout"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.bollinger_period or index >= len(context.bollinger_width_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous_width = context.bollinger_width_values[index - 1]
+        current_width = context.bollinger_width_values[index]
+        current_close = context.closes[index]
+        squeeze_released = previous_width <= config.squeeze_threshold_pct and current_width > previous_width
+        if (
+            squeeze_released
+            and current_close > context.bollinger_upper[index]
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "bollinger_squeeze_release_long")
+        if (
+            squeeze_released
+            and current_close < context.bollinger_lower[index]
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "bollinger_squeeze_release_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.bollinger_mid):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current_close = context.closes[index]
+        if side is PositionSide.LONG and current_close <= context.bollinger_mid[index]:
+            return Signal(SignalType.EXIT_LONG, "bollinger_squeeze_midline")
+        if side is PositionSide.SHORT and current_close >= context.bollinger_mid[index]:
+            return Signal(SignalType.EXIT_SHORT, "bollinger_squeeze_midline")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class ObvTrendStrategy:
+    name = StrategyName.OBV_TREND
+    description = "OBV trend confirmation with price trend"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.volume_period or index >= len(context.obv_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        if (
+            _crossed_above(context.obv_values, context.obv_signal_values, index)
+            and context.closes[index] > context.slow[index]
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "obv_trend_long")
+        if (
+            _crossed_below(context.obv_values, context.obv_signal_values, index)
+            and context.closes[index] < context.slow[index]
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "obv_trend_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.obv_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        if side is PositionSide.LONG and context.obv_values[index] < context.obv_signal_values[index]:
+            return Signal(SignalType.EXIT_LONG, "obv_trend_lost")
+        if side is PositionSide.SHORT and context.obv_values[index] > context.obv_signal_values[index]:
+            return Signal(SignalType.EXIT_SHORT, "obv_trend_lost")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class VolumeBreakoutStrategy:
+    name = StrategyName.VOLUME_BREAKOUT
+    description = "Donchian breakout confirmed by above-average volume"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index < max(config.donchian_period, config.volume_period) or index >= len(context.closes):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current_close = context.closes[index]
+        current_volume = context.candles[index].volume
+        volume_confirmed = current_volume > context.volume_mean[index] * config.volume_multiplier
+        if (
+            volume_confirmed
+            and current_close > context.donchian_high[index]
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "volume_breakout_long")
+        if (
+            volume_confirmed
+            and current_close < context.donchian_low[index]
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "volume_breakout_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index < config.donchian_period or index >= len(context.closes):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current_close = context.closes[index]
+        if side is PositionSide.LONG and current_close < context.donchian_low[index]:
+            return Signal(SignalType.EXIT_LONG, "volume_breakout_low")
+        if side is PositionSide.SHORT and current_close > context.donchian_high[index]:
+            return Signal(SignalType.EXIT_SHORT, "volume_breakout_high")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class VwapTrendContinuationStrategy:
+    name = StrategyName.VWAP_TREND_CONTINUATION
+    description = "VWAP trend continuation with EMA confirmation"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < max(config.slow_ema, config.vwap_period) or index >= len(context.vwap):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        bullish_trend = context.fast[index] > context.slow[index]
+        bearish_trend = context.fast[index] < context.slow[index]
+        if (
+            bullish_trend
+            and context.closes[index - 1] <= context.vwap[index - 1]
+            and context.closes[index] > context.vwap[index]
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "vwap_trend_continuation_long")
+        if (
+            bearish_trend
+            and context.closes[index - 1] >= context.vwap[index - 1]
+            and context.closes[index] < context.vwap[index]
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "vwap_trend_continuation_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.vwap):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current_close = context.closes[index]
+        if side is PositionSide.LONG and current_close < context.vwap[index]:
+            return Signal(SignalType.EXIT_LONG, "vwap_trend_lost")
+        if side is PositionSide.SHORT and current_close > context.vwap[index]:
+            return Signal(SignalType.EXIT_SHORT, "vwap_trend_lost")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
 def _side_allowed(config: StrategyConfig, side: PositionSide) -> bool:
     if side is PositionSide.LONG:
         return config.allowed_side in {AllowedSide.BOTH, AllowedSide.LONG_ONLY}
@@ -805,4 +1259,13 @@ _STRATEGIES: dict[StrategyName, TradingStrategy] = {
     StrategyName.STOCH_RSI_REVERSAL: StochRsiReversalStrategy(),
     StrategyName.EMA_RIBBON: EmaRibbonStrategy(),
     StrategyName.MOMENTUM_SCALPING: MomentumScalpingStrategy(),
+    StrategyName.KELTNER_BREAKOUT: KeltnerBreakoutStrategy(),
+    StrategyName.EMA_PULLBACK: EmaPullbackStrategy(),
+    StrategyName.ATR_TRAILING_TREND: AtrTrailingTrendStrategy(),
+    StrategyName.CCI_REVERSAL: CciReversalStrategy(),
+    StrategyName.WILLIAMS_R_REVERSAL: WilliamsRReversalStrategy(),
+    StrategyName.BOLLINGER_SQUEEZE_RELEASE: BollingerSqueezeReleaseStrategy(),
+    StrategyName.OBV_TREND: ObvTrendStrategy(),
+    StrategyName.VOLUME_BREAKOUT: VolumeBreakoutStrategy(),
+    StrategyName.VWAP_TREND_CONTINUATION: VwapTrendContinuationStrategy(),
 }

@@ -225,6 +225,9 @@ class UiTests(unittest.TestCase):
                     "fast_ema": 1,
                     "slow_ema": 2,
                     "rsi_period": 2,
+                    "strategy": "keltner-breakout",
+                    "atr_period": 3,
+                    "keltner_multiplier": 0.5,
                     "fee_rate": 0,
                     "slippage_rate": 0,
                 },
@@ -238,6 +241,10 @@ class UiTests(unittest.TestCase):
                 ["BTCUSDT", "ETHUSDT"],
             )
             self.assertEqual(len(list(Path(tmp).glob("backtests/*/summary.json"))), 2)
+            config_path = sorted(Path(tmp).glob("backtests/*/config.json"))[0]
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(config["strategy"], "keltner-breakout")
+            self.assertEqual(config["keltner_multiplier"], 0.5)
 
     def test_list_runs_reads_recent_summaries(self):
         with tempfile.TemporaryDirectory() as tmp:

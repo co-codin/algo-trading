@@ -273,12 +273,23 @@ def _validate_config(config: StrategyConfig) -> None:
         or config.vwap_period <= 0
         or config.stoch_rsi_period <= 0
         or config.momentum_period <= 0
+        or config.cci_period <= 0
+        or config.williams_period <= 0
+        or config.volume_period <= 0
     ):
         raise ValueError("strategy periods must be positive")
+    if config.keltner_multiplier <= 0 or config.volume_multiplier <= 0:
+        raise ValueError("strategy multipliers must be positive")
     if config.vwap_threshold_pct < 0:
         raise ValueError("strategy vwap_threshold_pct cannot be negative")
+    if config.squeeze_threshold_pct < 0:
+        raise ValueError("strategy squeeze_threshold_pct cannot be negative")
     if not 0 <= config.stoch_rsi_oversold < config.stoch_rsi_overbought <= 100:
         raise ValueError("strategy stochastic rsi thresholds must satisfy 0 <= oversold < overbought <= 100")
+    if config.cci_oversold >= config.cci_overbought:
+        raise ValueError("strategy cci thresholds must satisfy oversold < overbought")
+    if not -100 <= config.williams_oversold < config.williams_overbought <= 0:
+        raise ValueError("strategy williams thresholds must satisfy -100 <= oversold < overbought <= 0")
     if not 0 < config.ema_ribbon_fast < config.ema_ribbon_mid < config.ema_ribbon_slow:
         raise ValueError("strategy ema ribbon periods must satisfy fast < mid < slow")
     if not 0 <= config.rsi_midline <= 100:
@@ -318,4 +329,22 @@ def _required_candles(config: StrategyConfig) -> int:
         return config.ema_ribbon_slow + 2
     if strategy is StrategyName.MOMENTUM_SCALPING:
         return max(config.slow_ema, config.macd_signal + 1, config.rsi_period + 1, config.momentum_period + 2)
+    if strategy is StrategyName.KELTNER_BREAKOUT:
+        return config.atr_period + 1
+    if strategy is StrategyName.EMA_PULLBACK:
+        return config.slow_ema + 1
+    if strategy is StrategyName.ATR_TRAILING_TREND:
+        return config.atr_period + 2
+    if strategy is StrategyName.CCI_REVERSAL:
+        return config.cci_period + 2
+    if strategy is StrategyName.WILLIAMS_R_REVERSAL:
+        return config.williams_period + 2
+    if strategy is StrategyName.BOLLINGER_SQUEEZE_RELEASE:
+        return config.bollinger_period + 2
+    if strategy is StrategyName.OBV_TREND:
+        return max(config.slow_ema, config.volume_period) + 1
+    if strategy is StrategyName.VOLUME_BREAKOUT:
+        return max(config.donchian_period, config.volume_period) + 1
+    if strategy is StrategyName.VWAP_TREND_CONTINUATION:
+        return max(config.slow_ema, config.vwap_period) + 1
     return max(config.slow_ema, config.rsi_period + 1)
