@@ -3,7 +3,22 @@ name = "algo-trading"
 version = "0.1.0"
 description = "Local crypto backtesting and paper trading simulator"
 requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.136,<1",
+    "uvicorn[standard]>=0.40,<1",
+    "psycopg[binary]>=3.3,<4",
+]
 
 [project.scripts]
 algo-trading = "algo_trading.cli:main"
 algo-trading-ui = "algo_trading.ui:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["algo_trading*"]
+
+[tool.setuptools.package-data]
+algo_trading = ["web/dist/**/*"]

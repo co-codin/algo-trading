@@ -1,11 +1,32 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: algo
+      POSTGRES_PASSWORD: algo
+      POSTGRES_DB: algo_trading
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U algo -d algo_trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   algo-trading:
     build:
       context: .
     image: binance-algo-trading:local
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${PORT:-8765}:8765"
     volumes:
       - ./runs:/app/runs
     environment:
       PYTHONUNBUFFERED: "1"
+      DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading
+
+volumes:
+  postgres-data:

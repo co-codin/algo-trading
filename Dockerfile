@@ -21,13 +21,13 @@ COPY algo_trading ./algo_trading
 COPY tests ./tests
 COPY --from=frontend /app/algo_trading/web/dist ./algo_trading/web/dist
 
-RUN mkdir -p /app/runs && chown -R app:app /app
+RUN pip install --no-cache-dir . && mkdir -p /app/runs && chown -R app:app /app
 
 USER app
 
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/runs', timeout=2)"
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/auth/me', timeout=2)"
 
 CMD ["python", "-m", "algo_trading.ui", "--host", "0.0.0.0", "--port", "8765", "--output-root", "/app/runs"]

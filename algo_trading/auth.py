@@ -229,7 +229,7 @@ class PostgresAuthStore:
                 )
 
     def _connect(self):
-        import psycopg
+        import psycopg  # type: ignore[import-not-found]
 
         return psycopg.connect(self.database_url)
 
