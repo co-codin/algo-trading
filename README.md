@@ -87,6 +87,27 @@ python3 -m algo_trading.cli symbols --top 10
 
 The ranking is fetched live from Binance public market data. Stablecoin, fiat, and tokenized-metal bases such as `USDC`, `FDUSD`, `USD1`, and `XAUT` are excluded so the list focuses on crypto assets.
 
+Export recent Binance historical candles to CSV:
+
+```bash
+python3 -m algo_trading.cli candles --symbol BTCUSDT --interval 1h --limit 1000 --output historical_data/BTCUSDT-1h.csv
+```
+
+Export the last 365 days by paginating Binance candles into the same CSV schema:
+
+```bash
+python3 -m algo_trading.cli candles --symbol BTCUSDT --interval 1h --days 365 --limit 1000 --output historical_data/BTCUSDT-1h-365d.csv
+```
+
+Export the last 365 days of delayed Yahoo Finance CME index futures candles:
+
+```bash
+python3 -m algo_trading.cli candles --market cme_futures --symbol SP500 --interval 1d --days 365 --limit 1000 --output historical_data/SP500-1d-365d.csv
+python3 -m algo_trading.cli candles --market cme_futures --symbol NASDAQ --interval 1d --days 365 --limit 1000 --output historical_data/NASDAQ-1d-365d.csv
+```
+
+The candle CSV columns are `open_time,open,high,low,close,volume`. The same file can be reused as a backtest fixture with `--fixture`.
+
 Run a live read-only single-symbol backtest:
 
 ```bash

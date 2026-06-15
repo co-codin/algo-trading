@@ -7,9 +7,12 @@ from pathlib import Path
 
 from algo_trading.data import (
     BinanceMarketDataClient,
+    HistoricalMarketDataClient,
     MarketDataClient,
     TransientMarketDataError,
+    YahooFuturesMarketDataClient,
     load_candles_from_csv,
+    write_candles_to_csv,
 )
 from algo_trading.models import (
     AllowedSide,
@@ -24,6 +27,11 @@ from algo_trading.strategy import apply_strategy_preset, list_strategy_names
 from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 
 
+_MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
+_CRYPTO_SPOT_MARKET = "crypto_spot"
+_CME_FUTURES_MARKET = "cme_futures"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -34,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_paper_command(args)
         if args.command == "symbols":
             return _run_symbols_command(args)
+        if args.command == "candles":
+            return _run_candles_command(args)
         parser.print_help()
         return 2
     except Exception as exc:
@@ -77,6 +87,67 @@ def _run_symbols_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_candles_command(args: argparse.Namespace) -> int:
+    market = _market_from_name(args.market)
+    symbol = args.symbol.upper()
+    client = _market_client_for_name(market)
+    if args.days < 0:
+        raise ValueError("days cannot be negative")
+    if args.days > 0:
+        end_time = int(time.time() * 1000)
+        start_time = end_time - (args.days * _MILLISECONDS_PER_DAY)
+        candles = _get_historical_klines_with_retries(
+            client,
+            symbol,
+            args.interval,
+            start_time,
+            end_time,
+            args.limit,
+            args.market_data_retries,
+            args.retry_delay,
+        )
+    else:
+        candles = _get_klines_with_retries(
+            client,
+            symbol,
+            args.interval,
+            args.limit,
+            args.market_data_retries,
+            args.retry_delay,
+        )
+    output_path = write_candles_to_csv(candles, args.output)
+    print(f"wrote {len(candles)} {symbol} candles to {output_path}")
+    return 0
+
+
+def _market_from_name(value: str) -> str:
+    market = value.strip().lower()
+    aliases = {
+        "spot": _CRYPTO_SPOT_MARKET,
+        "crypto": _CRYPTO_SPOT_MARKET,
+        "crypto_spot": _CRYPTO_SPOT_MARKET,
+        "binance": _CRYPTO_SPOT_MARKET,
+        "futures": _CME_FUTURES_MARKET,
+        "cme": _CME_FUTURES_MARKET,
+        "cme_futures": _CME_FUTURES_MARKET,
+        "us_index_futures": _CME_FUTURES_MARKET,
+        "yahoo": _CME_FUTURES_MARKET,
+        "yahoo_futures": _CME_FUTURES_MARKET,
+    }
+    try:
+        return aliases[market]
+    except KeyError as exc:
+        raise ValueError(f"unsupported market: {value}") from exc
+
+
+def _market_client_for_name(market: str) -> HistoricalMarketDataClient:
+    if market == _CRYPTO_SPOT_MARKET:
+        return BinanceMarketDataClient()
+    if market == _CME_FUTURES_MARKET:
+        return YahooFuturesMarketDataClient()
+    raise ValueError(f"unsupported market: {market}")
+
+
 def _resolve_backtest_symbols(
     args: argparse.Namespace,
     client: MarketDataClient,
@@ -108,6 +179,43 @@ def _get_klines_with_retries(
     while True:
         try:
             return client.get_klines(symbol, interval, limit)
+        except TransientMarketDataError as exc:
+            if attempts >= retries:
+                raise
+            attempts += 1
+            print(
+                f"{symbol} market-data fetch failed: {exc}; retrying {attempts}/{retries}",
+                file=sys.stderr,
+            )
+            if retry_delay > 0:
+                time.sleep(retry_delay)
+
+
+def _get_historical_klines_with_retries(
+    client: HistoricalMarketDataClient,
+    symbol: str,
+    interval: str,
+    start_time: int,
+    end_time: int,
+    limit: int,
+    retries: int,
+    retry_delay: float,
+) -> list[Candle]:
+    if retries < 0:
+        raise ValueError("market-data retries cannot be negative")
+    if retry_delay < 0:
+        raise ValueError("retry delay cannot be negative")
+
+    attempts = 0
+    while True:
+        try:
+            return client.get_historical_klines(
+                symbol,
+                interval,
+                start_time,
+                end_time,
+                limit,
+            )
         except TransientMarketDataError as exc:
             if attempts >= retries:
                 raise
@@ -183,6 +291,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_backtest_parser(subparsers)
     _add_paper_parser(subparsers)
     _add_symbols_parser(subparsers)
+    _add_candles_parser(subparsers)
     return parser
 
 
@@ -226,6 +335,42 @@ def _add_paper_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
 def _add_symbols_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser("symbols", help="list top read-only Binance USDT symbols")
     parser.add_argument("--top", type=int, default=10, help="number of symbols to print")
+
+
+def _add_candles_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("candles", help="export historical candles to CSV")
+    parser.add_argument(
+        "--market",
+        default=_CRYPTO_SPOT_MARKET,
+        help="market provider: crypto_spot/binance or cme_futures/yahoo",
+    )
+    parser.add_argument("--symbol", default="BTCUSDT")
+    parser.add_argument("--interval", default="1h")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=300,
+        help="candles to fetch, or page size when --days is set",
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=0,
+        help="export this many days ending now; 0 fetches only --limit recent candles",
+    )
+    parser.add_argument("--output", required=True, help="CSV path to write")
+    parser.add_argument(
+        "--market-data-retries",
+        type=int,
+        default=2,
+        help="transient market-data retries",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=0.5,
+        help="seconds to wait between transient market-data retries",
+    )
 
 
 def _add_common_options(parser: argparse.ArgumentParser) -> None:

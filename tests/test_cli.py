@@ -1,3 +1,4 @@
+import csv
 import json
 import tempfile
 import unittest
@@ -25,6 +26,7 @@ def candle(time: int, close: float) -> Candle:
 class FakeBinanceClient:
     def __init__(self) -> None:
         self.kline_symbols: list[str] = []
+        self.historical_requests: list[tuple[str, str, int, int, int]] = []
 
     def get_24h_tickers(self) -> list[dict[str, object]]:
         return [
@@ -36,6 +38,36 @@ class FakeBinanceClient:
     def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
         self.kline_symbols.append(symbol)
         return [candle(index, price) for index, price in enumerate([10, 12, 13, 14])]
+
+    def get_historical_klines(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: int,
+        end_time: int,
+        limit: int,
+    ) -> list[Candle]:
+        self.historical_requests.append((symbol, interval, start_time, end_time, limit))
+        return [candle(start_time, 10), candle(end_time - 1, 12)]
+
+
+class FakeYahooClient:
+    def __init__(self) -> None:
+        self.historical_requests: list[tuple[str, str, int, int, int]] = []
+
+    def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+        return [candle(index, price) for index, price in enumerate([100, 101])]
+
+    def get_historical_klines(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: int,
+        end_time: int,
+        limit: int,
+    ) -> list[Candle]:
+        self.historical_requests.append((symbol, interval, start_time, end_time, limit))
+        return [candle(start_time, 100), candle(end_time - 1, 101)]
 
 
 class FlakyBinanceClient(FakeBinanceClient):
@@ -107,6 +139,148 @@ class CliTests(unittest.TestCase):
         self.assertIn("BTCUSDT", output)
         self.assertIn("ETHUSDT", output)
         self.assertNotIn("USDCUSDT", output)
+
+    def test_candles_command_writes_historical_candles_to_csv(self):
+        fake_client = FakeBinanceClient()
+        stdout = StringIO()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "BTCUSDT-1h.csv"
+            with patch("algo_trading.cli.BinanceMarketDataClient", return_value=fake_client):
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "candles",
+                            "--symbol",
+                            "BTCUSDT",
+                            "--interval",
+                            "1h",
+                            "--limit",
+                            "4",
+                            "--output",
+                            str(output),
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(fake_client.kline_symbols, ["BTCUSDT"])
+            with output.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(
+                rows[0],
+                {
+                    "open_time": "0",
+                    "open": "10",
+                    "high": "11.0",
+                    "low": "9.0",
+                    "close": "10",
+                    "volume": "1.0",
+                },
+            )
+            self.assertEqual(len(rows), 4)
+            self.assertIn("wrote 4 BTCUSDT candles", stdout.getvalue())
+
+    def test_candles_command_creates_output_parent_directories(self):
+        fake_client = FakeBinanceClient()
+        stdout = StringIO()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "history" / "spot" / "BTCUSDT-1h.csv"
+            with patch("algo_trading.cli.BinanceMarketDataClient", return_value=fake_client):
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "candles",
+                            "--symbol",
+                            "btcusdt",
+                            "--interval",
+                            "1h",
+                            "--limit",
+                            "2",
+                            "--output",
+                            str(output),
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(output.exists())
+            self.assertEqual(fake_client.kline_symbols, ["BTCUSDT"])
+
+    def test_candles_command_exports_last_n_days(self):
+        fake_client = FakeBinanceClient()
+        stdout = StringIO()
+        now_seconds = 1_700_000_000.0
+        expected_end = int(now_seconds * 1000)
+        expected_start = expected_end - (365 * 24 * 60 * 60 * 1000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "BTCUSDT-1h-365d.csv"
+            with patch("algo_trading.cli.BinanceMarketDataClient", return_value=fake_client):
+                with patch("algo_trading.cli.time.time", return_value=now_seconds):
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "candles",
+                                "--symbol",
+                                "btcusdt",
+                                "--interval",
+                                "1h",
+                                "--days",
+                                "365",
+                                "--limit",
+                                "1000",
+                                "--output",
+                                str(output),
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                fake_client.historical_requests,
+                [("BTCUSDT", "1h", expected_start, expected_end, 1000)],
+            )
+            with output.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 2)
+            self.assertIn("wrote 2 BTCUSDT candles", stdout.getvalue())
+
+    def test_candles_command_exports_yahoo_market_last_n_days(self):
+        fake_client = FakeYahooClient()
+        stdout = StringIO()
+        now_seconds = 1_700_000_000.0
+        expected_end = int(now_seconds * 1000)
+        expected_start = expected_end - (365 * 24 * 60 * 60 * 1000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "SP500-1d-365d.csv"
+            with patch("algo_trading.cli.YahooFuturesMarketDataClient", return_value=fake_client):
+                with patch("algo_trading.cli.time.time", return_value=now_seconds):
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "candles",
+                                "--market",
+                                "cme_futures",
+                                "--symbol",
+                                "sp500",
+                                "--interval",
+                                "1d",
+                                "--days",
+                                "365",
+                                "--limit",
+                                "1000",
+                                "--output",
+                                str(output),
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                fake_client.historical_requests,
+                [("SP500", "1d", expected_start, expected_end, 1000)],
+            )
+            self.assertTrue(output.exists())
+            self.assertIn("wrote 2 SP500 candles", stdout.getvalue())
 
     def test_backtest_top_symbols_runs_each_ranked_symbol(self):
         fake_client = FakeBinanceClient()
