@@ -163,6 +163,52 @@ class UiTests(unittest.TestCase):
         self.assertIn("combo_exit_confirmations", source)
         self.assertIn("combo_lookback", source)
 
+    def test_frontend_defines_bilingual_i18n_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        i18n_path = root / "frontend" / "src" / "i18n.ts"
+        self.assertTrue(i18n_path.exists())
+        i18n_source = i18n_path.read_text(encoding="utf-8")
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('export type Locale = "en" | "ru";', i18n_source)
+        self.assertIn("SUPPORTED_LOCALES", i18n_source)
+        self.assertIn('flag: "🇺🇸"', i18n_source)
+        self.assertIn('flag: "🇷🇺"', i18n_source)
+        self.assertIn('LOCALE_STORAGE_KEY = "algoTradingLocale"', i18n_source)
+        self.assertIn("export const messages", i18n_source)
+        self.assertIn("en:", i18n_source)
+        self.assertIn("ru:", i18n_source)
+        self.assertIn("strategyDescriptions", i18n_source)
+        self.assertIn("translateStrategyDescription", i18n_source)
+        self.assertIn("setLocale", app_source)
+        self.assertIn("localStorage.setItem(LOCALE_STORAGE_KEY", app_source)
+        self.assertIn('class="language-switcher"', app_source)
+        self.assertIn("SUPPORTED_LOCALES", app_source)
+
+    def test_chart_accepts_translated_labels_from_parent(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        chart_source = (
+            root / "frontend" / "src" / "components" / "TradingViewChart.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("ariaLabel?: string;", chart_source)
+        self.assertIn("emptyLabel?: string;", chart_source)
+        self.assertIn("paperEntryLabel?: string;", chart_source)
+        self.assertIn("paperExitLabel?: string;", chart_source)
+        self.assertIn("longSignalLabel?: string;", chart_source)
+        self.assertIn("shortSignalLabel?: string;", chart_source)
+        self.assertIn(':aria-label="chartLabels.aria"', app_source)
+        self.assertIn(':empty-label="chartLabels.empty"', app_source)
+        self.assertIn(':paper-entry-label="chartLabels.paperEntry"', app_source)
+        self.assertIn(':paper-exit-label="chartLabels.paperExit"', app_source)
+        self.assertIn(':long-signal-label="chartLabels.longSignal"', app_source)
+        self.assertIn(':short-signal-label="chartLabels.shortSignal"', app_source)
+
     def test_live_ui_uses_trading_terminal_visual_language(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
