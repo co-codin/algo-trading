@@ -678,7 +678,10 @@ def public_user(user: AuthUser) -> dict[str, object]:
 
 
 def isoformat_or_none(value: datetime | None) -> str | None:
-    return value.isoformat() if value else None
+    if value is None:
+        return None
+    formatted = value.isoformat()
+    return formatted.replace("+00:00", "Z")
 
 
 def utcnow() -> datetime:

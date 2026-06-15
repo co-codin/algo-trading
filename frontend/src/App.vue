@@ -213,6 +213,7 @@ const authStatusType = ref<StatusType>("");
 const profileStatus = ref(t("status.ready"));
 const profileStatusType = ref<StatusType>("");
 const adminUsers = ref<AuthUser[]>([]);
+const adminExpiryEdits = reactive<Record<number, string>>({});
 const adminSearch = ref("");
 const adminStatus = ref(t("status.ready"));
 const adminStatusType = ref<StatusType>("");
@@ -585,6 +586,7 @@ async function loadAdminUsers() {
   try {
     const payload = await requestJson<AdminUsersPayload>("/api/admin/users");
     adminUsers.value = payload.users;
+    syncAdminExpiryEdits(payload.users);
     setAdminStatus(`${t("status.loadedUsers")} ${payload.users.length}`);
   } catch (error) {
     adminUsers.value = [];
@@ -612,11 +614,15 @@ async function updateUserAccess(user: AuthUser, isActive: boolean) {
   try {
     const payload = await requestJson<AuthPayload>(`/api/admin/users/${user.id}/access`, {
       method: "PATCH",
-      body: JSON.stringify({ is_active: isActive }),
+      body: JSON.stringify({
+        is_active: isActive,
+        expired_at: isoDateTimeFromDateInput(adminExpiryEdits[user.id]),
+      }),
     });
     adminUsers.value = adminUsers.value.map((existingUser) =>
       existingUser.id === payload.user.id ? payload.user : existingUser,
     );
+    syncAdminExpiryEdits([payload.user]);
     if (authUser.value?.id === payload.user.id) {
       authUser.value = payload.user;
       setProfileForm(payload.user);
@@ -625,6 +631,30 @@ async function updateUserAccess(user: AuthUser, isActive: boolean) {
       }
     }
     setAdminStatus(t("status.accessUpdated"));
+  } catch (error) {
+    setAdminStatus(errorMessage(error), "error");
+  }
+}
+
+async function updateUserExpiry(user: AuthUser) {
+  setAdminStatus(t("status.updatingAccess"), "busy");
+  try {
+    const payload = await requestJson<AuthPayload>(`/api/admin/users/${user.id}/access`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        is_active: user.is_active,
+        expired_at: isoDateTimeFromDateInput(adminExpiryEdits[user.id]),
+      }),
+    });
+    adminUsers.value = adminUsers.value.map((existingUser) =>
+      existingUser.id === payload.user.id ? payload.user : existingUser,
+    );
+    syncAdminExpiryEdits([payload.user]);
+    if (authUser.value?.id === payload.user.id) {
+      authUser.value = payload.user;
+      setProfileForm(payload.user);
+    }
+    setAdminStatus(t("status.expirationUpdated"));
   } catch (error) {
     setAdminStatus(errorMessage(error), "error");
   }
@@ -657,6 +687,20 @@ function setProfileForm(user: AuthUser | null) {
   profileForm.first_name = user?.first_name ?? "";
   profileForm.last_name = user?.last_name ?? "";
   profileForm.middle_name = user?.middle_name ?? "";
+}
+
+function syncAdminExpiryEdits(users: AuthUser[]) {
+  for (const user of users) {
+    adminExpiryEdits[user.id] = dateInputValue(user.expired_at);
+  }
+}
+
+function dateInputValue(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : "";
+}
+
+function isoDateTimeFromDateInput(value: string): string | null {
+  return value ? `${value}T23:59:59Z` : null;
 }
 
 async function logout() {
@@ -1393,7 +1437,14 @@ function errorMessage(error: unknown): string {
             <td>{{ user.middle_name || "—" }}</td>
             <td>{{ user.is_active ? t("auth.active") : t("auth.inactive") }}</td>
             <td>{{ formatDateTime(user.activated_at) }}</td>
-            <td>{{ formatDateTime(user.expired_at) }}</td>
+            <td>
+              <div class="admin-expiry-field">
+                <input v-model="adminExpiryEdits[user.id]" type="date">
+                <button class="secondary" type="button" @click="updateUserExpiry(user)">
+                  {{ t("actions.saveExpiration") }}
+                </button>
+              </div>
+            </td>
             <td>
               <button
                 class="secondary"

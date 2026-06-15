@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timezone
 import mimetypes
 import os
 import urllib.parse
@@ -38,6 +39,20 @@ from algo_trading.ui import (
 ADMIN_EMAIL = "cuiyeqing960904@gmail.com"
 ADMIN_PASSWORD = "Vladimir960904"
 EXPIRY_CHECK_SECONDS = 60 * 60
+
+
+def parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be an ISO datetime or null")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be an ISO datetime or null") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def create_app(
@@ -231,10 +246,15 @@ def create_app(
         )
         if existing_user is None:
             raise ValueError("unknown user")
+        expired_at = (
+            parse_optional_datetime(access["expired_at"], "expired_at")
+            if "expired_at" in access
+            else existing_user.expired_at
+        )
         updated = store.set_user_access(
             user_id,
             is_active=is_active,
-            expired_at=existing_user.expired_at,
+            expired_at=expired_at,
         )
         return {"ok": True, "user": public_user(updated)}
 

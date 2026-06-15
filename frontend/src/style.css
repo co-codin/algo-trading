@@ -450,6 +450,18 @@ button:focus {
   gap: 10px;
 }
 
+.admin-expiry-field {
+  display: grid;
+  grid-template-columns: minmax(132px, 1fr) max-content;
+  gap: 6px;
+  align-items: center;
+  min-width: 240px;
+}
+
+.admin-expiry-field button {
+  white-space: nowrap;
+}
+
 .profile-field {
   min-width: 0;
   border: 1px solid var(--line);

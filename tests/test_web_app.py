@@ -302,6 +302,43 @@ class WebAppTests(unittest.TestCase):
         self.assertFalse(deactivate.json()["user"]["is_active"])
         self.assertIsNone(deactivate.json()["user"]["activated_at"])
 
+    def test_admin_can_update_user_expiration_date(self):
+        store = InMemoryAuthStore()
+        client = self.make_client(auth_store=store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        alice = store.list_users()[0]
+        client.post("/api/auth/logout")
+        store.seed_admin_user("admin@example.com", "Vladimir960904")
+        client.post(
+            "/api/auth/login",
+            json={"username": "admin@example.com", "password": "Vladimir960904"},
+        )
+        expires_at = (utcnow() + timedelta(days=30)).replace(microsecond=0)
+
+        response = client.patch(
+            f"/api/admin/users/{alice.id}/access",
+            json={
+                "is_active": True,
+                "expired_at": expires_at.isoformat().replace("+00:00", "Z"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()["user"]
+        self.assertTrue(updated["is_active"])
+        self.assertEqual(updated["expired_at"], expires_at.isoformat().replace("+00:00", "Z"))
+
+        clear_response = client.patch(
+            f"/api/admin/users/{alice.id}/access",
+            json={"is_active": True, "expired_at": None},
+        )
+
+        self.assertEqual(clear_response.status_code, 200)
+        self.assertIsNone(clear_response.json()["user"]["expired_at"])
+
     def test_expired_active_user_is_deactivated_before_feature_access(self):
         store = InMemoryAuthStore()
         client = self.make_client(auth_store=store)

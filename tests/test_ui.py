@@ -392,6 +392,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("const authUser = ref<AuthUser | null>(null);", app_source)
         self.assertIn("const profileForm = reactive", app_source)
         self.assertIn('const adminUsers = ref<AuthUser[]>([]);', app_source)
+        self.assertIn('const adminExpiryEdits = reactive<Record<number, string>>({});', app_source)
         self.assertIn('const adminSearch = ref("");', app_source)
         self.assertIn("const filteredAdminUsers = computed", app_source)
         self.assertIn("user.username.toLowerCase().includes(query)", app_source)
@@ -407,7 +408,11 @@ class UiTests(unittest.TestCase):
         self.assertIn('requestJson<AuthPayload>("/api/profile"', app_source)
         self.assertIn('requestJson<AdminUsersPayload>("/api/admin/users")', app_source)
         self.assertIn("async function updateUserAccess(user: AuthUser, isActive: boolean)", app_source)
+        self.assertIn("async function updateUserExpiry(user: AuthUser)", app_source)
         self.assertIn('`/api/admin/users/${user.id}/access`', app_source)
+        self.assertIn("expired_at: isoDateTimeFromDateInput(adminExpiryEdits[user.id])", app_source)
+        self.assertIn("function dateInputValue(value: string | null | undefined): string", app_source)
+        self.assertIn("function isoDateTimeFromDateInput(value: string): string | null", app_source)
         self.assertIn("async function submitAuth()", app_source)
         self.assertIn('authMode.value === "login" ? "/api/auth/login" : "/api/auth/register"', app_source)
         self.assertIn("async function logout()", app_source)
@@ -444,6 +449,10 @@ class UiTests(unittest.TestCase):
         self.assertIn('v-model.trim="adminSearch"', app_source)
         self.assertIn('v-for="user in filteredAdminUsers"', app_source)
         self.assertIn('@click="updateUserAccess(user, !user.is_active)"', app_source)
+        self.assertIn('v-model="adminExpiryEdits[user.id]"', app_source)
+        self.assertIn('type="date"', app_source)
+        self.assertIn('@click="updateUserExpiry(user)"', app_source)
+        self.assertIn('"actions.saveExpiration"', i18n_source)
 
     def test_chart_accepts_translated_labels_from_parent(self):
         root = Path(__file__).resolve().parents[1]
