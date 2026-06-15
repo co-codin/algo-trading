@@ -2,6 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { requestJson, toQuery } from "./api";
 import TradingViewChart from "./components/TradingViewChart.vue";
+import {
+  LOCALE_STORAGE_KEY,
+  SUPPORTED_LOCALES,
+  normalizeLocale,
+  translate,
+  translateStrategyDescription,
+  type Locale,
+  type MessageKey,
+} from "./i18n";
 import type {
   CombinationSignalsPayload,
   LiveChartPayload,
@@ -42,20 +51,6 @@ const modeRoutes: Record<Mode, string> = {
   combos: "/combos",
 };
 
-const tabs: { mode: Mode; label: string }[] = [
-  { mode: "backtest", label: "Backtest" },
-  { mode: "paper", label: "Paper" },
-  { mode: "live", label: "Live" },
-  { mode: "combos", label: "Combinations" },
-  { mode: "runs", label: "Runs" },
-  { mode: "lab", label: "Strategy Lab" },
-];
-
-const liveMarketOptions = [
-  { value: "crypto_spot", label: "Crypto Spot" },
-  { value: "cme_futures", label: "US Index Futures" },
-] satisfies SelectOption[];
-
 const liveSymbolOptions = [
   { value: "BTCUSDT", label: "BTCUSDT" },
   { value: "ETHUSDT", label: "ETHUSDT" },
@@ -66,15 +61,6 @@ const liveSymbolOptions = [
   { value: "ADAUSDT", label: "ADAUSDT" },
   { value: "AVAXUSDT", label: "AVAXUSDT" },
 ] satisfies SelectOption[];
-
-const liveFuturesSymbolOptions = [
-  { value: "ES=F", label: "S&P 500 Future" },
-] satisfies SelectOption[];
-
-const liveSymbolsByMarket: Record<string, SelectOption[]> = {
-  crypto_spot: liveSymbolOptions,
-  cme_futures: liveFuturesSymbolOptions,
-};
 
 const liveIntervalOptions = [
   { value: "1m", label: "1m" },
@@ -153,6 +139,17 @@ const settings = reactive<Record<string, string>>({
   poll_seconds: "30",
 });
 
+const locale = ref<Locale>(normalizeLocale(window.localStorage.getItem(LOCALE_STORAGE_KEY)));
+
+function t(key: MessageKey): string {
+  return translate(locale.value, key);
+}
+
+function setLocale(nextLocale: Locale) {
+  locale.value = nextLocale;
+  localStorage.setItem(LOCALE_STORAGE_KEY, nextLocale);
+}
+
 const activeMode = ref<Mode>(modeFromLocation());
 const strategies = ref<StrategyInfo[]>([]);
 const presets = ref<string[]>(["custom", "conservative", "balanced", "aggressive"]);
@@ -163,13 +160,13 @@ const outputRuns = ref<RunCard[]>([]);
 const livePayload = ref<LiveChartPayload | null>(null);
 const comboPayload = ref<CombinationSignalsPayload | null>(null);
 const labRows = ref<StrategyLabRow[]>([]);
-const status = ref("Ready");
+const status = ref(t("status.ready"));
 const statusType = ref<StatusType>("");
-const liveStatus = ref("Ready");
+const liveStatus = ref(t("status.ready"));
 const liveStatusType = ref<StatusType>("");
-const comboStatus = ref("Ready");
+const comboStatus = ref(t("status.ready"));
 const comboStatusType = ref<StatusType>("");
-const labStatus = ref("Ready");
+const labStatus = ref(t("status.ready"));
 const labStatusType = ref<StatusType>("");
 const liveMarket = ref("crypto_spot");
 const liveSymbol = ref("BTCUSDT");
@@ -211,19 +208,46 @@ const labCsvHeaders: (keyof StrategyLabRow)[] = [
   "walk_forward_profitable_pct",
 ];
 
+const tabs = computed(() => [
+  { mode: "backtest" as const, label: t("tabs.backtest") },
+  { mode: "paper" as const, label: t("tabs.paper") },
+  { mode: "live" as const, label: t("tabs.live") },
+  { mode: "combos" as const, label: t("tabs.combos") },
+  { mode: "runs" as const, label: t("tabs.runs") },
+  { mode: "lab" as const, label: t("tabs.lab") },
+]);
+const liveMarketOptions = computed<SelectOption[]>(() => [
+  { value: "crypto_spot", label: t("options.cryptoSpot") },
+  { value: "cme_futures", label: t("options.usIndexFutures") },
+]);
+const liveFuturesSymbolOptions = computed<SelectOption[]>(() => [
+  { value: "ES=F", label: t("options.sp500Future") },
+]);
+const liveSymbolsByMarket = computed<Record<string, SelectOption[]>>(() => ({
+  crypto_spot: liveSymbolOptions,
+  cme_futures: liveFuturesSymbolOptions.value,
+}));
+const sideOptions = computed<SelectOption[]>(() => [
+  { value: "both", label: t("options.both") },
+  { value: "long-only", label: t("options.longOnly") },
+  { value: "short-only", label: t("options.shortOnly") },
+]);
 const strategyName = computed(() => strategyLabel(settings.strategy));
 const liveStrategyOptions = computed(() => [
-  { name: "all", description: "All strategies" },
-  ...strategies.value,
+  { name: "all", description: t("options.allStrategies") },
+  ...strategies.value.map((strategy) => ({
+    ...strategy,
+    description: translateStrategyDescription(locale.value, strategy.name, strategy.description),
+  })),
 ]);
 const activeLiveSymbolOptions = computed(
-  () => liveSymbolsByMarket[liveMarket.value] ?? liveSymbolOptions,
+  () => liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions,
 );
 const liveChartResetKey = computed(() =>
   [liveMarket.value, liveSymbol.value, liveInterval.value, liveLimit.value].join(":"),
 );
 const activeLiveStrategyLabel = computed(() =>
-  settings.strategy === "all" ? "All strategies" : strategyLabel(settings.strategy),
+  settings.strategy === "all" ? t("options.allStrategies") : strategyLabel(settings.strategy),
 );
 const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
 const livePaperMarkerCount = computed(() => livePayload.value?.paper_markers.length ?? 0);
@@ -236,6 +260,14 @@ const comboCandleCount = computed(() => comboPayload.value?.candles.length ?? 0)
 const comboChartResetKey = computed(() =>
   [comboSymbol.value, comboInterval.value, comboLimit.value, settings.combo_strategies].join(":"),
 );
+const chartLabels = computed(() => ({
+  aria: t("chart.aria"),
+  empty: t("empty.noCandles"),
+  longSignal: t("chart.longSignal"),
+  shortSignal: t("chart.shortSignal"),
+  paperEntry: t("chart.paperEntry"),
+  paperExit: t("chart.paperExit"),
+}));
 
 watch(liveMarket, () => {
   liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
@@ -244,6 +276,21 @@ watch(liveMarket, () => {
 watch([liveMarket, liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {
   if (activeMode.value === "live") {
     refreshLiveChart();
+  }
+});
+
+watch(locale, () => {
+  if (!statusType.value) {
+    status.value = t("status.ready");
+  }
+  if (!liveStatusType.value) {
+    liveStatus.value = t("status.ready");
+  }
+  if (!comboStatusType.value) {
+    comboStatus.value = t("status.ready");
+  }
+  if (!labStatusType.value) {
+    labStatus.value = t("status.ready");
   }
 });
 
@@ -310,14 +357,14 @@ async function loadStrategies() {
 }
 
 async function loadSymbols() {
-  setStatus("Loading symbols", "busy");
+  setStatus(t("status.loadingSymbols"), "busy");
   symbols.value = [];
   try {
     const payload = await requestJson<{ ok: true; symbols: SymbolInfo[] }>(
       `/api/symbols?top=${encodeURIComponent(settings.top)}`,
     );
     symbols.value = payload.symbols;
-    setStatus(`Loaded ${payload.symbols.length} symbols`);
+    setStatus(`${t("status.loadedSymbols")} ${payload.symbols.length}`);
   } catch (error) {
     setStatus(errorMessage(error), "error");
   }
@@ -331,7 +378,7 @@ async function runCurrentMode() {
     payload.symbol = payload.symbols || "BTCUSDT";
     delete payload.symbols;
   }
-  setStatus(mode === "paper" ? "Paper session running" : "Backtest running", "busy");
+  setStatus(mode === "paper" ? t("status.paperRunning") : t("status.backtestRunning"), "busy");
   outputRuns.value = [];
   try {
     const result = await requestJson<{ ok: true; runs: RunCard[] }>(endpoint, {
@@ -340,14 +387,14 @@ async function runCurrentMode() {
     });
     outputRuns.value = result.runs;
     await loadRuns();
-    setStatus("Ready");
+    setStatus(t("status.ready"));
   } catch (error) {
     setStatus(errorMessage(error), "error");
   }
 }
 
 async function loadLiveChart() {
-  setLiveStatus("Loading chart", "busy");
+  setLiveStatus(t("status.loadingChart"), "busy");
   try {
       const query = toQuery({
         ...settings,
@@ -357,7 +404,7 @@ async function loadLiveChart() {
         limit: liveLimit.value,
     });
     livePayload.value = await requestJson<LiveChartPayload>(`/api/live-chart?${query}`);
-    setLiveStatus(`Updated ${new Date().toLocaleTimeString()}`);
+    setLiveStatus(`${t("status.updated")} ${new Date().toLocaleTimeString()}`);
   } catch (error) {
     livePayload.value = null;
     setLiveStatus(errorMessage(error), "error");
@@ -387,7 +434,7 @@ function refreshLiveChart() {
 }
 
 async function runCombinationSignals() {
-  setComboStatus("Running combination signals", "busy");
+  setComboStatus(t("status.comboRunning"), "busy");
   comboPayload.value = null;
   try {
     comboPayload.value = await requestJson<CombinationSignalsPayload>("/api/combination-signals", {
@@ -400,7 +447,7 @@ async function runCombinationSignals() {
         limit: comboLimit.value,
       }),
     });
-    setComboStatus(`Updated ${comboPayload.value.signals.length} signals`);
+    setComboStatus(`${t("status.updatedSignals")} ${comboPayload.value.signals.length}`);
   } catch (error) {
     setComboStatus(errorMessage(error), "error");
   }
@@ -425,7 +472,7 @@ async function loadRunDetails(path: string) {
 }
 
 async function runStrategyLab() {
-  setLabStatus("Running strategy lab", "busy");
+  setLabStatus(t("status.labRunning"), "busy");
   labRows.value = [];
   try {
     const payload = await requestJson<StrategyLabPayload>("/api/strategy-lab", {
@@ -439,7 +486,7 @@ async function runStrategyLab() {
       }),
     });
     labRows.value = payload.rows;
-    setLabStatus(`Ranked ${payload.rows.length} results`);
+    setLabStatus(`${t("status.rankedResults")} ${payload.rows.length}`);
   } catch (error) {
     setLabStatus(errorMessage(error), "error");
   }
@@ -488,7 +535,8 @@ function appendSymbol(symbol: string) {
 }
 
 function strategyLabel(name: string): string {
-  return strategies.value.find((strategy) => strategy.name === name)?.description ?? name;
+  const strategy = strategies.value.find((item) => item.name === name);
+  return translateStrategyDescription(locale.value, name, strategy?.description ?? name);
 }
 
 function formatNumber(value: unknown): string {
@@ -510,13 +558,28 @@ function errorMessage(error: unknown): string {
 <template>
   <header class="topbar">
     <div>
-      <h1>Algo Trading</h1>
-      <p>Vue control panel for read-only backtesting, paper trading, live charts, and strategy ranking.</p>
+      <h1>{{ t("app.title") }}</h1>
+      <p>{{ t("app.subtitle") }}</p>
     </div>
-    <div class="safety">Simulated only: no real orders</div>
+    <div class="topbar-actions">
+      <div class="language-switcher" :aria-label="t('aria.language')">
+        <button
+          v-for="item in SUPPORTED_LOCALES"
+          :key="item.code"
+          type="button"
+          class="language-option"
+          :class="{ 'is-active': locale === item.code }"
+          @click="setLocale(item.code)"
+        >
+          <span aria-hidden="true">{{ item.flag }}</span>
+          <span>{{ item.label }}</span>
+        </button>
+      </div>
+      <div class="safety">{{ t("app.safety") }}</div>
+    </div>
   </header>
 
-  <nav class="tabs" aria-label="Modes">
+  <nav class="tabs" :aria-label="t('aria.modes')">
     <button
       v-for="tab in tabs"
       :key="tab.mode"
@@ -534,24 +597,24 @@ function errorMessage(error: unknown): string {
       <form class="panel settings" @submit.prevent="runCurrentMode">
         <div class="panel-heading">
           <div>
-            <h2>{{ activeMode === "paper" ? "Paper Trading" : "Backtest" }}</h2>
+            <h2>{{ activeMode === "paper" ? t("pages.paperTrading") : t("pages.backtest") }}</h2>
             <p>{{ strategyName }}</p>
           </div>
           <button class="primary" type="submit">
-            {{ activeMode === "paper" ? "Run Paper" : "Run Backtest" }}
+            {{ activeMode === "paper" ? t("actions.runPaper") : t("actions.runBacktest") }}
           </button>
         </div>
 
         <div class="symbols-row">
           <label>
-            <span>{{ activeMode === "paper" ? "Symbol" : "Symbols" }}</span>
+            <span>{{ activeMode === "paper" ? t("labels.symbol") : t("labels.symbols") }}</span>
             <input v-model="settings.symbols" autocomplete="off">
           </label>
           <label class="small-field">
-            <span>Top</span>
+            <span>{{ t("labels.top") }}</span>
             <input v-model="settings.top" type="number" min="1" max="25">
           </label>
-          <button class="secondary" type="button" @click="loadSymbols">Load Top</button>
+          <button class="secondary" type="button" @click="loadSymbols">{{ t("actions.loadTop") }}</button>
         </div>
 
         <div class="symbol-list">
@@ -568,23 +631,23 @@ function errorMessage(error: unknown): string {
 
         <div class="field-grid">
           <label>
-            <span>Interval</span>
+            <span>{{ t("labels.interval") }}</span>
             <input v-model="settings.interval" autocomplete="off">
           </label>
           <label>
-            <span>Candles</span>
+            <span>{{ t("labels.candles") }}</span>
             <input v-model="settings.limit" type="number" min="1">
           </label>
           <label>
-            <span>Side</span>
+            <span>{{ t("labels.side") }}</span>
             <select v-model="settings.allowed_side">
-              <option value="both">Both</option>
-              <option value="long-only">Long only</option>
-              <option value="short-only">Short only</option>
+              <option v-for="option in sideOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
             </select>
           </label>
           <label>
-            <span>Strategy</span>
+            <span>{{ t("labels.strategy") }}</span>
             <select v-model="settings.strategy">
               <option v-for="strategy in strategies" :key="strategy.name" :value="strategy.name">
                 {{ strategy.name }}
@@ -592,67 +655,67 @@ function errorMessage(error: unknown): string {
             </select>
           </label>
           <label>
-            <span>Preset</span>
+            <span>{{ t("labels.preset") }}</span>
             <select v-model="settings.preset">
               <option v-for="preset in presets" :key="preset" :value="preset">{{ preset }}</option>
             </select>
           </label>
-          <label><span>Starting USDT</span><input v-model="settings.starting_balance" type="number" min="1" step="0.01"></label>
-          <label><span>Position Fraction</span><input v-model="settings.position_fraction" type="number" min="0.01" max="1" step="0.01"></label>
-          <label><span>Fee Rate</span><input v-model="settings.fee_rate" type="number" min="0" step="0.0001"></label>
-          <label><span>Slippage</span><input v-model="settings.slippage_rate" type="number" min="0" step="0.0001"></label>
-          <label><span>Fast EMA</span><input v-model="settings.fast_ema" type="number" min="1"></label>
-          <label><span>Slow EMA</span><input v-model="settings.slow_ema" type="number" min="1"></label>
-          <label><span>RSI Period</span><input v-model="settings.rsi_period" type="number" min="1"></label>
-          <label><span>RSI Overbought</span><input v-model="settings.rsi_overbought" type="number" min="1" max="100" step="0.1"></label>
-          <label><span>RSI Oversold</span><input v-model="settings.rsi_oversold" type="number" min="0" max="99" step="0.1"></label>
-          <label><span>RSI Midline</span><input v-model="settings.rsi_midline" type="number" min="0" max="100" step="0.1"></label>
-          <label><span>MACD Signal</span><input v-model="settings.macd_signal" type="number" min="1"></label>
-          <label><span>Bollinger Period</span><input v-model="settings.bollinger_period" type="number" min="1"></label>
-          <label><span>Bollinger Stddev</span><input v-model="settings.bollinger_stddev" type="number" min="0.1" step="0.1"></label>
-          <label><span>Donchian Period</span><input v-model="settings.donchian_period" type="number" min="1"></label>
-          <label><span>ATR Period</span><input v-model="settings.atr_period" type="number" min="1"></label>
-          <label><span>SuperTrend Mult</span><input v-model="settings.supertrend_multiplier" type="number" min="0.1" step="0.1"></label>
-          <label><span>VWAP Period</span><input v-model="settings.vwap_period" type="number" min="1"></label>
-          <label><span>VWAP Threshold</span><input v-model="settings.vwap_threshold_pct" type="number" min="0" step="0.001"></label>
-          <label><span>Stoch RSI Period</span><input v-model="settings.stoch_rsi_period" type="number" min="1"></label>
-          <label><span>EMA Ribbon Fast</span><input v-model="settings.ema_ribbon_fast" type="number" min="1"></label>
-          <label><span>EMA Ribbon Mid</span><input v-model="settings.ema_ribbon_mid" type="number" min="1"></label>
-          <label><span>EMA Ribbon Slow</span><input v-model="settings.ema_ribbon_slow" type="number" min="1"></label>
-          <label><span>Momentum Period</span><input v-model="settings.momentum_period" type="number" min="1"></label>
-          <label><span>Keltner Mult</span><input v-model="settings.keltner_multiplier" type="number" min="0.1" step="0.1"></label>
-          <label><span>CCI Period</span><input v-model="settings.cci_period" type="number" min="1"></label>
-          <label><span>CCI Oversold</span><input v-model="settings.cci_oversold" type="number" step="1"></label>
-          <label><span>CCI Overbought</span><input v-model="settings.cci_overbought" type="number" step="1"></label>
-          <label><span>Williams Period</span><input v-model="settings.williams_period" type="number" min="1"></label>
-          <label><span>Williams Oversold</span><input v-model="settings.williams_oversold" type="number" min="-100" max="0" step="1"></label>
-          <label><span>Williams Overbought</span><input v-model="settings.williams_overbought" type="number" min="-100" max="0" step="1"></label>
-          <label><span>Volume Period</span><input v-model="settings.volume_period" type="number" min="1"></label>
-          <label><span>Volume Mult</span><input v-model="settings.volume_multiplier" type="number" min="0.1" step="0.1"></label>
-          <label><span>Squeeze Threshold</span><input v-model="settings.squeeze_threshold_pct" type="number" min="0" step="0.001"></label>
-          <label><span>Stop Loss</span><input v-model="settings.stop_loss_pct" type="number" min="0" step="0.001"></label>
-          <label><span>Take Profit</span><input v-model="settings.take_profit_pct" type="number" min="0" step="0.001"></label>
-          <label><span>Trailing Stop</span><input v-model="settings.trailing_stop_pct" type="number" min="0" step="0.001"></label>
-          <label v-if="activeMode === 'backtest'"><span>Retries</span><input v-model="settings.market_data_retries" type="number" min="0"></label>
-          <label v-if="activeMode === 'backtest'"><span>Retry Delay</span><input v-model="settings.retry_delay" type="number" min="0" step="0.1"></label>
-          <label v-if="activeMode === 'paper'"><span>Iterations</span><input v-model="settings.iterations" type="number" min="1"></label>
-          <label v-if="activeMode === 'paper'"><span>Poll Seconds</span><input v-model="settings.poll_seconds" type="number" min="0" step="0.5"></label>
+          <label><span>{{ t("labels.startingUsdt") }}</span><input v-model="settings.starting_balance" type="number" min="1" step="0.01"></label>
+          <label><span>{{ t("labels.positionFraction") }}</span><input v-model="settings.position_fraction" type="number" min="0.01" max="1" step="0.01"></label>
+          <label><span>{{ t("labels.feeRate") }}</span><input v-model="settings.fee_rate" type="number" min="0" step="0.0001"></label>
+          <label><span>{{ t("labels.slippage") }}</span><input v-model="settings.slippage_rate" type="number" min="0" step="0.0001"></label>
+          <label><span>{{ t("labels.fastEma") }}</span><input v-model="settings.fast_ema" type="number" min="1"></label>
+          <label><span>{{ t("labels.slowEma") }}</span><input v-model="settings.slow_ema" type="number" min="1"></label>
+          <label><span>{{ t("labels.rsiPeriod") }}</span><input v-model="settings.rsi_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.rsiOverbought") }}</span><input v-model="settings.rsi_overbought" type="number" min="1" max="100" step="0.1"></label>
+          <label><span>{{ t("labels.rsiOversold") }}</span><input v-model="settings.rsi_oversold" type="number" min="0" max="99" step="0.1"></label>
+          <label><span>{{ t("labels.rsiMidline") }}</span><input v-model="settings.rsi_midline" type="number" min="0" max="100" step="0.1"></label>
+          <label><span>{{ t("labels.macdSignal") }}</span><input v-model="settings.macd_signal" type="number" min="1"></label>
+          <label><span>{{ t("labels.bollingerPeriod") }}</span><input v-model="settings.bollinger_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.bollingerStddev") }}</span><input v-model="settings.bollinger_stddev" type="number" min="0.1" step="0.1"></label>
+          <label><span>{{ t("labels.donchianPeriod") }}</span><input v-model="settings.donchian_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.atrPeriod") }}</span><input v-model="settings.atr_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.supertrendMultiplier") }}</span><input v-model="settings.supertrend_multiplier" type="number" min="0.1" step="0.1"></label>
+          <label><span>{{ t("labels.vwapPeriod") }}</span><input v-model="settings.vwap_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.vwapThreshold") }}</span><input v-model="settings.vwap_threshold_pct" type="number" min="0" step="0.001"></label>
+          <label><span>{{ t("labels.stochRsiPeriod") }}</span><input v-model="settings.stoch_rsi_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.emaRibbonFast") }}</span><input v-model="settings.ema_ribbon_fast" type="number" min="1"></label>
+          <label><span>{{ t("labels.emaRibbonMid") }}</span><input v-model="settings.ema_ribbon_mid" type="number" min="1"></label>
+          <label><span>{{ t("labels.emaRibbonSlow") }}</span><input v-model="settings.ema_ribbon_slow" type="number" min="1"></label>
+          <label><span>{{ t("labels.momentumPeriod") }}</span><input v-model="settings.momentum_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.keltnerMultiplier") }}</span><input v-model="settings.keltner_multiplier" type="number" min="0.1" step="0.1"></label>
+          <label><span>{{ t("labels.cciPeriod") }}</span><input v-model="settings.cci_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.cciOversold") }}</span><input v-model="settings.cci_oversold" type="number" step="1"></label>
+          <label><span>{{ t("labels.cciOverbought") }}</span><input v-model="settings.cci_overbought" type="number" step="1"></label>
+          <label><span>{{ t("labels.williamsPeriod") }}</span><input v-model="settings.williams_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.williamsOversold") }}</span><input v-model="settings.williams_oversold" type="number" min="-100" max="0" step="1"></label>
+          <label><span>{{ t("labels.williamsOverbought") }}</span><input v-model="settings.williams_overbought" type="number" min="-100" max="0" step="1"></label>
+          <label><span>{{ t("labels.volumePeriod") }}</span><input v-model="settings.volume_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.volumeMultiplier") }}</span><input v-model="settings.volume_multiplier" type="number" min="0.1" step="0.1"></label>
+          <label><span>{{ t("labels.squeezeThreshold") }}</span><input v-model="settings.squeeze_threshold_pct" type="number" min="0" step="0.001"></label>
+          <label><span>{{ t("labels.stopLoss") }}</span><input v-model="settings.stop_loss_pct" type="number" min="0" step="0.001"></label>
+          <label><span>{{ t("labels.takeProfit") }}</span><input v-model="settings.take_profit_pct" type="number" min="0" step="0.001"></label>
+          <label><span>{{ t("labels.trailingStop") }}</span><input v-model="settings.trailing_stop_pct" type="number" min="0" step="0.001"></label>
+          <label v-if="activeMode === 'backtest'"><span>{{ t("labels.retries") }}</span><input v-model="settings.market_data_retries" type="number" min="0"></label>
+          <label v-if="activeMode === 'backtest'"><span>{{ t("labels.retryDelay") }}</span><input v-model="settings.retry_delay" type="number" min="0" step="0.1"></label>
+          <label v-if="activeMode === 'paper'"><span>{{ t("labels.iterations") }}</span><input v-model="settings.iterations" type="number" min="1"></label>
+          <label v-if="activeMode === 'paper'"><span>{{ t("labels.pollSeconds") }}</span><input v-model="settings.poll_seconds" type="number" min="0" step="0.5"></label>
         </div>
       </form>
 
       <section class="panel output">
         <div class="panel-heading">
-          <h2>Output</h2>
+          <h2>{{ t("pages.output") }}</h2>
           <div class="status" :class="statusType ? `is-${statusType}` : ''">{{ status }}</div>
         </div>
-        <div v-if="!outputRuns.length" class="empty">No run output yet</div>
+        <div v-if="!outputRuns.length" class="empty">{{ t("empty.noRunOutput") }}</div>
         <article v-for="run in outputRuns" :key="run.path" class="detail-section">
-          <h3>{{ run.symbol || "Run" }}</h3>
+          <h3>{{ run.symbol || t("fallback.run") }}</h3>
           <div class="metric-row">
-            <div class="metric"><b>Final</b><span>{{ formatNumber(run.summary.final_balance) }}</span></div>
-            <div class="metric"><b>Trades</b><span>{{ formatNumber(run.summary.trades) }}</span></div>
-            <div class="metric"><b>Return</b><span>{{ formatNumber(run.summary.total_return_pct) }}</span></div>
-            <div class="metric"><b>Win Rate</b><span>{{ formatNumber(run.summary.win_rate) }}</span></div>
+            <div class="metric"><b>{{ t("metrics.final") }}</b><span>{{ formatNumber(run.summary.final_balance) }}</span></div>
+            <div class="metric"><b>{{ t("metrics.trades") }}</b><span>{{ formatNumber(run.summary.trades) }}</span></div>
+            <div class="metric"><b>{{ t("metrics.return") }}</b><span>{{ formatNumber(run.summary.total_return_pct) }}</span></div>
+            <div class="metric"><b>{{ t("metrics.winRate") }}</b><span>{{ formatNumber(run.summary.win_rate) }}</span></div>
           </div>
           <p>{{ run.path }}</p>
         </article>
@@ -662,40 +725,40 @@ function errorMessage(error: unknown): string {
     <section v-else-if="activeMode === 'live'" class="panel live-panel">
       <div class="panel-heading">
         <div>
-          <h2>Live Market</h2>
+          <h2>{{ t("pages.liveMarket") }}</h2>
           <p>{{ activeLiveStrategyLabel }}</p>
         </div>
         <div class="status" :class="liveStatusType ? `is-${liveStatusType}` : ''">{{ liveStatus }}</div>
       </div>
       <div class="live-market-strip">
         <div class="ticker-pill">
-          <span>Source</span>
+          <span>{{ t("labels.source") }}</span>
           <b>{{ livePayload?.data_source ?? "Binance Spot public REST" }}</b>
         </div>
         <div class="ticker-pill">
-          <span>Market</span>
+          <span>{{ t("labels.market") }}</span>
           <b>{{ livePayload?.symbol ?? liveSymbol }}</b>
         </div>
         <div class="ticker-pill">
-          <span>Interval</span>
+          <span>{{ t("labels.interval") }}</span>
           <b>{{ livePayload?.interval ?? liveInterval }}</b>
         </div>
         <div class="ticker-pill">
-          <span>Candles</span>
+          <span>{{ t("labels.candles") }}</span>
           <b>{{ formatNumber(liveCandleCount) }}</b>
         </div>
         <div class="ticker-pill">
-          <span>Signals</span>
+          <span>{{ t("labels.signals") }}</span>
           <b>{{ formatNumber(liveSignalCount) }}</b>
         </div>
         <div class="ticker-pill">
-          <span>Paper</span>
+          <span>{{ t("labels.paper") }}</span>
           <b>{{ formatNumber(livePaperMarkerCount) }}</b>
         </div>
       </div>
       <div class="live-controls">
         <label>
-          <span>Market</span>
+          <span>{{ t("labels.market") }}</span>
           <select v-model="liveMarket">
             <option
               v-for="option in liveMarketOptions"
@@ -707,7 +770,7 @@ function errorMessage(error: unknown): string {
           </select>
         </label>
         <label>
-          <span>Symbol</span>
+          <span>{{ t("labels.symbol") }}</span>
           <select v-model="liveSymbol">
             <option
               v-for="option in activeLiveSymbolOptions"
@@ -719,7 +782,7 @@ function errorMessage(error: unknown): string {
           </select>
         </label>
         <label>
-          <span>Interval</span>
+          <span>{{ t("labels.interval") }}</span>
           <select v-model="liveInterval">
             <option
               v-for="option in liveIntervalOptions"
@@ -731,7 +794,7 @@ function errorMessage(error: unknown): string {
           </select>
         </label>
         <label>
-          <span>Candles</span>
+          <span>{{ t("labels.candles") }}</span>
           <select v-model="liveLimit">
             <option
               v-for="option in liveCandleOptions"
@@ -743,25 +806,25 @@ function errorMessage(error: unknown): string {
           </select>
         </label>
         <label class="live-strategy-field">
-          <span>Strategy</span>
+          <span>{{ t("labels.strategy") }}</span>
           <select v-model="settings.strategy">
             <option v-for="strategy in liveStrategyOptions" :key="strategy.name" :value="strategy.name">
               {{ strategy.description }}
             </option>
           </select>
         </label>
-        <label><span>Refresh Sec</span><input v-model="liveRefresh" type="number" min="2" max="300"></label>
-        <label class="toggle-row"><input v-model="showSignals" type="checkbox"><span>Strategy markers</span></label>
-        <label class="toggle-row"><input v-model="showPaper" type="checkbox"><span>Paper markers</span></label>
-        <button class="primary" type="button" @click="refreshLiveChart">Refresh Chart</button>
+        <label><span>{{ t("labels.refreshSec") }}</span><input v-model="liveRefresh" type="number" min="2" max="300"></label>
+        <label class="toggle-row"><input v-model="showSignals" type="checkbox"><span>{{ t("labels.strategyMarkers") }}</span></label>
+        <label class="toggle-row"><input v-model="showPaper" type="checkbox"><span>{{ t("labels.paperMarkers") }}</span></label>
+        <button class="primary" type="button" @click="refreshLiveChart">{{ t("actions.refreshChart") }}</button>
       </div>
       <div class="chart-shell">
         <div class="chart-legend">
-          <span><i class="legend-dot long"></i>Long signal</span>
-          <span><i class="legend-dot short"></i>Short signal</span>
-          <span><i class="legend-dot paper-entry"></i>Paper entry</span>
-          <span><i class="legend-dot paper-exit"></i>Paper exit</span>
-          <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a>
+          <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
+          <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
+          <span><i class="legend-dot paper-entry"></i>{{ t("chart.paperEntryLegend") }}</span>
+          <span><i class="legend-dot paper-exit"></i>{{ t("chart.paperExitLegend") }}</span>
+          <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">{{ t("chart.tradingView") }}</a>
         </div>
         <TradingViewChart
           v-if="livePayload"
@@ -771,8 +834,14 @@ function errorMessage(error: unknown): string {
           :show-signals="showSignals"
           :show-paper="showPaper"
           :reset-key="liveChartResetKey"
+          :aria-label="chartLabels.aria"
+          :empty-label="chartLabels.empty"
+          :paper-entry-label="chartLabels.paperEntry"
+          :paper-exit-label="chartLabels.paperExit"
+          :long-signal-label="chartLabels.longSignal"
+          :short-signal-label="chartLabels.shortSignal"
         />
-        <div v-else class="empty">Load a chart to start</div>
+        <div v-else class="empty">{{ t("empty.loadChart") }}</div>
       </div>
     </section>
 
@@ -780,64 +849,64 @@ function errorMessage(error: unknown): string {
       <form class="panel settings" @submit.prevent="runCombinationSignals">
         <div class="panel-heading">
           <div>
-            <h2>Combination Signals</h2>
+            <h2>{{ t("pages.combinationSignals") }}</h2>
             <p>{{ settings.combo_strategies }}</p>
           </div>
-          <button class="primary" type="submit">Run Combo</button>
+          <button class="primary" type="submit">{{ t("actions.runCombo") }}</button>
         </div>
         <div class="field-grid">
-          <label><span>Symbol</span><input v-model="comboSymbol" autocomplete="off"></label>
-          <label><span>Interval</span><input v-model="comboInterval" autocomplete="off"></label>
-          <label><span>Candles</span><input v-model="comboLimit" type="number" min="30"></label>
-          <label><span>Side</span>
+          <label><span>{{ t("labels.symbol") }}</span><input v-model="comboSymbol" autocomplete="off"></label>
+          <label><span>{{ t("labels.interval") }}</span><input v-model="comboInterval" autocomplete="off"></label>
+          <label><span>{{ t("labels.candles") }}</span><input v-model="comboLimit" type="number" min="30"></label>
+          <label><span>{{ t("labels.side") }}</span>
             <select v-model="settings.allowed_side">
-              <option value="both">Both</option>
-              <option value="long-only">Long only</option>
-              <option value="short-only">Short only</option>
+              <option v-for="option in sideOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
             </select>
           </label>
-          <label><span>Member Strategies</span><input v-model="settings.combo_strategies" autocomplete="off"></label>
-          <label><span>Entry Confirms</span><input v-model="settings.combo_entry_confirmations" type="number" min="1"></label>
-          <label><span>Exit Confirms</span><input v-model="settings.combo_exit_confirmations" type="number" min="1"></label>
-          <label><span>Lookback</span><input v-model="settings.combo_lookback" type="number" min="1"></label>
+          <label><span>{{ t("labels.memberStrategies") }}</span><input v-model="settings.combo_strategies" autocomplete="off"></label>
+          <label><span>{{ t("labels.entryConfirms") }}</span><input v-model="settings.combo_entry_confirmations" type="number" min="1"></label>
+          <label><span>{{ t("labels.exitConfirms") }}</span><input v-model="settings.combo_exit_confirmations" type="number" min="1"></label>
+          <label><span>{{ t("labels.lookback") }}</span><input v-model="settings.combo_lookback" type="number" min="1"></label>
           <label>
-            <span>Preset</span>
+            <span>{{ t("labels.preset") }}</span>
             <select v-model="settings.preset">
               <option v-for="preset in presets" :key="preset" :value="preset">{{ preset }}</option>
             </select>
           </label>
-          <label><span>Starting USDT</span><input v-model="settings.starting_balance" type="number" min="1" step="0.01"></label>
-          <label><span>Position Fraction</span><input v-model="settings.position_fraction" type="number" min="0.01" max="1" step="0.01"></label>
-          <label><span>Fast Period</span><input v-model="settings.fast_ema" type="number" min="1"></label>
-          <label><span>Slow Period</span><input v-model="settings.slow_ema" type="number" min="1"></label>
-          <label><span>RSI Period</span><input v-model="settings.rsi_period" type="number" min="1"></label>
-          <label><span>RSI Overbought</span><input v-model="settings.rsi_overbought" type="number" min="1" max="100" step="0.1"></label>
-          <label><span>RSI Oversold</span><input v-model="settings.rsi_oversold" type="number" min="0" max="99" step="0.1"></label>
-          <label><span>MACD Signal</span><input v-model="settings.macd_signal" type="number" min="1"></label>
-          <label><span>Fee Rate</span><input v-model="settings.fee_rate" type="number" min="0" step="0.0001"></label>
-          <label><span>Slippage</span><input v-model="settings.slippage_rate" type="number" min="0" step="0.0001"></label>
-          <label><span>Stop Loss</span><input v-model="settings.stop_loss_pct" type="number" min="0" step="0.001"></label>
-          <label><span>Take Profit</span><input v-model="settings.take_profit_pct" type="number" min="0" step="0.001"></label>
-          <label><span>Trailing Stop</span><input v-model="settings.trailing_stop_pct" type="number" min="0" step="0.001"></label>
+          <label><span>{{ t("labels.startingUsdt") }}</span><input v-model="settings.starting_balance" type="number" min="1" step="0.01"></label>
+          <label><span>{{ t("labels.positionFraction") }}</span><input v-model="settings.position_fraction" type="number" min="0.01" max="1" step="0.01"></label>
+          <label><span>{{ t("labels.fastPeriod") }}</span><input v-model="settings.fast_ema" type="number" min="1"></label>
+          <label><span>{{ t("labels.slowPeriod") }}</span><input v-model="settings.slow_ema" type="number" min="1"></label>
+          <label><span>{{ t("labels.rsiPeriod") }}</span><input v-model="settings.rsi_period" type="number" min="1"></label>
+          <label><span>{{ t("labels.rsiOverbought") }}</span><input v-model="settings.rsi_overbought" type="number" min="1" max="100" step="0.1"></label>
+          <label><span>{{ t("labels.rsiOversold") }}</span><input v-model="settings.rsi_oversold" type="number" min="0" max="99" step="0.1"></label>
+          <label><span>{{ t("labels.macdSignal") }}</span><input v-model="settings.macd_signal" type="number" min="1"></label>
+          <label><span>{{ t("labels.feeRate") }}</span><input v-model="settings.fee_rate" type="number" min="0" step="0.0001"></label>
+          <label><span>{{ t("labels.slippage") }}</span><input v-model="settings.slippage_rate" type="number" min="0" step="0.0001"></label>
+          <label><span>{{ t("labels.stopLoss") }}</span><input v-model="settings.stop_loss_pct" type="number" min="0" step="0.001"></label>
+          <label><span>{{ t("labels.takeProfit") }}</span><input v-model="settings.take_profit_pct" type="number" min="0" step="0.001"></label>
+          <label><span>{{ t("labels.trailingStop") }}</span><input v-model="settings.trailing_stop_pct" type="number" min="0" step="0.001"></label>
         </div>
       </form>
       <section class="panel output">
         <div class="panel-heading">
-          <h2>Combo Result</h2>
+          <h2>{{ t("pages.comboResult") }}</h2>
           <div class="status" :class="comboStatusType ? `is-${comboStatusType}` : ''">{{ comboStatus }}</div>
         </div>
         <div v-if="comboPayload" class="metric-row">
-          <div class="metric"><b>Final</b><span>{{ formatNumber(comboPayload.summary.final_balance) }}</span></div>
-          <div class="metric"><b>Return</b><span>{{ formatNumber(comboPayload.summary.total_return_pct) }}</span></div>
-          <div class="metric"><b>Trades</b><span>{{ formatNumber(comboPayload.summary.trades) }}</span></div>
-          <div class="metric"><b>Signals</b><span>{{ formatNumber(comboSignalCount) }}</span></div>
-          <div class="metric"><b>Candles</b><span>{{ formatNumber(comboCandleCount) }}</span></div>
+          <div class="metric"><b>{{ t("metrics.final") }}</b><span>{{ formatNumber(comboPayload.summary.final_balance) }}</span></div>
+          <div class="metric"><b>{{ t("metrics.return") }}</b><span>{{ formatNumber(comboPayload.summary.total_return_pct) }}</span></div>
+          <div class="metric"><b>{{ t("metrics.trades") }}</b><span>{{ formatNumber(comboPayload.summary.trades) }}</span></div>
+          <div class="metric"><b>{{ t("labels.signals") }}</b><span>{{ formatNumber(comboSignalCount) }}</span></div>
+          <div class="metric"><b>{{ t("labels.candles") }}</b><span>{{ formatNumber(comboCandleCount) }}</span></div>
         </div>
         <div class="chart-shell">
           <div class="chart-legend">
-            <span><i class="legend-dot long"></i>Long signal</span>
-            <span><i class="legend-dot short"></i>Short signal</span>
-            <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a>
+            <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
+            <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
+            <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">{{ t("chart.tradingView") }}</a>
           </div>
           <TradingViewChart
             v-if="comboPayload"
@@ -847,44 +916,57 @@ function errorMessage(error: unknown): string {
             :show-signals="true"
             :show-paper="false"
             :reset-key="comboChartResetKey"
+            :aria-label="chartLabels.aria"
+            :empty-label="chartLabels.empty"
+            :paper-entry-label="chartLabels.paperEntry"
+            :paper-exit-label="chartLabels.paperExit"
+            :long-signal-label="chartLabels.longSignal"
+            :short-signal-label="chartLabels.shortSignal"
           />
-          <div v-else class="empty">Run a combination to load the chart</div>
+          <div v-else class="empty">{{ t("empty.runCombo") }}</div>
         </div>
       </section>
     </section>
 
     <section v-else-if="activeMode === 'runs'" class="panel runs-panel">
       <div class="panel-heading">
-        <h2>Runs</h2>
-        <button class="secondary" type="button" @click="loadRuns">Refresh</button>
+        <h2>{{ t("pages.runs") }}</h2>
+        <button class="secondary" type="button" @click="loadRuns">{{ t("actions.refresh") }}</button>
       </div>
       <div class="runs-layout">
         <div class="runs-list">
-          <div v-if="!runs.length" class="empty">No local runs yet</div>
+          <div v-if="!runs.length" class="empty">{{ t("empty.noRuns") }}</div>
           <div v-for="run in runs" :key="run.path" class="run-row">
             <div>
-              <h3>{{ run.symbol || "Run" }} · {{ run.mode }}</h3>
-              <p>{{ run.timestamp }} · Final {{ formatNumber(run.final_balance) }}</p>
+              <h3>{{ run.symbol || t("fallback.run") }} · {{ run.mode }}</h3>
+              <p>{{ run.timestamp }} · {{ t("metrics.final") }} {{ formatNumber(run.final_balance) }}</p>
             </div>
-            <button class="secondary" type="button" @click="loadRunDetails(run.path)">Open</button>
+            <button class="secondary" type="button" @click="loadRunDetails(run.path)">{{ t("actions.open") }}</button>
           </div>
         </div>
         <div class="run-detail">
-          <div v-if="!runDetails" class="empty">Select a run</div>
+          <div v-if="!runDetails" class="empty">{{ t("empty.selectRun") }}</div>
           <template v-else>
             <div class="detail-section">
               <h3>{{ runDetails.summary.symbol || runDetails.path }}</h3>
               <div class="metric-row">
-                <div class="metric"><b>Final</b><span>{{ formatNumber(runDetails.summary.final_balance) }}</span></div>
-                <div class="metric"><b>Trades</b><span>{{ formatNumber(runDetails.summary.trades) }}</span></div>
-                <div class="metric"><b>Max DD</b><span>{{ formatNumber(runDetails.summary.max_drawdown_pct) }}</span></div>
-                <div class="metric"><b>Profit Factor</b><span>{{ formatNumber(runDetails.summary.profit_factor) }}</span></div>
+                <div class="metric"><b>{{ t("metrics.final") }}</b><span>{{ formatNumber(runDetails.summary.final_balance) }}</span></div>
+                <div class="metric"><b>{{ t("metrics.trades") }}</b><span>{{ formatNumber(runDetails.summary.trades) }}</span></div>
+                <div class="metric"><b>{{ t("metrics.maxDd") }}</b><span>{{ formatNumber(runDetails.summary.max_drawdown_pct) }}</span></div>
+                <div class="metric"><b>{{ t("metrics.profitFactor") }}</b><span>{{ formatNumber(runDetails.summary.profit_factor) }}</span></div>
               </div>
             </div>
             <div class="detail-section">
-              <h3>Recent Trades</h3>
+              <h3>{{ t("pages.recentTrades") }}</h3>
               <table>
-                <thead><tr><th>Side</th><th>Entry</th><th>Exit</th><th>PNL</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>{{ t("table.side") }}</th>
+                    <th>{{ t("table.entry") }}</th>
+                    <th>{{ t("table.exit") }}</th>
+                    <th>{{ t("table.pnl") }}</th>
+                  </tr>
+                </thead>
                 <tbody>
                   <tr v-for="trade in runDetails.trades" :key="`${trade.entry_time}-${trade.exit_time}-${trade.side}`">
                     <td>{{ trade.side }}</td>
@@ -904,55 +986,55 @@ function errorMessage(error: unknown): string {
       <form class="panel settings" @submit.prevent="runStrategyLab">
         <div class="panel-heading">
           <div>
-            <h2>Strategy Lab</h2>
-            <p>Rank strategies by simulated return and drawdown.</p>
+            <h2>{{ t("pages.strategyLab") }}</h2>
+            <p>{{ t("pages.strategyLabSubtitle") }}</p>
           </div>
-          <button class="primary" type="submit">Run Lab</button>
+          <button class="primary" type="submit">{{ t("actions.runLab") }}</button>
         </div>
         <div class="field-grid">
-          <label><span>Symbols</span><input v-model="labSymbols" autocomplete="off"></label>
-          <label><span>Strategies</span><input v-model="labStrategies" autocomplete="off"></label>
-          <label><span>Presets</span><input v-model="labPresets" autocomplete="off"></label>
-          <label><span>Benchmarks</span><input v-model="labBenchmarkSymbols" autocomplete="off"></label>
-          <label><span>Walk Windows</span><input v-model="settings.walk_forward_windows" type="number" min="0"></label>
-          <label><span>Walk Min Candles</span><input v-model="settings.walk_forward_min_candles" type="number" min="1"></label>
-          <label><span>Interval</span><input v-model="settings.interval" autocomplete="off"></label>
-          <label><span>Candles</span><input v-model="settings.limit" type="number" min="30"></label>
-          <label><span>Side</span>
+          <label><span>{{ t("labels.symbols") }}</span><input v-model="labSymbols" autocomplete="off"></label>
+          <label><span>{{ t("labels.strategies") }}</span><input v-model="labStrategies" autocomplete="off"></label>
+          <label><span>{{ t("labels.presets") }}</span><input v-model="labPresets" autocomplete="off"></label>
+          <label><span>{{ t("labels.benchmarks") }}</span><input v-model="labBenchmarkSymbols" autocomplete="off"></label>
+          <label><span>{{ t("labels.walkWindows") }}</span><input v-model="settings.walk_forward_windows" type="number" min="0"></label>
+          <label><span>{{ t("labels.walkMinCandles") }}</span><input v-model="settings.walk_forward_min_candles" type="number" min="1"></label>
+          <label><span>{{ t("labels.interval") }}</span><input v-model="settings.interval" autocomplete="off"></label>
+          <label><span>{{ t("labels.candles") }}</span><input v-model="settings.limit" type="number" min="30"></label>
+          <label><span>{{ t("labels.side") }}</span>
             <select v-model="settings.allowed_side">
-              <option value="both">Both</option>
-              <option value="long-only">Long only</option>
-              <option value="short-only">Short only</option>
+              <option v-for="option in sideOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
             </select>
           </label>
         </div>
       </form>
       <section class="panel output">
         <div class="panel-heading">
-          <h2>Ranking</h2>
+          <h2>{{ t("pages.ranking") }}</h2>
           <div class="actions">
-            <button type="button" :disabled="!labRows.length" @click="exportLabCsv">Export CSV</button>
+            <button type="button" :disabled="!labRows.length" @click="exportLabCsv">{{ t("actions.exportCsv") }}</button>
             <div class="status" :class="labStatusType ? `is-${labStatusType}` : ''">{{ labStatus }}</div>
           </div>
         </div>
-        <div v-if="!labRows.length" class="empty">Run the lab to rank strategy/preset combinations</div>
+        <div v-if="!labRows.length" class="empty">{{ t("empty.runLab") }}</div>
         <table v-else>
           <thead>
             <tr>
-              <th>Rank</th>
-              <th>Symbol</th>
-              <th>Strategy</th>
-              <th>Preset</th>
-              <th>Return</th>
-              <th>Max DD</th>
-              <th>Trades</th>
-              <th>PF</th>
-              <th>Sharpe</th>
-              <th>Sortino</th>
-              <th>Exposure</th>
-              <th>Worst</th>
-              <th>WF Avg</th>
-              <th>WF Win</th>
+              <th>{{ t("table.rank") }}</th>
+              <th>{{ t("table.symbol") }}</th>
+              <th>{{ t("table.strategy") }}</th>
+              <th>{{ t("table.preset") }}</th>
+              <th>{{ t("table.return") }}</th>
+              <th>{{ t("table.maxDd") }}</th>
+              <th>{{ t("table.trades") }}</th>
+              <th>{{ t("table.pf") }}</th>
+              <th>{{ t("table.sharpe") }}</th>
+              <th>{{ t("table.sortino") }}</th>
+              <th>{{ t("table.exposure") }}</th>
+              <th>{{ t("table.worst") }}</th>
+              <th>{{ t("table.wfAvg") }}</th>
+              <th>{{ t("table.wfWin") }}</th>
             </tr>
           </thead>
           <tbody>

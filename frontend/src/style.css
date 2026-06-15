@@ -71,6 +71,39 @@ button {
   font-size: 13px;
 }
 
+.topbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.language-switcher {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--field);
+}
+
+.language-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.language-option.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
 .safety {
   flex: 0 0 auto;
   border: 1px solid rgba(34, 171, 148, 0.45);
@@ -493,6 +526,10 @@ th {
   .topbar {
     display: grid;
   }
+
+  .topbar-actions {
+    justify-content: space-between;
+  }
 }
 
 @media (max-width: 720px) {
@@ -523,5 +560,19 @@ th {
   .panel-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .topbar-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .language-switcher {
+    width: 100%;
+  }
+
+  .language-option {
+    flex: 1 1 0;
+    justify-content: center;
   }
 }

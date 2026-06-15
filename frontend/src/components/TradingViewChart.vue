@@ -14,14 +14,27 @@ import {
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import type { Candle, Marker } from "../types";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   candles: Candle[];
   signals: Marker[];
   paperMarkers: Marker[];
   showSignals: boolean;
   showPaper: boolean;
   resetKey: string;
-}>();
+  ariaLabel?: string;
+  emptyLabel?: string;
+  paperEntryLabel?: string;
+  paperExitLabel?: string;
+  longSignalLabel?: string;
+  shortSignalLabel?: string;
+}>(), {
+  ariaLabel: "TradingView live market chart",
+  emptyLabel: "No candles returned",
+  paperEntryLabel: "Paper",
+  paperExitLabel: "Exit",
+  longSignalLabel: "Long",
+  shortSignalLabel: "Short",
+});
 
 const chartEl = ref<HTMLElement | null>(null);
 const chart = shallowRef<IChartApi | null>(null);
@@ -133,7 +146,7 @@ function signalMarker(marker: Marker): SeriesMarker<Time> | null {
       position: "belowBar",
       color: "#22ab94",
       shape: "arrowUp",
-      text: markerLabel("Long", marker.reason),
+      text: markerLabel(props.longSignalLabel, marker.reason),
     };
   }
   if (marker.type === "short_signal") {
@@ -142,7 +155,7 @@ function signalMarker(marker: Marker): SeriesMarker<Time> | null {
       position: "aboveBar",
       color: "#f23645",
       shape: "arrowDown",
-      text: markerLabel("Short", marker.reason),
+      text: markerLabel(props.shortSignalLabel, marker.reason),
     };
   }
   return null;
@@ -156,7 +169,7 @@ function paperMarker(marker: Marker): SeriesMarker<Time> | null {
     position: isShort ? "aboveBar" : "belowBar",
     color: isEntry ? "#2962ff" : "#7c3aed",
     shape: isEntry ? (isShort ? "arrowDown" : "arrowUp") : "square",
-    text: markerLabel(isEntry ? "Paper" : "Exit", marker.reason),
+    text: markerLabel(isEntry ? props.paperEntryLabel : props.paperExitLabel, marker.reason),
   };
 }
 
@@ -171,6 +184,6 @@ function toChartTime(value: number): Time {
 </script>
 
 <template>
-  <div v-if="candles.length" ref="chartEl" class="tv-chart" aria-label="TradingView live market chart" />
-  <div v-else class="empty">No candles returned</div>
+  <div v-if="candles.length" ref="chartEl" class="tv-chart" :aria-label="ariaLabel" />
+  <div v-else class="empty">{{ emptyLabel }}</div>
 </template>

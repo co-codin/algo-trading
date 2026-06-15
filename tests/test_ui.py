@@ -85,17 +85,19 @@ class UiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("const liveSymbolOptions = [", source)
-        self.assertIn("const liveMarketOptions = [", source)
+        self.assertIn("const liveMarketOptions = computed<SelectOption[]>(() => [", source)
         self.assertIn("const liveSymbolsByMarket", source)
         self.assertIn("const liveIntervalOptions = [", source)
         self.assertIn("const liveCandleOptions = [", source)
         self.assertIn("const liveStrategyOptions = computed(() => [", source)
         self.assertIn('name: "all"', source)
-        self.assertIn("All strategies", source)
+        self.assertIn('t("options.allStrategies")', source)
         self.assertIn('value: "crypto_spot"', source)
+        self.assertIn('t("options.cryptoSpot")', source)
         self.assertIn('value: "cme_futures"', source)
+        self.assertIn('t("options.usIndexFutures")', source)
         self.assertIn('value: "ES=F"', source)
-        self.assertIn("S&P 500 Future", source)
+        self.assertIn('t("options.sp500Future")', source)
         self.assertIn('<select v-model="liveMarket"', source)
         self.assertIn('<select v-model="liveSymbol"', source)
         self.assertIn('<select v-model="liveInterval"', source)
@@ -155,8 +157,8 @@ class UiTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('{ mode: "combos", label: "Combinations" }', source)
-        self.assertIn("Combination Signals", source)
+        self.assertIn('{ mode: "combos" as const, label: t("tabs.combos") }', source)
+        self.assertIn('t("pages.combinationSignals")', source)
         self.assertIn("/api/combination-signals", source)
         self.assertIn("combo_strategies", source)
         self.assertIn("combo_entry_confirmations", source)
@@ -513,7 +515,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("walk_forward_windows", source)
         self.assertIn("exportLabCsv", source)
         self.assertIn("strategy-lab.csv", source)
-        self.assertIn("Export CSV", source)
+        self.assertIn('t("actions.exportCsv")', source)
 
     def test_run_backtest_payload_writes_one_run_per_symbol(self):
         client = FakeClient()
