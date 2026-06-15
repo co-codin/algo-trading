@@ -20,6 +20,7 @@ const props = defineProps<{
   paperMarkers: Marker[];
   showSignals: boolean;
   showPaper: boolean;
+  resetKey: string;
 }>();
 
 const chartEl = ref<HTMLElement | null>(null);
@@ -27,11 +28,16 @@ const chart = shallowRef<IChartApi | null>(null);
 const series = shallowRef<ISeriesApi<"Candlestick"> | null>(null);
 const markerApi = shallowRef<ISeriesMarkersPluginApi<Time> | null>(null);
 let resizeObserver: ResizeObserver | null = null;
+let shouldFitContent = true;
 
 const visibleMarkers = computed(() => [
   ...(props.showSignals ? props.signals.map(signalMarker) : []),
   ...(props.showPaper ? props.paperMarkers.map(paperMarker) : []),
 ]);
+
+watch(() => props.resetKey, () => {
+  shouldFitContent = true;
+});
 
 watch(
   () => [props.candles, visibleMarkers.value],
@@ -59,7 +65,10 @@ function renderChart() {
       .filter((marker): marker is SeriesMarker<Time> => marker !== null)
       .sort((left, right) => Number(left.time) - Number(right.time)),
   );
-  chart.value?.timeScale().fitContent();
+  if (shouldFitContent) {
+    chart.value?.timeScale().fitContent();
+    shouldFitContent = false;
+  }
 }
 
 function ensureChart() {

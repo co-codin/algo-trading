@@ -120,6 +120,25 @@ class UiTests(unittest.TestCase):
         self.assertIn("refreshLiveChart();", source)
         self.assertIn("market: liveMarket.value", source)
 
+    def test_live_chart_refresh_preserves_user_zoom(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        chart_source = (
+            root / "frontend" / "src" / "components" / "TradingViewChart.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(':reset-key="liveChartResetKey"', app_source)
+        self.assertIn("const liveChartResetKey = computed", app_source)
+        self.assertIn("resetKey: string;", chart_source)
+        self.assertIn("let shouldFitContent = true;", chart_source)
+        self.assertIn("watch(() => props.resetKey", chart_source)
+        self.assertIn("shouldFitContent = true;", chart_source)
+        self.assertIn("if (shouldFitContent) {", chart_source)
+        self.assertIn("chart.value?.timeScale().fitContent();", chart_source)
+        self.assertIn("shouldFitContent = false;", chart_source)
+
     def test_all_strategies_selection_stays_live_only(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
