@@ -268,7 +268,7 @@ button:focus {
 
 .live-controls {
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr)) repeat(2, auto) auto;
+  grid-template-columns: repeat(5, minmax(120px, 1fr)) repeat(2, auto) auto;
   gap: 10px;
   align-items: end;
   margin-bottom: 14px;

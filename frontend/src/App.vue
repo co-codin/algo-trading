@@ -149,7 +149,7 @@ const strategyName = computed(() => strategyLabel(settings.strategy));
 const filteredSignals = computed(() => livePayload.value?.signals ?? []);
 const filteredPaperMarkers = computed(() => livePayload.value?.paper_markers ?? []);
 
-watch([liveSymbol, liveInterval, liveLimit], () => {
+watch([liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {
   if (activeMode.value === "live") {
     refreshLiveChart();
   }
@@ -539,6 +539,14 @@ function errorMessage(error: unknown): string {
               :value="option.value"
             >
               {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label class="live-strategy-field">
+          <span>Strategy</span>
+          <select v-model="settings.strategy">
+            <option v-for="strategy in strategies" :key="strategy.name" :value="strategy.name">
+              {{ strategy.name }}
             </option>
           </select>
         </label>

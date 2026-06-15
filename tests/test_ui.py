@@ -65,6 +65,9 @@ class UiTests(unittest.TestCase):
         self.assertIn('<select v-model="liveSymbol"', source)
         self.assertIn('<select v-model="liveInterval"', source)
         self.assertIn('<select v-model="liveLimit"', source)
+        self.assertIn('class="live-strategy-field"', source)
+        self.assertIn('<select v-model="settings.strategy"', source)
+        self.assertIn("v-for=\"strategy in strategies\"", source)
         self.assertIn('value: "BTCUSDT"', source)
         self.assertIn('value: "ETHUSDT"', source)
         self.assertIn('value: "1m"', source)
@@ -78,7 +81,7 @@ class UiTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";', source)
-        self.assertIn("watch([liveSymbol, liveInterval, liveLimit], () => {", source)
+        self.assertIn("watch([liveSymbol, liveInterval, liveLimit, () => settings.strategy], () => {", source)
         self.assertIn('if (activeMode.value === "live") {', source)
         self.assertIn("refreshLiveChart();", source)
 
