@@ -191,7 +191,6 @@ const liveRefresh = ref("10");
 const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
 const liveConsensusMinConfirmations = ref(2);
 const showSignals = ref(true);
-const showPaper = ref(true);
 const comboSymbol = ref("BTCUSDT");
 const comboInterval = ref("1h");
 const comboLimit = ref<string | number>(300);
@@ -272,9 +271,7 @@ const activeLiveStrategyLabel = computed(() =>
   settings.strategy === "all" ? t("options.allStrategies") : strategyLabel(settings.strategy),
 );
 const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
-const livePaperMarkerCount = computed(() => livePayload.value?.paper_markers.length ?? 0);
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
-const filteredPaperMarkers = computed(() => livePayload.value?.paper_markers ?? []);
 const breadthGroups = computed(() => breadthPayload.value?.groups ?? []);
 const breadthSeriesCount = computed(() =>
   Object.keys(breadthPayload.value?.series ?? {}).length,
@@ -1026,10 +1023,6 @@ function errorMessage(error: unknown): string {
           <span>{{ t("labels.signals") }}</span>
           <b>{{ formatNumber(liveSignalCount) }}</b>
         </div>
-        <div class="ticker-pill">
-          <span>{{ t("labels.paper") }}</span>
-          <b>{{ formatNumber(livePaperMarkerCount) }}</b>
-        </div>
       </div>
       <div class="live-controls">
         <label>
@@ -1106,29 +1099,24 @@ function errorMessage(error: unknown): string {
         </label>
         <label><span>{{ t("labels.refreshSec") }}</span><input v-model="liveRefresh" type="number" min="2" max="300"></label>
         <label class="toggle-row"><input v-model="showSignals" type="checkbox"><span>{{ t("labels.strategyMarkers") }}</span></label>
-        <label class="toggle-row"><input v-model="showPaper" type="checkbox"><span>{{ t("labels.paperMarkers") }}</span></label>
         <button class="primary" type="button" @click="refreshLiveChart">{{ t("actions.refreshChart") }}</button>
       </div>
       <div class="chart-shell">
         <div class="chart-legend">
           <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
           <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
-          <span><i class="legend-dot paper-entry"></i>{{ t("chart.paperEntryLegend") }}</span>
-          <span><i class="legend-dot paper-exit"></i>{{ t("chart.paperExitLegend") }}</span>
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">{{ t("chart.tradingView") }}</a>
         </div>
         <TradingViewChart
           v-if="livePayload"
           :candles="livePayload.candles"
           :signals="displayedSignals"
-          :paper-markers="filteredPaperMarkers"
+          :paper-markers="[]"
           :show-signals="showSignals"
-          :show-paper="showPaper"
+          :show-paper="false"
           :reset-key="liveChartResetKey"
           :aria-label="chartLabels.aria"
           :empty-label="chartLabels.empty"
-          :paper-entry-label="chartLabels.paperEntry"
-          :paper-exit-label="chartLabels.paperExit"
           :long-signal-label="chartLabels.longSignal"
           :short-signal-label="chartLabels.shortSignal"
         />

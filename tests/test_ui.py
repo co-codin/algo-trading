@@ -325,6 +325,31 @@ class UiTests(unittest.TestCase):
         self.assertNotIn("liveSignalDisplayMode.value", reset_key_source)
         self.assertNotIn("liveConsensusMinConfirmations.value", reset_key_source)
 
+    def test_live_page_does_not_show_paper_trade_markers(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+        live_section = source.split(
+            '<section v-else-if="activeMode === \'live\'" class="panel live-panel">',
+            1,
+        )[1].split(
+            "<section v-else-if='activeMode === \"breadth\"' class=\"panel breadth-panel\">",
+            1,
+        )[0]
+
+        self.assertNotIn('t("labels.paper")', live_section)
+        self.assertNotIn("livePaperMarkerCount", live_section)
+        self.assertNotIn('v-model="showPaper"', live_section)
+        self.assertNotIn('t("labels.paperMarkers")', live_section)
+        self.assertNotIn("paper-entry", live_section)
+        self.assertNotIn("paper-exit", live_section)
+        self.assertNotIn('t("chart.paperEntryLegend")', live_section)
+        self.assertNotIn('t("chart.paperExitLegend")', live_section)
+        self.assertNotIn(':paper-markers="filteredPaperMarkers"', live_section)
+        self.assertNotIn(':show-paper="showPaper"', live_section)
+        self.assertIn(':paper-markers="[]"', live_section)
+        self.assertIn(':show-paper="false"', live_section)
+
     def test_live_ui_uses_trading_terminal_visual_language(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
