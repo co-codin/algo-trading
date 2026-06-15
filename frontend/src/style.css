@@ -152,6 +152,10 @@ button {
   white-space: nowrap;
 }
 
+.profile-button {
+  white-space: nowrap;
+}
+
 .user-pill {
   display: grid;
   min-width: 150px;
@@ -204,16 +208,6 @@ button {
 .language-option.is-active {
   background: var(--primary);
   color: #fff;
-}
-
-.safety {
-  flex: 0 0 auto;
-  border: 1px solid rgba(34, 171, 148, 0.45);
-  border-radius: 999px;
-  padding: 7px 10px;
-  color: var(--long);
-  font-size: 13px;
-  font-weight: 700;
 }
 
 .tabs {
@@ -645,7 +639,7 @@ button:focus {
 
 .breadth-group {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
   gap: 1px;
   min-width: 0;
   border: 1px solid var(--line);
@@ -722,8 +716,8 @@ button:focus {
 }
 
 .breadth-card .tv-chart {
-  height: 220px;
-  min-height: 220px;
+  height: 360px;
+  min-height: 360px;
 }
 
 .breadth-put-call {
@@ -736,8 +730,8 @@ button:focus {
 }
 
 .breadth-put-call .tv-chart {
-  height: 320px;
-  min-height: 320px;
+  height: 440px;
+  min-height: 440px;
 }
 
 .runs-layout {
@@ -834,6 +828,11 @@ th {
 
   .profile-grid {
     grid-template-columns: 1fr;
+  }
+
+  .breadth-card .tv-chart {
+    height: 300px;
+    min-height: 300px;
   }
 
   .ticker-pill {

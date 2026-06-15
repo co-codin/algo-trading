@@ -18,7 +18,6 @@ export const messages = {
     "app.title": "Algo Trading",
     "app.subtitle":
       "Vue control panel for strategy ranking, live charts, and market breadth.",
-    "app.safety": "Simulated only: no real orders",
     "auth.title": "Trading workspace",
     "auth.subtitle": "Log in or create an account to open the dashboard.",
     "auth.login": "Login",
@@ -220,7 +219,6 @@ export const messages = {
     "app.title": "Algo Trading",
     "app.subtitle":
       "Панель Vue для рейтинга стратегий, онлайн-графиков и ширины рынка.",
-    "app.safety": "Только симуляция: реальных заявок нет",
     "auth.title": "Торговая панель",
     "auth.subtitle": "Войдите или создайте аккаунт, чтобы открыть дашборд.",
     "auth.login": "Вход",

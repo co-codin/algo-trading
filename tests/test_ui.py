@@ -315,6 +315,10 @@ class UiTests(unittest.TestCase):
         self.assertIn("profile-panel", app_source)
         self.assertIn("admin-panel", app_source)
         self.assertIn('t("auth.inactive")', app_source)
+        self.assertIn('class="secondary profile-button"', app_source)
+        self.assertNotIn('class="safety"', app_source)
+        self.assertNotIn('t("app.safety")', app_source)
+        self.assertNotIn('"app.safety"', i18n_source)
         self.assertIn('"tabs.profile"', i18n_source)
         self.assertIn('"tabs.admin"', i18n_source)
         self.assertIn('"auth.inactive"', i18n_source)
@@ -468,15 +472,29 @@ class UiTests(unittest.TestCase):
         self.assertNotIn("chart.value?.resize(chartEl.value.clientWidth, 560);", chart_source)
 
     def test_breadth_page_uses_stacked_readable_group_layout(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
         style_source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "style.css"
+            root / "frontend" / "src" / "style.css"
         ).read_text(encoding="utf-8")
+        breadth_loaded_source = app_source.split(
+            '<template v-else>',
+            1,
+        )[1]
 
         self.assertIn(".breadth-grid {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);", style_source)
         self.assertIn("padding: 14px;", style_source)
-        self.assertIn(".breadth-group {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));", style_source)
+        self.assertLess(
+            breadth_loaded_source.index('class="breadth-put-call"'),
+            breadth_loaded_source.index('class="breadth-grid"'),
+        )
+        self.assertIn(".breadth-group {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));", style_source)
         self.assertIn("grid-column: 1 / -1;", style_source)
-        self.assertIn(".breadth-card .tv-chart {\n  height: 220px;", style_source)
+        self.assertIn(".breadth-card .tv-chart {\n  height: 360px;", style_source)
+        self.assertIn(".breadth-put-call .tv-chart {\n  height: 440px;", style_source)
+        self.assertIn(".breadth-card .tv-chart {\n    height: 300px;", style_source)
 
     def test_top_symbols_payload_filters_and_ranks(self):
         payload = top_symbols_payload(FakeClient(), top=2)

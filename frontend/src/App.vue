@@ -781,7 +781,9 @@ function errorMessage(error: unknown): string {
       <button class="secondary logout-button" type="button" @click="logout">
         {{ t("auth.logout") }}
       </button>
-      <div class="safety">{{ t("app.safety") }}</div>
+      <button class="secondary profile-button" type="button" @click="setMode('profile')">
+        {{ t("tabs.profile") }}
+      </button>
     </div>
   </header>
 
@@ -964,6 +966,26 @@ function errorMessage(error: unknown): string {
       </div>
       <div v-if="!breadthPayload" class="empty breadth-empty">{{ t("empty.loadBreadth") }}</div>
       <template v-else>
+        <section v-if="breadthPutCall" class="breadth-put-call">
+          <div class="breadth-group-heading">
+            <h3>{{ t("pages.putCallRatio") }}</h3>
+            <span>{{ breadthPutCall.symbol }} · {{ breadthPutCall.period }}</span>
+          </div>
+          <TradingViewChart
+            :candles="breadthPutCall.candles"
+            :signals="[]"
+            :paper-markers="[]"
+            :show-signals="false"
+            :show-paper="false"
+            :reset-key="`breadth:${breadthPutCall.symbol}`"
+            :aria-label="`${chartLabels.aria} ${breadthPutCall.symbol}`"
+            :empty-label="chartLabels.empty"
+            :paper-entry-label="chartLabels.paperEntry"
+            :paper-exit-label="chartLabels.paperExit"
+            :long-signal-label="chartLabels.longSignal"
+            :short-signal-label="chartLabels.shortSignal"
+          />
+        </section>
         <div class="breadth-grid">
           <section v-for="group in breadthGroups" :key="group.name" class="breadth-group">
             <div class="breadth-group-heading">
@@ -1004,26 +1026,6 @@ function errorMessage(error: unknown): string {
             </article>
           </section>
         </div>
-        <section v-if="breadthPutCall" class="breadth-put-call">
-          <div class="breadth-group-heading">
-            <h3>{{ t("pages.putCallRatio") }}</h3>
-            <span>{{ breadthPutCall.symbol }} · {{ breadthPutCall.period }}</span>
-          </div>
-          <TradingViewChart
-            :candles="breadthPutCall.candles"
-            :signals="[]"
-            :paper-markers="[]"
-            :show-signals="false"
-            :show-paper="false"
-            :reset-key="`breadth:${breadthPutCall.symbol}`"
-            :aria-label="`${chartLabels.aria} ${breadthPutCall.symbol}`"
-            :empty-label="chartLabels.empty"
-            :paper-entry-label="chartLabels.paperEntry"
-            :paper-exit-label="chartLabels.paperExit"
-            :long-signal-label="chartLabels.longSignal"
-            :short-signal-label="chartLabels.shortSignal"
-          />
-        </section>
       </template>
     </section>
 
