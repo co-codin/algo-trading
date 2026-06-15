@@ -207,6 +207,42 @@ class UiTests(unittest.TestCase):
         self.assertIn('class="language-switcher"', app_source)
         self.assertIn("SUPPORTED_LOCALES", app_source)
 
+    def test_frontend_exposes_auth_shell_and_session_calls(self):
+        root = Path(__file__).resolve().parents[1]
+        api_source = (root / "frontend" / "src" / "api.ts").read_text(
+            encoding="utf-8"
+        )
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('credentials: "same-origin"', api_source)
+        self.assertIn("export type AuthUser", types_source)
+        self.assertIn("const authChecked = ref(false);", app_source)
+        self.assertIn("const authUser = ref<AuthUser | null>(null);", app_source)
+        self.assertIn('const authMode = ref<"login" | "register">("login");', app_source)
+        self.assertIn("const authForm = reactive", app_source)
+        self.assertIn("async function loadCurrentUser()", app_source)
+        self.assertIn('requestJson<AuthMePayload>("/api/auth/me")', app_source)
+        self.assertIn("async function submitAuth()", app_source)
+        self.assertIn('authMode.value === "login" ? "/api/auth/login" : "/api/auth/register"', app_source)
+        self.assertIn("async function logout()", app_source)
+        self.assertIn('requestJson<{ ok: true }>("/api/auth/logout"', app_source)
+        self.assertIn('class="auth-shell"', app_source)
+        self.assertIn('@submit.prevent="submitAuth"', app_source)
+        self.assertIn('@click="logout"', app_source)
+        self.assertIn('t("auth.login")', app_source)
+        self.assertIn('t("auth.register")', app_source)
+        self.assertIn('"auth.username"', i18n_source)
+        self.assertIn('"auth.password"', i18n_source)
+        self.assertIn('"auth.logout"', i18n_source)
+
     def test_chart_accepts_translated_labels_from_parent(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
