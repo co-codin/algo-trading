@@ -72,6 +72,90 @@ def atr(candles: list[Candle], period: int = 14) -> list[float]:
     return rolling_mean(ranges, period)
 
 
+def keltner_channels(
+    candles: list[Candle],
+    period: int = 20,
+    multiplier: float = 2.0,
+) -> tuple[list[float], list[float], list[float]]:
+    if multiplier <= 0:
+        raise ValueError("multiplier must be positive")
+    closes = [candle.close for candle in candles]
+    middle = ema(closes, period)
+    ranges = atr(candles, period)
+    upper = [mid + (multiplier * width) for mid, width in zip(middle, ranges)]
+    lower = [mid - (multiplier * width) for mid, width in zip(middle, ranges)]
+    return middle, upper, lower
+
+
+def commodity_channel_index(candles: list[Candle], period: int = 20) -> list[float]:
+    if period <= 0:
+        raise ValueError("period must be positive")
+    typical_prices = [_typical_price(candle) for candle in candles]
+    output: list[float] = []
+    for index, typical_price in enumerate(typical_prices):
+        if index < period - 1:
+            output.append(0.0)
+            continue
+        window = typical_prices[index - period + 1 : index + 1]
+        mean = sum(window) / period
+        mean_deviation = sum(abs(value - mean) for value in window) / period
+        if mean_deviation == 0.0:
+            output.append(0.0)
+        else:
+            output.append((typical_price - mean) / (0.015 * mean_deviation))
+    return output
+
+
+def williams_r(candles: list[Candle], period: int = 14) -> list[float]:
+    if period <= 0:
+        raise ValueError("period must be positive")
+    output: list[float] = []
+    for index, candle in enumerate(candles):
+        window = candles[max(0, index - period + 1) : index + 1]
+        highest_high = max(item.high for item in window)
+        lowest_low = min(item.low for item in window)
+        width = highest_high - lowest_low
+        if width == 0.0:
+            output.append(-50.0)
+        else:
+            output.append(((highest_high - candle.close) / width) * -100.0)
+    return output
+
+
+def on_balance_volume(candles: list[Candle]) -> list[float]:
+    if not candles:
+        return []
+    output = [0.0]
+    for index in range(1, len(candles)):
+        previous = candles[index - 1]
+        current = candles[index]
+        if current.close > previous.close:
+            output.append(output[-1] + current.volume)
+        elif current.close < previous.close:
+            output.append(output[-1] - current.volume)
+        else:
+            output.append(output[-1])
+    return output
+
+
+def rolling_volume_mean(candles: list[Candle], period: int = 20) -> list[float]:
+    return rolling_mean([candle.volume for candle in candles], period)
+
+
+def bollinger_width(
+    upper: list[float],
+    lower: list[float],
+    middle: list[float],
+) -> list[float]:
+    output: list[float] = []
+    for upper_value, lower_value, middle_value in zip(upper, lower, middle):
+        if middle_value == 0.0:
+            output.append(0.0)
+        else:
+            output.append((upper_value - lower_value) / middle_value)
+    return output
+
+
 def rolling_vwap(candles: list[Candle], period: int = 20) -> list[float]:
     if period <= 0:
         raise ValueError("period must be positive")

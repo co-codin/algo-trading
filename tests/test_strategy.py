@@ -19,23 +19,31 @@ from algo_trading.strategy import (
 )
 
 
-def candle(time: int, close: float) -> Candle:
+def candle(time: int, close: float, volume: float = 1.0) -> Candle:
     return Candle(
         open_time=time,
         open=close,
         high=close + 1.0,
         low=close - 1.0,
         close=close,
-        volume=1.0,
+        volume=volume,
     )
 
 
-def candles(prices: list[float]) -> list[Candle]:
-    return [candle(index, price) for index, price in enumerate(prices)]
+def candles(prices: list[float], volumes: list[float] | None = None) -> list[Candle]:
+    source_volumes = volumes or [1.0] * len(prices)
+    return [
+        candle(index, price, volume)
+        for index, (price, volume) in enumerate(zip(prices, source_volumes))
+    ]
 
 
-def first_entry_signal(config: StrategyConfig, prices: list[float]):
-    context = build_strategy_context(candles(prices), config)
+def first_entry_signal(
+    config: StrategyConfig,
+    prices: list[float],
+    volumes: list[float] | None = None,
+):
+    context = build_strategy_context(candles(prices, volumes), config)
     for index in range(len(prices)):
         signal = entry_signal_for_index(config, context, index)
         if signal.type is not SignalType.HOLD:
@@ -58,6 +66,15 @@ class StrategyTests(unittest.TestCase):
                 "stoch-rsi-reversal",
                 "ema-ribbon",
                 "momentum-scalping",
+                "keltner-breakout",
+                "ema-pullback",
+                "atr-trailing-trend",
+                "cci-reversal",
+                "williams-r-reversal",
+                "bollinger-squeeze-release",
+                "obv-trend",
+                "volume-breakout",
+                "vwap-trend-continuation",
             ],
         )
 
@@ -227,6 +244,137 @@ class StrategyTests(unittest.TestCase):
         self.assertIsNotNone(signal)
         self.assertEqual(signal.type, SignalType.ENTER_LONG)
         self.assertEqual(signal.reason, "momentum_scalping_long")
+
+    def test_keltner_breakout_enters_long_above_upper_band(self):
+        config = StrategyConfig(
+            strategy=StrategyName("keltner-breakout"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            atr_period=3,
+            keltner_multiplier=0.5,
+        )
+
+        signal = first_entry_signal(config, [10, 10, 10, 13])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "keltner_breakout_long")
+
+    def test_ema_pullback_enters_long_when_price_reclaims_fast_ema_in_uptrend(self):
+        config = StrategyConfig(
+            strategy=StrategyName("ema-pullback"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=4,
+        )
+
+        signal = first_entry_signal(config, [10, 11, 12, 11, 13])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "ema_pullback_long")
+
+    def test_atr_trailing_trend_enters_long_on_trend_flip(self):
+        config = StrategyConfig(
+            strategy=StrategyName("atr-trailing-trend"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            atr_period=2,
+            supertrend_multiplier=1.0,
+        )
+
+        signal = first_entry_signal(config, [12, 11, 10, 9, 10, 12, 14, 16])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "atr_trailing_trend_long")
+
+    def test_cci_reversal_enters_long_when_cci_leaves_oversold(self):
+        config = StrategyConfig(
+            strategy=StrategyName("cci-reversal"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            cci_period=3,
+            cci_oversold=-100.0,
+            cci_overbought=100.0,
+        )
+
+        signal = first_entry_signal(config, [10, 10, 7, 10, 11])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "cci_reversal_long")
+
+    def test_williams_r_reversal_enters_long_when_oscillator_leaves_oversold(self):
+        config = StrategyConfig(
+            strategy=StrategyName("williams-r-reversal"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            williams_period=3,
+            williams_oversold=-80.0,
+            williams_overbought=-20.0,
+        )
+
+        signal = first_entry_signal(config, [10, 10, 7, 10, 11])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "williams_r_reversal_long")
+
+    def test_bollinger_squeeze_release_enters_long_on_expansion_breakout(self):
+        config = StrategyConfig(
+            strategy=StrategyName("bollinger-squeeze-release"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            bollinger_period=3,
+            bollinger_stddev=1.0,
+            squeeze_threshold_pct=0.05,
+        )
+
+        signal = first_entry_signal(config, [10, 10, 10, 12, 14])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "bollinger_squeeze_release_long")
+
+    def test_obv_trend_enters_long_when_obv_confirms_price_trend(self):
+        config = StrategyConfig(
+            strategy=StrategyName("obv-trend"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            slow_ema=3,
+            volume_period=2,
+        )
+
+        signal = first_entry_signal(config, [10, 9, 10, 11, 12], [100, 100, 300, 300, 300])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "obv_trend_long")
+
+    def test_volume_breakout_enters_long_when_price_and_volume_break_out(self):
+        config = StrategyConfig(
+            strategy=StrategyName("volume-breakout"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            donchian_period=3,
+            volume_period=3,
+            volume_multiplier=1.5,
+        )
+
+        signal = first_entry_signal(config, [10, 10, 10, 14], [100, 100, 100, 400])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "volume_breakout_long")
+
+    def test_vwap_trend_continuation_enters_long_after_vwap_reclaim_in_uptrend(self):
+        config = StrategyConfig(
+            strategy=StrategyName("vwap-trend-continuation"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=4,
+            vwap_period=3,
+        )
+
+        signal = first_entry_signal(config, [10, 11, 12, 11, 13])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "vwap_trend_continuation_long")
 
     def test_allowed_side_blocks_disallowed_entries(self):
         config = StrategyConfig(

@@ -230,6 +230,53 @@ class CliTests(unittest.TestCase):
             self.assertEqual(config["slow_ema"], 13)
             self.assertEqual(config["macd_signal"], 5)
 
+    def test_backtest_command_records_new_strategy_parameters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fixture = tmp_path / "candles.csv"
+            fixture.write_text(
+                "\n".join(
+                    [
+                        "open_time,open,high,low,close,volume",
+                        "1,10,11,9,10,100",
+                        "2,10,11,9,10,100",
+                        "3,10,11,9,10,100",
+                        "4,14,15,13,14,400",
+                        "5,15,16,14,15,400",
+                    ]
+                )
+            )
+
+            exit_code = main(
+                [
+                    "backtest",
+                    "--fixture",
+                    str(fixture),
+                    "--output-root",
+                    str(tmp_path),
+                    "--strategy",
+                    "volume-breakout",
+                    "--donchian-period",
+                    "3",
+                    "--volume-period",
+                    "3",
+                    "--volume-multiplier",
+                    "1.25",
+                    "--fee-rate",
+                    "0",
+                    "--slippage-rate",
+                    "0",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            configs = list(tmp_path.glob("backtests/*/config.json"))
+            self.assertEqual(len(configs), 1)
+            config = json.loads(configs[0].read_text())
+            self.assertEqual(config["strategy"], "volume-breakout")
+            self.assertEqual(config["volume_period"], 3)
+            self.assertEqual(config["volume_multiplier"], 1.25)
+
 
 if __name__ == "__main__":
     unittest.main()

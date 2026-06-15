@@ -124,6 +124,16 @@ const settings = reactive<Record<string, string>>({
   ema_ribbon_mid: "21",
   ema_ribbon_slow: "55",
   momentum_period: "10",
+  keltner_multiplier: "2",
+  cci_period: "20",
+  cci_oversold: "-100",
+  cci_overbought: "100",
+  williams_period: "14",
+  williams_oversold: "-80",
+  williams_overbought: "-20",
+  volume_period: "20",
+  volume_multiplier: "1.5",
+  squeeze_threshold_pct: "0.05",
   stop_loss_pct: "0.03",
   take_profit_pct: "0.06",
   trailing_stop_pct: "0",
@@ -507,6 +517,16 @@ function errorMessage(error: unknown): string {
           <label><span>EMA Ribbon Mid</span><input v-model="settings.ema_ribbon_mid" type="number" min="1"></label>
           <label><span>EMA Ribbon Slow</span><input v-model="settings.ema_ribbon_slow" type="number" min="1"></label>
           <label><span>Momentum Period</span><input v-model="settings.momentum_period" type="number" min="1"></label>
+          <label><span>Keltner Mult</span><input v-model="settings.keltner_multiplier" type="number" min="0.1" step="0.1"></label>
+          <label><span>CCI Period</span><input v-model="settings.cci_period" type="number" min="1"></label>
+          <label><span>CCI Oversold</span><input v-model="settings.cci_oversold" type="number" step="1"></label>
+          <label><span>CCI Overbought</span><input v-model="settings.cci_overbought" type="number" step="1"></label>
+          <label><span>Williams Period</span><input v-model="settings.williams_period" type="number" min="1"></label>
+          <label><span>Williams Oversold</span><input v-model="settings.williams_oversold" type="number" min="-100" max="0" step="1"></label>
+          <label><span>Williams Overbought</span><input v-model="settings.williams_overbought" type="number" min="-100" max="0" step="1"></label>
+          <label><span>Volume Period</span><input v-model="settings.volume_period" type="number" min="1"></label>
+          <label><span>Volume Mult</span><input v-model="settings.volume_multiplier" type="number" min="0.1" step="0.1"></label>
+          <label><span>Squeeze Threshold</span><input v-model="settings.squeeze_threshold_pct" type="number" min="0" step="0.001"></label>
           <label><span>Stop Loss</span><input v-model="settings.stop_loss_pct" type="number" min="0" step="0.001"></label>
           <label><span>Take Profit</span><input v-model="settings.take_profit_pct" type="number" min="0" step="0.001"></label>
           <label><span>Trailing Stop</span><input v-model="settings.trailing_stop_pct" type="number" min="0" step="0.001"></label>

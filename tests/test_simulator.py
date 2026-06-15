@@ -1,18 +1,27 @@
 import unittest
+from dataclasses import replace
 
-from algo_trading.models import Candle, PositionSide, StrategyConfig, StrategyName
+from algo_trading.models import AllowedSide, Candle, PositionSide, StrategyConfig, StrategyName
 from algo_trading.simulator import run_backtest
 
 
-def candle(time: int, close: float) -> Candle:
+def candle(time: int, close: float, volume: float = 1.0) -> Candle:
     return Candle(
         open_time=time,
         open=close,
         high=close + 1.0,
         low=close - 1.0,
         close=close,
-        volume=1.0,
+        volume=volume,
     )
+
+
+def candles(prices: list[float], volumes: list[float] | None = None) -> list[Candle]:
+    source_volumes = volumes or [1.0] * len(prices)
+    return [
+        candle(index, price, volume)
+        for index, (price, volume) in enumerate(zip(prices, source_volumes))
+    ]
 
 
 class SimulatorTests(unittest.TestCase):
@@ -295,6 +304,166 @@ class SimulatorTests(unittest.TestCase):
             with self.subTest(config=config):
                 with self.assertRaisesRegex(ValueError, "strategy"):
                     run_backtest(candles, config)
+
+    def test_backtest_rejects_invalid_new_strategy_parameters(self):
+        candles = [candle(index, float(index + 10)) for index in range(90)]
+
+        for config in [
+            StrategyConfig(strategy=StrategyName("keltner-breakout"), keltner_multiplier=0),
+            StrategyConfig(strategy=StrategyName("cci-reversal"), cci_period=0),
+            StrategyConfig(strategy=StrategyName("cci-reversal"), cci_oversold=120, cci_overbought=100),
+            StrategyConfig(strategy=StrategyName("williams-r-reversal"), williams_period=0),
+            StrategyConfig(
+                strategy=StrategyName("williams-r-reversal"),
+                williams_oversold=-10,
+                williams_overbought=-20,
+            ),
+            StrategyConfig(strategy=StrategyName("obv-trend"), volume_period=0),
+            StrategyConfig(strategy=StrategyName("volume-breakout"), volume_multiplier=0),
+            StrategyConfig(
+                strategy=StrategyName("bollinger-squeeze-release"),
+                squeeze_threshold_pct=-0.01,
+            ),
+        ]:
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(ValueError, "strategy"):
+                    run_backtest(candles, config)
+
+    def test_backtest_rejects_new_strategy_candles_before_warmup(self):
+        for config, sample_candles in [
+            (
+                StrategyConfig(
+                    strategy=StrategyName("keltner-breakout"),
+                    fast_ema=1,
+                    slow_ema=2,
+                    rsi_period=2,
+                    atr_period=5,
+                ),
+                candles([10, 11, 12, 13, 14]),
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("volume-breakout"),
+                    fast_ema=1,
+                    slow_ema=2,
+                    rsi_period=2,
+                    donchian_period=3,
+                    volume_period=5,
+                ),
+                candles([10, 11, 12, 13, 14]),
+            ),
+        ]:
+            with self.subTest(config=config):
+                with self.assertRaisesRegex(ValueError, "not enough candles"):
+                    run_backtest(sample_candles, config)
+
+    def test_backtest_runs_new_strategy_bundle(self):
+        cases = [
+            (
+                StrategyConfig(
+                    strategy=StrategyName("keltner-breakout"),
+                    atr_period=3,
+                    keltner_multiplier=0.5,
+                ),
+                candles([10, 10, 10, 13, 14]),
+                "keltner_breakout_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("ema-pullback"),
+                    fast_ema=2,
+                    slow_ema=4,
+                ),
+                candles([10, 11, 12, 11, 13, 14]),
+                "ema_pullback_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("atr-trailing-trend"),
+                    atr_period=2,
+                    supertrend_multiplier=1.0,
+                ),
+                candles([12, 11, 10, 9, 10, 12, 14, 16, 17]),
+                "atr_trailing_trend_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("cci-reversal"),
+                    cci_period=3,
+                    cci_oversold=-100.0,
+                    cci_overbought=100.0,
+                ),
+                candles([10, 10, 7, 10, 11, 12]),
+                "cci_reversal_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("williams-r-reversal"),
+                    williams_period=3,
+                    williams_oversold=-80.0,
+                    williams_overbought=-20.0,
+                ),
+                candles([10, 10, 7, 10, 11, 12]),
+                "williams_r_reversal_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("bollinger-squeeze-release"),
+                    bollinger_period=3,
+                    bollinger_stddev=1.0,
+                    squeeze_threshold_pct=0.05,
+                ),
+                candles([10, 10, 10, 12, 14, 15]),
+                "bollinger_squeeze_release_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("obv-trend"),
+                    fast_ema=1,
+                    slow_ema=3,
+                    volume_period=2,
+                ),
+                candles([10, 9, 10, 11, 12, 13], [100, 100, 300, 300, 300, 300]),
+                "obv_trend_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("volume-breakout"),
+                    donchian_period=3,
+                    volume_period=3,
+                    volume_multiplier=1.5,
+                ),
+                candles([10, 10, 10, 14, 15], [100, 100, 100, 400, 400]),
+                "volume_breakout_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("vwap-trend-continuation"),
+                    fast_ema=2,
+                    slow_ema=4,
+                    vwap_period=3,
+                ),
+                candles([10, 11, 12, 11, 13, 14]),
+                "vwap_trend_continuation_long",
+            ),
+        ]
+
+        for config, sample_candles, entry_reason in cases:
+            with self.subTest(strategy=config.strategy):
+                result = run_backtest(
+                    sample_candles,
+                    replace(
+                        config,
+                        fee_rate=0.0,
+                        slippage_rate=0.0,
+                        stop_loss_pct=1.0,
+                        take_profit_pct=1.0,
+                        allowed_side=AllowedSide.LONG_ONLY,
+                    ),
+                )
+
+                self.assertGreater(len(result.trades), 0)
+                self.assertEqual(result.trades[0].entry_reason, entry_reason)
 
 
 if __name__ == "__main__":

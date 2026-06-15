@@ -34,6 +34,15 @@ class StrategyName(str, Enum):
     STOCH_RSI_REVERSAL = "stoch-rsi-reversal"
     EMA_RIBBON = "ema-ribbon"
     MOMENTUM_SCALPING = "momentum-scalping"
+    KELTNER_BREAKOUT = "keltner-breakout"
+    EMA_PULLBACK = "ema-pullback"
+    ATR_TRAILING_TREND = "atr-trailing-trend"
+    CCI_REVERSAL = "cci-reversal"
+    WILLIAMS_R_REVERSAL = "williams-r-reversal"
+    BOLLINGER_SQUEEZE_RELEASE = "bollinger-squeeze-release"
+    OBV_TREND = "obv-trend"
+    VOLUME_BREAKOUT = "volume-breakout"
+    VWAP_TREND_CONTINUATION = "vwap-trend-continuation"
 
 
 class StrategyPreset(str, Enum):
@@ -93,6 +102,16 @@ class StrategyConfig:
     ema_ribbon_mid: int = 21
     ema_ribbon_slow: int = 55
     momentum_period: int = 10
+    keltner_multiplier: float = 2.0
+    cci_period: int = 20
+    cci_oversold: float = -100.0
+    cci_overbought: float = 100.0
+    williams_period: int = 14
+    williams_oversold: float = -80.0
+    williams_overbought: float = -20.0
+    volume_period: int = 20
+    volume_multiplier: float = 1.5
+    squeeze_threshold_pct: float = 0.05
     stop_loss_pct: float = 0.03
     take_profit_pct: float = 0.06
     trailing_stop_pct: float = 0.0

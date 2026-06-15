@@ -168,6 +168,16 @@ def _config_from_args(args: argparse.Namespace, symbol: str | None = None) -> St
         ema_ribbon_mid=args.ema_ribbon_mid,
         ema_ribbon_slow=args.ema_ribbon_slow,
         momentum_period=args.momentum_period,
+        keltner_multiplier=args.keltner_multiplier,
+        cci_period=args.cci_period,
+        cci_oversold=args.cci_oversold,
+        cci_overbought=args.cci_overbought,
+        williams_period=args.williams_period,
+        williams_oversold=args.williams_oversold,
+        williams_overbought=args.williams_overbought,
+        volume_period=args.volume_period,
+        volume_multiplier=args.volume_multiplier,
+        squeeze_threshold_pct=args.squeeze_threshold_pct,
         stop_loss_pct=args.stop_loss_pct,
         take_profit_pct=args.take_profit_pct,
         trailing_stop_pct=args.trailing_stop_pct,
@@ -273,6 +283,16 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ema-ribbon-mid", type=int, default=21)
     parser.add_argument("--ema-ribbon-slow", type=int, default=55)
     parser.add_argument("--momentum-period", type=int, default=10)
+    parser.add_argument("--keltner-multiplier", type=float, default=2.0)
+    parser.add_argument("--cci-period", type=int, default=20)
+    parser.add_argument("--cci-oversold", type=float, default=-100.0)
+    parser.add_argument("--cci-overbought", type=float, default=100.0)
+    parser.add_argument("--williams-period", type=int, default=14)
+    parser.add_argument("--williams-oversold", type=float, default=-80.0)
+    parser.add_argument("--williams-overbought", type=float, default=-20.0)
+    parser.add_argument("--volume-period", type=int, default=20)
+    parser.add_argument("--volume-multiplier", type=float, default=1.5)
+    parser.add_argument("--squeeze-threshold-pct", type=float, default=0.05)
     parser.add_argument("--stop-loss-pct", type=float, default=0.03)
     parser.add_argument("--take-profit-pct", type=float, default=0.06)
     parser.add_argument("--trailing-stop-pct", type=float, default=0.0)
