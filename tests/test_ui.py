@@ -211,6 +211,39 @@ class UiTests(unittest.TestCase):
         self.assertIn(':long-signal-label="chartLabels.longSignal"', app_source)
         self.assertIn(':short-signal-label="chartLabels.shortSignal"', app_source)
 
+    def test_live_all_strategy_view_collapses_markers_by_consensus(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('type SignalDisplayMode = "consensus" | "individual";', source)
+        self.assertIn(
+            'const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");',
+            source,
+        )
+        self.assertIn("const liveConsensusMinConfirmations = ref(2);", source)
+        self.assertIn(
+            "const liveSignalDisplayOptions = computed<SelectOption[]>(() => [",
+            source,
+        )
+        self.assertIn('t("options.consensusSignals")', source)
+        self.assertIn('t("options.individualSignals")', source)
+        self.assertIn("const consensusSignals = computed", source)
+        self.assertIn("const displayedSignals = computed", source)
+        self.assertIn('settings.strategy !== "all"', source)
+        self.assertIn("liveConsensusMinConfirmations.value", source)
+        self.assertIn("groupSignalsByConsensus", source)
+        self.assertIn("formatConsensusReason", source)
+        self.assertIn(':signals="displayedSignals"', source)
+        self.assertIn('v-model="liveSignalDisplayMode"', source)
+        self.assertIn('v-model.number="liveConsensusMinConfirmations"', source)
+        reset_key_source = source.split("const liveChartResetKey = computed", 1)[1].split(
+            ");",
+            1,
+        )[0]
+        self.assertNotIn("liveSignalDisplayMode.value", reset_key_source)
+        self.assertNotIn("liveConsensusMinConfirmations.value", reset_key_source)
+
     def test_live_ui_uses_trading_terminal_visual_language(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
