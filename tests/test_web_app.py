@@ -1,11 +1,12 @@
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
 
-from algo_trading.auth import InMemoryAuthStore
+from algo_trading.auth import InMemoryAuthStore, utcnow
 from algo_trading.web_app import create_app
 
 
@@ -13,9 +14,10 @@ class WebAppTests(unittest.TestCase):
     def make_client(self, **overrides: Any) -> TestClient:
         tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
+        auth_store = overrides.pop("auth_store", InMemoryAuthStore())
         app = create_app(
             output_root=Path(tempdir.name),
-            auth_store=InMemoryAuthStore(),
+            auth_store=auth_store,
             **overrides,
         )
         return TestClient(app)
@@ -31,7 +33,7 @@ class WebAppTests(unittest.TestCase):
             {"ok": False, "error": "authentication required"},
         )
 
-    def test_register_sets_session_cookie_and_allows_trading_api(self):
+    def test_register_sets_inactive_session_and_blocks_trading_api(self):
         client = self.make_client()
 
         response = client.post(
@@ -41,9 +43,30 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["user"]["username"], "alice")
+        self.assertFalse(response.json()["user"]["is_active"])
+        self.assertIsNone(response.json()["user"]["activated_at"])
+        self.assertIsNone(response.json()["user"]["expired_at"])
         self.assertIn("algo_session=", response.headers["set-cookie"])
         self.assertIn("HttpOnly", response.headers["set-cookie"])
         protected = client.get("/api/strategies")
+        self.assertEqual(protected.status_code, 403)
+        self.assertEqual(protected.json(), {"ok": False, "error": "account inactive"})
+        profile = client.get("/api/profile")
+        self.assertEqual(profile.status_code, 200)
+        self.assertEqual(profile.json()["user"]["username"], "alice")
+
+    def test_active_user_can_access_trading_api(self):
+        store = InMemoryAuthStore()
+        client = self.make_client(auth_store=store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice", "password": "password123"},
+        )
+        user = store.list_users()[0]
+        store.set_user_access(user.id, is_active=True, activated_at=utcnow())
+
+        protected = client.get("/api/strategies")
+
         self.assertEqual(protected.status_code, 200)
         self.assertTrue(protected.json()["ok"])
 
@@ -62,7 +85,9 @@ class WebAppTests(unittest.TestCase):
             json={"username": "alice", "password": "password123"},
         )
         self.assertEqual(login.status_code, 200)
-        self.assertEqual(client.get("/api/strategies").status_code, 200)
+        user = client.get("/api/auth/me").json()["user"]
+        self.assertFalse(user["is_active"])
+        self.assertEqual(client.get("/api/strategies").status_code, 403)
 
         logout = client.post("/api/auth/logout")
         self.assertEqual(logout.status_code, 200)
@@ -84,6 +109,7 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(authenticated.status_code, 200)
         self.assertEqual(authenticated.json()["user"]["username"], "alice")
+        self.assertIn("is_active", authenticated.json()["user"])
 
     def test_spa_routes_are_public_before_login(self):
         client = self.make_client()
@@ -128,17 +154,68 @@ class WebAppTests(unittest.TestCase):
                 }
 
         service = FakeMarketBreadthService()
-        client = self.make_client(market_breadth_service=service)
+        store = InMemoryAuthStore()
+        client = self.make_client(auth_store=store, market_breadth_service=service)
         client.post(
             "/api/auth/register",
             json={"username": "alice", "password": "password123"},
         )
+        store.set_user_access(store.list_users()[0].id, is_active=True, activated_at=utcnow())
 
         response = client.get("/api/market-breadth?symbols=$S5FD,$CPC")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["series"]["$S5FD"]["data"], "daily")
         self.assertEqual(service.symbols, ["$S5FD", "$CPC"])
+
+    def test_admin_users_requires_admin_email_and_lists_all_users(self):
+        store = InMemoryAuthStore()
+        client = self.make_client(auth_store=store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+
+        forbidden = client.get("/api/admin/users")
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(forbidden.json(), {"ok": False, "error": "admin required"})
+
+        client.post("/api/auth/logout")
+        client.post(
+            "/api/auth/register",
+            json={"username": "cuiyeqing960904@gmail.com", "password": "password123"},
+        )
+        response = client.get("/api/admin/users")
+
+        self.assertEqual(response.status_code, 200)
+        users = response.json()["users"]
+        self.assertEqual(
+            [user["username"] for user in users],
+            ["alice@example.com", "cuiyeqing960904@gmail.com"],
+        )
+        self.assertFalse(users[0]["is_active"])
+        self.assertIsNone(users[0]["expired_at"])
+
+    def test_expired_active_user_is_deactivated_before_feature_access(self):
+        store = InMemoryAuthStore()
+        client = self.make_client(auth_store=store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice", "password": "password123"},
+        )
+        user = store.list_users()[0]
+        store.set_user_access(
+            user.id,
+            is_active=True,
+            activated_at=utcnow() - timedelta(days=2),
+            expired_at=utcnow() - timedelta(seconds=1),
+        )
+
+        response = client.get("/api/strategies")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"ok": False, "error": "account inactive"})
+        self.assertFalse(store.list_users()[0].is_active)
 
 
 if __name__ == "__main__":

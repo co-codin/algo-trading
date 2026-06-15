@@ -1,8 +1,11 @@
-export type Mode = "live" | "breadth" | "lab";
+export type Mode = "live" | "breadth" | "lab" | "profile" | "admin";
 
 export type AuthUser = {
   id: number;
   username: string;
+  is_active: boolean;
+  activated_at: string | null;
+  expired_at: string | null;
 };
 
 export type AuthMePayload = {
@@ -13,6 +16,11 @@ export type AuthMePayload = {
 export type AuthPayload = {
   ok: true;
   user: AuthUser;
+};
+
+export type AdminUsersPayload = {
+  ok: true;
+  users: AuthUser[];
 };
 
 export type StrategyInfo = {

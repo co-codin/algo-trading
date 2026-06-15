@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 import mimetypes
 import os
 import urllib.parse
@@ -37,22 +40,32 @@ from algo_trading.ui import (
     _live_client_for_handler,
 )
 
+ADMIN_EMAIL = "cuiyeqing960904@gmail.com"
+EXPIRY_CHECK_SECONDS = 60 * 60
+
 
 def create_app(
     output_root: str | Path = "runs",
     client_factory: Callable[[], MarketDataClient] = BinanceMarketDataClient,
     auth_store: AuthStore | None = None,
     market_breadth_service: Any | None = None,
+    expiry_check_seconds: float | None = None,
 ) -> FastAPI:
     output_path = Path(output_root)
     store = auth_store or auth_store_from_env()
     store.ensure_schema()
     breadth_service = market_breadth_service or MarketBreadthService()
-    app = FastAPI(title="Algo Trading")
+    expiry_interval = (
+        expiry_check_seconds
+        if expiry_check_seconds is not None
+        else float(os.environ.get("USER_EXPIRY_CHECK_SECONDS", EXPIRY_CHECK_SECONDS))
+    )
+    expiry_task: asyncio.Task[None] | None = None
 
     def require_user(
         session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ) -> AuthUser:
+        store.deactivate_expired_users()
         user = store.user_for_session(session_token)
         if user is None:
             raise HTTPException(
@@ -60,6 +73,45 @@ def create_app(
                 detail="authentication required",
             )
         return user
+
+    def require_active_user(user: AuthUser = Depends(require_user)) -> AuthUser:
+        if not user.is_active:
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="account inactive",
+            )
+        return user
+
+    def require_admin_user(user: AuthUser = Depends(require_user)) -> AuthUser:
+        if user.username != admin_email():
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="admin required",
+            )
+        return user
+
+    async def deactivate_expired_users_loop() -> None:
+        while True:
+            store.deactivate_expired_users()
+            await asyncio.sleep(max(1.0, expiry_interval))
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        nonlocal expiry_task
+        store.deactivate_expired_users()
+        if expiry_interval > 0:
+            expiry_task = asyncio.create_task(deactivate_expired_users_loop())
+        try:
+            yield
+        finally:
+            if expiry_task is None:
+                return
+            expiry_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await expiry_task
+            expiry_task = None
+
+    app = FastAPI(title="Algo Trading", lifespan=lifespan)
 
     @app.exception_handler(HTTPException)
     async def http_error_handler(
@@ -136,28 +188,38 @@ def create_app(
     def current_user(
         session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ) -> dict[str, Any]:
+        store.deactivate_expired_users()
         user = store.user_for_session(session_token)
         return {"ok": True, "user": public_user(user) if user else None}
+
+    @app.get("/api/profile")
+    def get_profile(user: AuthUser = Depends(require_user)) -> dict[str, Any]:
+        return {"ok": True, "user": public_user(user)}
+
+    @app.get("/api/admin/users")
+    def get_admin_users(_admin: AuthUser = Depends(require_admin_user)) -> dict[str, Any]:
+        store.deactivate_expired_users()
+        return {"ok": True, "users": [public_user(user) for user in store.list_users()]}
 
     @app.get("/api/symbols")
     def get_symbols(
         top: int = 10,
-        _user: AuthUser = Depends(require_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         return top_symbols_payload(client_factory(), top=top)
 
     @app.get("/api/strategies")
-    def get_strategies(_user: AuthUser = Depends(require_user)) -> dict[str, Any]:
+    def get_strategies(_user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:
         return strategies_payload()
 
     @app.get("/api/runs")
-    def get_runs(_user: AuthUser = Depends(require_user)) -> dict[str, Any]:
+    def get_runs(_user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:
         return {"ok": True, "runs": list_runs(output_path)}
 
     @app.get("/api/live-chart")
     def get_live_chart(
         request: Request,
-        _user: AuthUser = Depends(require_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         payload = dict(request.query_params)
         return live_chart_payload(
@@ -169,7 +231,7 @@ def create_app(
     @app.get("/api/market-breadth")
     def get_market_breadth(
         symbols: str = "",
-        _user: AuthUser = Depends(require_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         requested_symbols = (
             [symbol.strip().upper() for symbol in symbols.split(",") if symbol.strip()]
@@ -181,35 +243,35 @@ def create_app(
     @app.get("/api/run")
     def get_run(
         path: str = "",
-        _user: AuthUser = Depends(require_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         return load_run_details(path, output_path)
 
     @app.post("/api/backtest")
     def post_backtest(
         payload: dict[str, Any] | None = Body(default=None),
-        _user: AuthUser = Depends(require_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         return run_backtest_payload(payload or {}, client_factory(), output_path)
 
     @app.post("/api/paper")
     def post_paper(
         payload: dict[str, Any] | None = Body(default=None),
-        _user: AuthUser = Depends(require_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         return run_paper_payload(payload or {}, client_factory(), output_path)
 
     @app.post("/api/strategy-lab")
     def post_strategy_lab(
         payload: dict[str, Any] | None = Body(default=None),
-        _user: AuthUser = Depends(require_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         return strategy_lab_payload(payload or {}, client_factory())
 
     @app.post("/api/combination-signals")
     def post_combination_signals(
         payload: dict[str, Any] | None = Body(default=None),
-        _user: AuthUser = Depends(require_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         request_payload = payload or {}
         return combination_signals_payload(
@@ -244,6 +306,10 @@ def auth_store_from_env() -> AuthStore:
     if database_url:
         return PostgresAuthStore(database_url)
     return InMemoryAuthStore()
+
+
+def admin_email() -> str:
+    return os.environ.get("ADMIN_EMAIL", ADMIN_EMAIL).strip().lower()
 
 
 def set_session_cookie(response: Response, token: str) -> None:

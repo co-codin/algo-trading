@@ -152,6 +152,34 @@ button {
   white-space: nowrap;
 }
 
+.user-pill {
+  display: grid;
+  min-width: 150px;
+  min-height: 34px;
+  border-color: var(--line);
+  background: var(--field);
+  color: var(--ink);
+  line-height: 1.15;
+  text-align: left;
+}
+
+.user-pill span,
+.user-pill b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-pill span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.user-pill b {
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .language-switcher {
   display: inline-flex;
   overflow: hidden;
@@ -245,6 +273,12 @@ main {
   gap: 12px;
   overflow: hidden;
   padding: 0;
+}
+
+.profile-panel,
+.admin-panel {
+  display: grid;
+  gap: 14px;
 }
 
 .panel-heading {
@@ -387,6 +421,54 @@ button:focus {
   border-radius: 6px;
   background: var(--panel-raised);
   padding: 12px;
+}
+
+.account-notice {
+  border: 1px solid rgba(242, 54, 69, 0.55);
+  border-radius: 6px;
+  background: rgba(242, 54, 69, 0.08);
+  padding: 12px;
+}
+
+.account-notice h3 {
+  margin: 0 0 5px;
+  color: var(--short);
+  font-size: 15px;
+}
+
+.account-notice p {
+  margin: 0;
+  color: var(--ink);
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-field {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  padding: 12px;
+}
+
+.profile-field span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.profile-field b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metric b {
@@ -730,6 +812,10 @@ th {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .profile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .topbar {
     display: grid;
   }
@@ -743,6 +829,10 @@ th {
   .live-controls,
   .live-market-strip,
   .breadth-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-grid {
     grid-template-columns: 1fr;
   }
 

@@ -1,6 +1,7 @@
 import unittest
+from datetime import timedelta
 
-from algo_trading.auth import InMemoryAuthStore, hash_password, verify_password
+from algo_trading.auth import InMemoryAuthStore, hash_password, public_user, utcnow, verify_password
 
 
 class AuthTests(unittest.TestCase):
@@ -17,6 +18,19 @@ class AuthTests(unittest.TestCase):
         user = store.register_user(" Alice ", "password123")
 
         self.assertEqual(user.username, "alice")
+        self.assertFalse(user.is_active)
+        self.assertIsNone(user.activated_at)
+        self.assertIsNone(user.expired_at)
+        self.assertEqual(
+            public_user(user),
+            {
+                "id": user.id,
+                "username": "alice",
+                "is_active": False,
+                "activated_at": None,
+                "expired_at": None,
+            },
+        )
         with self.assertRaisesRegex(ValueError, "username already exists"):
             store.register_user("alice", "password123")
 
@@ -51,6 +65,34 @@ class AuthTests(unittest.TestCase):
         self.assertIsNone(store.user_for_session("not-a-real-token"))
         store.delete_session(token)
         self.assertIsNone(store.user_for_session(token))
+
+    def test_memory_store_lists_users_and_deactivates_expired_users(self):
+        store = InMemoryAuthStore()
+        expired_user = store.register_user("expired@example.com", "password123")
+        fresh_user = store.register_user("fresh@example.com", "password123")
+        now = utcnow()
+        store.set_user_access(
+            expired_user.id,
+            is_active=True,
+            activated_at=now - timedelta(days=30),
+            expired_at=now - timedelta(seconds=1),
+        )
+        store.set_user_access(
+            fresh_user.id,
+            is_active=True,
+            activated_at=now - timedelta(days=1),
+            expired_at=now + timedelta(days=1),
+        )
+
+        deactivated = store.deactivate_expired_users(now=now)
+
+        users = store.list_users()
+        self.assertEqual(deactivated, 1)
+        self.assertEqual([user.username for user in users], ["expired@example.com", "fresh@example.com"])
+        self.assertFalse(users[0].is_active)
+        self.assertIsNone(users[0].activated_at)
+        self.assertTrue(users[1].is_active)
+        self.assertEqual(users[1].expired_at, now + timedelta(days=1))
 
     def test_memory_store_expires_sessions(self):
         store = InMemoryAuthStore(session_ttl_seconds=-1)

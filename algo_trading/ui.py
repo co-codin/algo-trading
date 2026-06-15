@@ -92,6 +92,8 @@ FRONTEND_ROUTES = frozenset(
         "/chart",
         "/breadth",
         "/lab",
+        "/profile",
+        "/admin",
     }
 )
 

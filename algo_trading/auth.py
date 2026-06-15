@@ -4,9 +4,10 @@ import base64
 import hashlib
 import hmac
 import secrets
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import Protocol, cast
 
 SESSION_COOKIE_NAME = "algo_session"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -21,6 +22,9 @@ _SCRYPT_DKLEN = 64
 class AuthUser:
     id: int
     username: str
+    is_active: bool = False
+    activated_at: datetime | None = None
+    expired_at: datetime | None = None
 
 
 class AuthStore(Protocol):
@@ -30,6 +34,16 @@ class AuthStore(Protocol):
     def create_session(self, user_id: int) -> str: ...
     def user_for_session(self, token: str | None) -> AuthUser | None: ...
     def delete_session(self, token: str | None) -> None: ...
+    def list_users(self) -> list[AuthUser]: ...
+    def set_user_access(
+        self,
+        user_id: int,
+        *,
+        is_active: bool,
+        activated_at: datetime | None = None,
+        expired_at: datetime | None = None,
+    ) -> AuthUser: ...
+    def deactivate_expired_users(self, now: datetime | None = None) -> int: ...
 
 
 @dataclass
@@ -104,6 +118,47 @@ class InMemoryAuthStore:
         if token:
             self._sessions.pop(hash_session_token(token), None)
 
+    def list_users(self) -> list[AuthUser]:
+        return [
+            record.user
+            for _user_id, record in sorted(self._users_by_id.items())
+        ]
+
+    def set_user_access(
+        self,
+        user_id: int,
+        *,
+        is_active: bool,
+        activated_at: datetime | None = None,
+        expired_at: datetime | None = None,
+    ) -> AuthUser:
+        record = self._users_by_id.get(user_id)
+        if record is None:
+            raise ValueError("unknown user")
+        next_activated_at = activated_at if is_active else None
+        if is_active and next_activated_at is None:
+            next_activated_at = record.user.activated_at or utcnow()
+        record.user = replace(
+            record.user,
+            is_active=is_active,
+            activated_at=next_activated_at,
+            expired_at=expired_at,
+        )
+        return record.user
+
+    def deactivate_expired_users(self, now: datetime | None = None) -> int:
+        current_time = now or utcnow()
+        deactivated = 0
+        for record in self._users_by_id.values():
+            if (
+                record.user.is_active
+                and record.user.expired_at is not None
+                and record.user.expired_at <= current_time
+            ):
+                record.user = replace(record.user, is_active=False, activated_at=None)
+                deactivated += 1
+        return deactivated
+
 
 class PostgresAuthStore:
     def __init__(
@@ -129,6 +184,24 @@ class PostgresAuthStore:
                 )
                 cursor.execute(
                     """
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT false
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ
+                    """
+                )
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS sessions (
                         token_hash TEXT PRIMARY KEY,
                         user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -149,6 +222,13 @@ class PostgresAuthStore:
                     ON sessions(expires_at)
                     """
                 )
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS users_expired_at_idx
+                    ON users(expired_at)
+                    WHERE expired_at IS NOT NULL
+                    """
+                )
 
     def register_user(self, username: str, password: str) -> AuthUser:
         normalized = normalize_username(username)
@@ -160,27 +240,31 @@ class PostgresAuthStore:
                     INSERT INTO users (username, password_hash)
                     VALUES (%s, %s)
                     ON CONFLICT (username) DO NOTHING
-                    RETURNING id, username
+                    RETURNING id, username, is_active, activated_at, expired_at
                     """,
                     (normalized, hash_password(password)),
                 )
                 row = cursor.fetchone()
         if row is None:
             raise ValueError("username already exists")
-        return AuthUser(id=int(row[0]), username=str(row[1]))
+        return user_from_row(row)
 
     def authenticate_user(self, username: str, password: str) -> AuthUser:
         normalized = normalize_username(username)
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT id, username, password_hash FROM users WHERE username = %s",
+                    """
+                    SELECT id, username, is_active, activated_at, expired_at, password_hash
+                    FROM users
+                    WHERE username = %s
+                    """,
                     (normalized,),
                 )
                 row = cursor.fetchone()
-        if row is None or not verify_password(password, str(row[2])):
+        if row is None or not verify_password(password, str(row[5])):
             raise ValueError("invalid username or password")
-        return AuthUser(id=int(row[0]), username=str(row[1]))
+        return user_from_row(row)
 
     def create_session(self, user_id: int) -> str:
         token = secrets.token_urlsafe(48)
@@ -206,7 +290,11 @@ class PostgresAuthStore:
                 cursor.execute("DELETE FROM sessions WHERE expires_at <= now()")
                 cursor.execute(
                     """
-                    SELECT users.id, users.username
+                    SELECT users.id,
+                           users.username,
+                           users.is_active,
+                           users.activated_at,
+                           users.expired_at
                     FROM sessions
                     JOIN users ON users.id = sessions.user_id
                     WHERE sessions.token_hash = %s
@@ -216,7 +304,7 @@ class PostgresAuthStore:
                 row = cursor.fetchone()
         if row is None:
             return None
-        return AuthUser(id=int(row[0]), username=str(row[1]))
+        return user_from_row(row)
 
     def delete_session(self, token: str | None) -> None:
         if not token:
@@ -228,10 +316,81 @@ class PostgresAuthStore:
                     (hash_session_token(token),),
                 )
 
+    def list_users(self) -> list[AuthUser]:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, username, is_active, activated_at, expired_at
+                    FROM users
+                    ORDER BY id
+                    """
+                )
+                rows = cursor.fetchall()
+        return [user_from_row(row) for row in rows]
+
+    def set_user_access(
+        self,
+        user_id: int,
+        *,
+        is_active: bool,
+        activated_at: datetime | None = None,
+        expired_at: datetime | None = None,
+    ) -> AuthUser:
+        next_activated_at = activated_at if is_active else None
+        if is_active and next_activated_at is None:
+            next_activated_at = utcnow()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET is_active = %s,
+                        activated_at = %s,
+                        expired_at = %s
+                    WHERE id = %s
+                    RETURNING id, username, is_active, activated_at, expired_at
+                    """,
+                    (is_active, next_activated_at, expired_at, user_id),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            raise ValueError("unknown user")
+        return user_from_row(row)
+
+    def deactivate_expired_users(self, now: datetime | None = None) -> int:
+        current_time = now or utcnow()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET is_active = false,
+                        activated_at = NULL
+                    WHERE is_active = true
+                      AND expired_at IS NOT NULL
+                      AND expired_at <= %s
+                    RETURNING id
+                    """,
+                    (current_time,),
+                )
+                rows = cursor.fetchall()
+        return len(rows)
+
     def _connect(self):
         import psycopg  # type: ignore[import-not-found]
 
         return psycopg.connect(self.database_url)
+
+
+def user_from_row(row: Sequence[object]) -> AuthUser:
+    return AuthUser(
+        id=int(str(row[0])),
+        username=str(row[1]),
+        is_active=bool(row[2]),
+        activated_at=cast(datetime | None, row[3]),
+        expired_at=cast(datetime | None, row[4]),
+    )
 
 
 def normalize_username(username: str) -> str:
@@ -291,8 +450,18 @@ def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def public_user(user: AuthUser) -> dict[str, int | str]:
-    return {"id": user.id, "username": user.username}
+def public_user(user: AuthUser) -> dict[str, object]:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "is_active": user.is_active,
+        "activated_at": isoformat_or_none(user.activated_at),
+        "expired_at": isoformat_or_none(user.expired_at),
+    }
+
+
+def isoformat_or_none(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
 
 
 def utcnow() -> datetime:

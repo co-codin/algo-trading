@@ -12,6 +12,7 @@ import {
   type MessageKey,
 } from "./i18n";
 import type {
+  AdminUsersPayload,
   AuthMePayload,
   AuthPayload,
   AuthUser,
@@ -39,12 +40,16 @@ const routeModes: Record<string, Mode> = {
   "/chart": "live",
   "/breadth": "breadth",
   "/lab": "lab",
+  "/profile": "profile",
+  "/admin": "admin",
 };
 
 const modeRoutes: Record<Mode, string> = {
   live: "/live",
   breadth: "/breadth",
   lab: "/lab",
+  profile: "/profile",
+  admin: "/admin",
 };
 
 const liveSymbolOptions = [
@@ -129,6 +134,9 @@ const authForm = reactive({
 });
 const authStatus = ref("");
 const authStatusType = ref<StatusType>("");
+const adminUsers = ref<AuthUser[]>([]);
+const adminStatus = ref(t("status.ready"));
+const adminStatusType = ref<StatusType>("");
 
 function t(key: MessageKey): string {
   return translate(locale.value, key);
@@ -188,10 +196,22 @@ const labCsvHeaders: (keyof StrategyLabRow)[] = [
   "walk_forward_profitable_pct",
 ];
 
-const tabs = computed(() => [
+const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
+const isAdminUser = computed(() =>
+  authUser.value?.username === "cuiyeqing960904@gmail.com",
+);
+const featureTabs = computed(() => [
   { mode: "lab" as const, label: t("tabs.lab") },
   { mode: "live" as const, label: t("tabs.live") },
   { mode: "breadth" as const, label: t("tabs.breadth") },
+]);
+const accountTabs = computed(() => [
+  { mode: "profile" as const, label: t("tabs.profile") },
+  ...(isAdminUser.value ? [{ mode: "admin" as const, label: t("tabs.admin") }] : []),
+]);
+const tabs = computed(() => [
+  ...(canUseFeatures.value ? featureTabs.value : []),
+  ...accountTabs.value,
 ]);
 const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "crypto_spot", label: t("options.cryptoSpot") },
@@ -283,6 +303,9 @@ watch(locale, () => {
   if (!labStatusType.value) {
     labStatus.value = t("status.ready");
   }
+  if (!adminStatusType.value) {
+    adminStatus.value = t("status.ready");
+  }
   if (!authStatusType.value && authStatus.value) {
     authStatus.value = t("auth.ready");
   }
@@ -315,20 +338,41 @@ function modeFromLocation(): Mode {
   return routeModes[window.location.pathname] ?? "lab";
 }
 
+function isFeatureMode(mode: Mode): boolean {
+  return mode === "lab" || mode === "live" || mode === "breadth";
+}
+
+function permittedMode(mode: Mode): Mode {
+  if (mode === "admin" && !isAdminUser.value) {
+    return "profile";
+  }
+  if (isFeatureMode(mode) && !canUseFeatures.value) {
+    return "profile";
+  }
+  return mode;
+}
+
 function setMode(mode: Mode, updateUrl = true) {
   stopLivePolling();
-  activeMode.value = mode;
-  if (mode !== "live" && settings.strategy === "all") {
+  const nextMode = permittedMode(mode);
+  activeMode.value = nextMode;
+  if (nextMode !== "live" && settings.strategy === "all") {
     settings.strategy = "ema-rsi";
   }
-  if (updateUrl && window.location.pathname !== modeRoutes[mode]) {
-    window.history.pushState({ mode }, "", modeRoutes[mode]);
+  if (updateUrl && window.location.pathname !== modeRoutes[nextMode]) {
+    window.history.pushState({ mode: nextMode }, "", modeRoutes[nextMode]);
   }
-  if (mode === "live") {
+  if (nextMode === "live") {
     startLivePolling();
   }
-  if (mode === "breadth") {
+  if (nextMode === "breadth") {
     void loadMarketBreadth();
+  }
+  if (nextMode === "profile") {
+    void loadProfile();
+  }
+  if (nextMode === "admin") {
+    void loadAdminUsers();
   }
 }
 
@@ -347,6 +391,11 @@ function setLabStatus(message: string, type: StatusType = "") {
   labStatusType.value = type;
 }
 
+function setAdminStatus(message: string, type: StatusType = "") {
+  adminStatus.value = message;
+  adminStatusType.value = type;
+}
+
 async function loadCurrentUser() {
   authChecked.value = false;
   try {
@@ -360,8 +409,30 @@ async function loadCurrentUser() {
 }
 
 async function bootstrapAuthenticatedApp() {
-  await loadStrategies();
+  await loadProfile();
+  if (canUseFeatures.value) {
+    await loadStrategies();
+  } else {
+    strategies.value = [];
+  }
   setMode(modeFromLocation(), false);
+}
+
+async function loadProfile() {
+  const payload = await requestJson<AuthMePayload>("/api/profile");
+  authUser.value = payload.user;
+}
+
+async function loadAdminUsers() {
+  setAdminStatus(t("status.loadingUsers"), "busy");
+  try {
+    const payload = await requestJson<AdminUsersPayload>("/api/admin/users");
+    adminUsers.value = payload.users;
+    setAdminStatus(`${t("status.loadedUsers")} ${payload.users.length}`);
+  } catch (error) {
+    adminUsers.value = [];
+    setAdminStatus(errorMessage(error), "error");
+  }
 }
 
 async function submitAuth() {
@@ -394,14 +465,23 @@ async function logout() {
   livePayload.value = null;
   breadthPayload.value = null;
   labRows.value = [];
+  adminUsers.value = [];
 }
 
 async function loadStrategies() {
+  if (!canUseFeatures.value) {
+    strategies.value = [];
+    return;
+  }
   const payload = await requestJson<StrategyPayload>("/api/strategies");
   strategies.value = payload.strategies;
 }
 
 async function loadLiveChart() {
+  if (!canUseFeatures.value) {
+    setLiveStatus(t("auth.inactive"), "error");
+    return;
+  }
   setLiveStatus(t("status.loadingChart"), "busy");
   try {
       const query = toQuery({
@@ -442,6 +522,10 @@ function refreshLiveChart() {
 }
 
 async function loadMarketBreadth() {
+  if (!canUseFeatures.value) {
+    setBreadthStatus(t("auth.inactive"), "error");
+    return;
+  }
   setBreadthStatus(t("status.loadingBreadth"), "busy");
   try {
     breadthPayload.value = await requestJson<MarketBreadthPayload>("/api/market-breadth");
@@ -453,6 +537,10 @@ async function loadMarketBreadth() {
 }
 
 async function runStrategyLab() {
+  if (!canUseFeatures.value) {
+    setLabStatus(t("auth.inactive"), "error");
+    return;
+  }
   setLabStatus(t("status.labRunning"), "busy");
   labRows.value = [];
   try {
@@ -555,6 +643,10 @@ function formatNumber(value: unknown): string {
     return String(value);
   }
   return number.toLocaleString(undefined, { maximumFractionDigits: 4 });
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString() : "—";
 }
 
 function latestBreadthCandle(symbol: string): MarketBreadthBar | null {
@@ -682,6 +774,10 @@ function errorMessage(error: unknown): string {
           <span>{{ item.label }}</span>
         </button>
       </div>
+      <button class="user-pill" type="button" @click="setMode('profile')">
+        <span>{{ authUser.username }}</span>
+        <b>{{ authUser.is_active ? t("auth.active") : t("auth.inactive") }}</b>
+      </button>
       <button class="secondary logout-button" type="button" @click="logout">
         {{ t("auth.logout") }}
       </button>
@@ -929,6 +1025,76 @@ function errorMessage(error: unknown): string {
           />
         </section>
       </template>
+    </section>
+
+    <section v-else-if='activeMode === "profile"' class="panel profile-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("pages.profile") }}</h2>
+          <p>{{ authUser.username }}</p>
+        </div>
+        <div class="status" :class="authUser.is_active ? '' : 'is-error'">
+          {{ authUser.is_active ? t("auth.active") : t("auth.inactive") }}
+        </div>
+      </div>
+      <div v-if="!authUser.is_active" class="account-notice">
+        <h3>{{ t("auth.inactive") }}</h3>
+        <p>{{ t("auth.inactiveHelp") }}</p>
+      </div>
+      <div class="profile-grid">
+        <div class="profile-field">
+          <span>{{ t("labels.username") }}</span>
+          <b>{{ authUser.username }}</b>
+        </div>
+        <div class="profile-field">
+          <span>{{ t("labels.status") }}</span>
+          <b>{{ authUser.is_active ? t("auth.active") : t("auth.inactive") }}</b>
+        </div>
+        <div class="profile-field">
+          <span>{{ t("labels.activatedAt") }}</span>
+          <b>{{ formatDateTime(authUser.activated_at) }}</b>
+        </div>
+        <div class="profile-field">
+          <span>{{ t("labels.expiredAt") }}</span>
+          <b>{{ formatDateTime(authUser.expired_at) }}</b>
+        </div>
+      </div>
+    </section>
+
+    <section v-else-if='activeMode === "admin"' class="panel admin-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("pages.admin") }}</h2>
+          <p>{{ t("pages.adminSubtitle") }}</p>
+        </div>
+        <div class="actions">
+          <button class="primary" type="button" @click="loadAdminUsers">
+            {{ t("actions.refreshUsers") }}
+          </button>
+          <div class="status" :class="adminStatusType ? `is-${adminStatusType}` : ''">
+            {{ adminStatus }}
+          </div>
+        </div>
+      </div>
+      <div v-if="!adminUsers.length" class="empty">{{ t("empty.noUsers") }}</div>
+      <table v-else>
+        <thead>
+          <tr>
+            <th>{{ t("table.username") }}</th>
+            <th>{{ t("table.active") }}</th>
+            <th>{{ t("table.activated") }}</th>
+            <th>{{ t("table.expires") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="user in adminUsers" :key="user.id">
+            <td>{{ user.username }}</td>
+            <td>{{ user.is_active ? t("auth.active") : t("auth.inactive") }}</td>
+            <td>{{ formatDateTime(user.activated_at) }}</td>
+            <td>{{ formatDateTime(user.expired_at) }}</td>
+          </tr>
+        </tbody>
+      </table>
     </section>
 
     <section v-else class="workspace lab-layout">

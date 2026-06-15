@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from algo_trading.auth import InMemoryAuthStore
+from algo_trading.auth import InMemoryAuthStore, utcnow
 import algo_trading.ui as ui
 from algo_trading.data import (
     BinanceMarketDataClient,
@@ -168,10 +168,10 @@ class UiTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('if (mode !== "live" && settings.strategy === "all") {', source)
+        self.assertIn('if (nextMode !== "live" && settings.strategy === "all") {', source)
         self.assertIn('settings.strategy = "ema-rsi";', source)
 
-    def test_frontend_keeps_only_lab_live_and_breadth_modes(self):
+    def test_frontend_keeps_trading_modes_plus_account_management_modes(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -183,12 +183,19 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('export type Mode = "live" | "breadth" | "lab";', types_source)
+        self.assertIn(
+            'export type Mode = "live" | "breadth" | "lab" | "profile" | "admin";',
+            types_source,
+        )
         self.assertIn('"/": "lab"', source)
+        self.assertIn('"/profile": "profile"', source)
+        self.assertIn('"/admin": "admin"', source)
         self.assertIn('return routeModes[window.location.pathname] ?? "lab";', source)
         self.assertIn('{ mode: "lab" as const, label: t("tabs.lab") }', source)
         self.assertIn('{ mode: "live" as const, label: t("tabs.live") }', source)
         self.assertIn('{ mode: "breadth" as const, label: t("tabs.breadth") }', source)
+        self.assertIn('{ mode: "profile" as const, label: t("tabs.profile") }', source)
+        self.assertIn('{ mode: "admin" as const, label: t("tabs.admin") }', source)
         self.assertNotIn('{ mode: "backtest" as const', source)
         self.assertNotIn('{ mode: "paper" as const', source)
         self.assertNotIn('{ mode: "combos" as const', source)
@@ -285,17 +292,32 @@ class UiTests(unittest.TestCase):
 
         self.assertIn('credentials: "same-origin"', api_source)
         self.assertIn("export type AuthUser", types_source)
+        self.assertIn('is_active: boolean;', types_source)
+        self.assertIn('activated_at: string | null;', types_source)
+        self.assertIn('expired_at: string | null;', types_source)
+        self.assertIn('export type AdminUsersPayload', types_source)
         self.assertIn("const authChecked = ref(false);", app_source)
         self.assertIn("const authUser = ref<AuthUser | null>(null);", app_source)
+        self.assertIn('const adminUsers = ref<AuthUser[]>([]);', app_source)
         self.assertIn('const authMode = ref<"login" | "register">("login");', app_source)
         self.assertIn("const authForm = reactive", app_source)
+        self.assertIn('const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));', app_source)
+        self.assertIn('authUser.value?.username === "cuiyeqing960904@gmail.com"', app_source)
         self.assertIn("async function loadCurrentUser()", app_source)
         self.assertIn('requestJson<AuthMePayload>("/api/auth/me")', app_source)
+        self.assertIn('requestJson<AuthMePayload>("/api/profile")', app_source)
+        self.assertIn('requestJson<AdminUsersPayload>("/api/admin/users")', app_source)
         self.assertIn("async function submitAuth()", app_source)
         self.assertIn('authMode.value === "login" ? "/api/auth/login" : "/api/auth/register"', app_source)
         self.assertIn("async function logout()", app_source)
         self.assertIn('requestJson<{ ok: true }>("/api/auth/logout"', app_source)
         self.assertIn('class="auth-shell"', app_source)
+        self.assertIn("profile-panel", app_source)
+        self.assertIn("admin-panel", app_source)
+        self.assertIn('t("auth.inactive")', app_source)
+        self.assertIn('"tabs.profile"', i18n_source)
+        self.assertIn('"tabs.admin"', i18n_source)
+        self.assertIn('"auth.inactive"', i18n_source)
         self.assertIn('@submit.prevent="submitAuth"', app_source)
         self.assertIn('@click="logout"', app_source)
         self.assertIn('t("auth.login")', app_source)
@@ -410,6 +432,8 @@ class UiTests(unittest.TestCase):
         self.assertTrue(is_frontend_route("/chart"))
         self.assertTrue(is_frontend_route("/breadth"))
         self.assertTrue(is_frontend_route("/lab"))
+        self.assertTrue(is_frontend_route("/profile"))
+        self.assertTrue(is_frontend_route("/admin"))
         self.assertFalse(is_frontend_route("/backtest"))
         self.assertFalse(is_frontend_route("/paper"))
         self.assertFalse(is_frontend_route("/runs"))
@@ -924,15 +948,21 @@ class UiTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch("algo_trading.ui.YahooFuturesMarketDataClient", return_value=client):
+                auth_store = InMemoryAuthStore()
                 http = TestClient(
                     create_app(
                         output_root=Path(tmp),
-                        auth_store=InMemoryAuthStore(),
+                        auth_store=auth_store,
                     )
                 )
                 http.post(
                     "/api/auth/register",
                     json={"username": "alice", "password": "password123"},
+                )
+                auth_store.set_user_access(
+                    auth_store.list_users()[0].id,
+                    is_active=True,
+                    activated_at=utcnow(),
                 )
                 response = http.get(
                     "/api/live-chart"
