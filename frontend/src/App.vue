@@ -15,6 +15,7 @@ import type {
   CombinationSignalsPayload,
   LiveChartPayload,
   Mode,
+  Marker,
   RunCard,
   RunDetails,
   StrategyInfo,
@@ -29,6 +30,7 @@ type SelectOption = {
   label: string;
   value: string | number;
 };
+type SignalDisplayMode = "consensus" | "individual";
 
 const routeModes: Record<string, Mode> = {
   "/": "backtest",
@@ -54,12 +56,6 @@ const modeRoutes: Record<Mode, string> = {
 const liveSymbolOptions = [
   { value: "BTCUSDT", label: "BTCUSDT" },
   { value: "ETHUSDT", label: "ETHUSDT" },
-  { value: "SOLUSDT", label: "SOLUSDT" },
-  { value: "BNBUSDT", label: "BNBUSDT" },
-  { value: "XRPUSDT", label: "XRPUSDT" },
-  { value: "DOGEUSDT", label: "DOGEUSDT" },
-  { value: "ADAUSDT", label: "ADAUSDT" },
-  { value: "AVAXUSDT", label: "AVAXUSDT" },
 ] satisfies SelectOption[];
 
 const liveIntervalOptions = [
@@ -173,6 +169,8 @@ const liveSymbol = ref("BTCUSDT");
 const liveInterval = ref("1m");
 const liveLimit = ref<string | number>(180);
 const liveRefresh = ref("10");
+const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
+const liveConsensusMinConfirmations = ref(2);
 const showSignals = ref(true);
 const showPaper = ref(true);
 const comboSymbol = ref("BTCUSDT");
@@ -232,6 +230,10 @@ const sideOptions = computed<SelectOption[]>(() => [
   { value: "long-only", label: t("options.longOnly") },
   { value: "short-only", label: t("options.shortOnly") },
 ]);
+const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
+  { value: "consensus", label: t("options.consensusSignals") },
+  { value: "individual", label: t("options.individualSignals") },
+]);
 const strategyName = computed(() => strategyLabel(settings.strategy));
 const liveStrategyOptions = computed(() => [
   { name: "all", description: t("options.allStrategies") },
@@ -252,7 +254,6 @@ const activeLiveStrategyLabel = computed(() =>
 const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
 const livePaperMarkerCount = computed(() => livePayload.value?.paper_markers.length ?? 0);
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
-const filteredSignals = computed(() => livePayload.value?.signals ?? []);
 const filteredPaperMarkers = computed(() => livePayload.value?.paper_markers ?? []);
 const comboSignals = computed(() => comboPayload.value?.signals ?? []);
 const comboSignalCount = computed(() => comboPayload.value?.signals.length ?? 0);
@@ -268,6 +269,16 @@ const chartLabels = computed(() => ({
   paperEntry: t("chart.paperEntry"),
   paperExit: t("chart.paperExit"),
 }));
+const consensusSignals = computed(() =>
+  groupSignalsByConsensus(livePayload.value?.signals ?? [], liveConsensusMinConfirmations.value),
+);
+const displayedSignals = computed(() => {
+  const rawSignals = livePayload.value?.signals ?? [];
+  if (settings.strategy !== "all" || liveSignalDisplayMode.value === "individual") {
+    return rawSignals;
+  }
+  return consensusSignals.value;
+});
 
 watch(liveMarket, () => {
   liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
@@ -537,6 +548,47 @@ function appendSymbol(symbol: string) {
 function strategyLabel(name: string): string {
   const strategy = strategies.value.find((item) => item.name === name);
   return translateStrategyDescription(locale.value, name, strategy?.description ?? name);
+}
+
+function groupSignalsByConsensus(signals: Marker[], minimumConfirmations: number): Marker[] {
+  const minimum = Math.max(1, Math.floor(Number(minimumConfirmations) || 1));
+  const groups = new Map<string, Marker[]>();
+  for (const signal of signals) {
+    const key = `${signal.time}:${signal.type}`;
+    groups.set(key, [...(groups.get(key) ?? []), signal]);
+  }
+  return [...groups.values()]
+    .filter((group) => group.length >= minimum)
+    .map((group) => consensusMarkerFromGroup(group))
+    .sort((left, right) => Number(left.time) - Number(right.time));
+}
+
+function consensusMarkerFromGroup(group: Marker[]): Marker {
+  const first = group[0];
+  return {
+    time: first.time,
+    price: first.price,
+    type: first.type,
+    reason: formatConsensusReason(group),
+  };
+}
+
+function formatConsensusReason(group: Marker[]): string {
+  const strategyNames = distinctStrategyNames(group).join(", ");
+  return strategyNames ? `${group.length}: ${strategyNames}` : String(group.length);
+}
+
+function distinctStrategyNames(group: Marker[]): string[] {
+  return [
+    ...new Set(
+      group
+        .map((marker) => {
+          const separator = marker.reason.indexOf(":");
+          return separator > 0 ? marker.reason.slice(0, separator) : "";
+        })
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function formatNumber(value: unknown): string {
@@ -813,6 +865,22 @@ function errorMessage(error: unknown): string {
             </option>
           </select>
         </label>
+        <label v-if="settings.strategy === 'all'">
+          <span>{{ t("labels.signalView") }}</span>
+          <select v-model="liveSignalDisplayMode">
+            <option
+              v-for="option in liveSignalDisplayOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label v-if="settings.strategy === 'all' && liveSignalDisplayMode === 'consensus'">
+          <span>{{ t("labels.minConfirmations") }}</span>
+          <input v-model.number="liveConsensusMinConfirmations" type="number" min="1" max="20">
+        </label>
         <label><span>{{ t("labels.refreshSec") }}</span><input v-model="liveRefresh" type="number" min="2" max="300"></label>
         <label class="toggle-row"><input v-model="showSignals" type="checkbox"><span>{{ t("labels.strategyMarkers") }}</span></label>
         <label class="toggle-row"><input v-model="showPaper" type="checkbox"><span>{{ t("labels.paperMarkers") }}</span></label>
@@ -829,7 +897,7 @@ function errorMessage(error: unknown): string {
         <TradingViewChart
           v-if="livePayload"
           :candles="livePayload.candles"
-          :signals="filteredSignals"
+          :signals="displayedSignals"
           :paper-markers="filteredPaperMarkers"
           :show-signals="showSignals"
           :show-paper="showPaper"

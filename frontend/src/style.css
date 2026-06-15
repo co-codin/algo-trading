@@ -360,16 +360,17 @@ button:focus {
 
 .live-controls {
   display: grid;
-  grid-template-columns:
-    minmax(120px, 1fr) minmax(96px, 0.8fr) minmax(96px, 0.8fr)
-    minmax(190px, 1.4fr) minmax(96px, 0.8fr) minmax(142px, auto)
-    minmax(132px, auto) auto;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 10px;
   align-items: end;
   margin-bottom: 0;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+}
+
+.live-controls input[type="number"] {
+  min-width: 76px;
 }
 
 .toggle-row {
