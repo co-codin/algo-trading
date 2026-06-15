@@ -112,6 +112,24 @@ class UiTests(unittest.TestCase):
         self.assertIn("value: 180", source)
         self.assertIn("value: 500", source)
 
+    def test_live_crypto_spot_symbols_are_limited_to_btc_and_eth(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+        options_source = source.split("const liveSymbolOptions = [", 1)[1].split(
+            "] satisfies SelectOption[];",
+            1,
+        )[0]
+
+        self.assertIn('value: "BTCUSDT"', options_source)
+        self.assertIn('value: "ETHUSDT"', options_source)
+        self.assertNotIn('value: "SOLUSDT"', options_source)
+        self.assertNotIn('value: "BNBUSDT"', options_source)
+        self.assertNotIn('value: "XRPUSDT"', options_source)
+        self.assertNotIn('value: "DOGEUSDT"', options_source)
+        self.assertNotIn('value: "ADAUSDT"', options_source)
+        self.assertNotIn('value: "AVAXUSDT"', options_source)
+
     def test_live_market_selector_changes_auto_refresh_chart(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
