@@ -11,6 +11,8 @@ from algo_trading.data import (
     HistoricalMarketDataClient,
     MAG7_STOCK_SYMBOLS,
     MOEX_BLUECHIP_SYMBOLS,
+    MOEX_FUTURES_SYMBOLS,
+    MOEX_INDEX_SYMBOLS,
     MoexSharesMarketDataClient,
     YahooFuturesMarketDataClient,
     load_candles_from_csv,
@@ -49,6 +51,8 @@ _CME_FUTURES_MARKET = "cme_futures"
 _COMMODITIES_MARKET = "commodities"
 _MAG7_STOCKS_MARKET = "mag7_stocks"
 _RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
+_RUSSIAN_INDICES_MARKET = "russian_indices"
+_RUSSIAN_FUTURES_MARKET = "russian_futures"
 _SUPPORTED_INTERVALS = {
     "1m",
     "3m",
@@ -279,7 +283,11 @@ def historical_client_for_market(market: str) -> HistoricalMarketDataClient:
         return BinanceMarketDataClient()
     if market in {_CME_FUTURES_MARKET, _COMMODITIES_MARKET, _MAG7_STOCKS_MARKET}:
         return YahooFuturesMarketDataClient()
-    if market == _RUSSIAN_BLUECHIPS_MARKET:
+    if market in {
+        _RUSSIAN_BLUECHIPS_MARKET,
+        _RUSSIAN_INDICES_MARKET,
+        _RUSSIAN_FUTURES_MARKET,
+    }:
         return MoexSharesMarketDataClient()
     raise ValueError(f"unsupported market: {market}")
 
@@ -297,6 +305,10 @@ def _infer_market(relative_path: Path, symbol: str) -> str:
     symbol_key = symbol.upper()
     if relative_path.parent.name == _MAG7_STOCKS_MARKET or symbol_key in MAG7_STOCK_SYMBOLS:
         return _MAG7_STOCKS_MARKET
+    if relative_path.parent.name == _RUSSIAN_INDICES_MARKET or symbol_key in MOEX_INDEX_SYMBOLS:
+        return _RUSSIAN_INDICES_MARKET
+    if relative_path.parent.name == _RUSSIAN_FUTURES_MARKET or symbol_key in MOEX_FUTURES_SYMBOLS:
+        return _RUSSIAN_FUTURES_MARKET
     if relative_path.parent.name == _RUSSIAN_BLUECHIPS_MARKET or symbol_key in MOEX_BLUECHIP_SYMBOLS:
         return _RUSSIAN_BLUECHIPS_MARKET
     if symbol_key in _COMMODITY_SYMBOLS:

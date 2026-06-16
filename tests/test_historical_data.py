@@ -3,7 +3,11 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from algo_trading.historical_data import HistoricalDataRefreshService
+from algo_trading.data import MoexSharesMarketDataClient
+from algo_trading.historical_data import (
+    HistoricalDataRefreshService,
+    historical_client_for_market,
+)
 from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.models import Candle
 
@@ -198,6 +202,52 @@ class HistoricalDataTests(unittest.TestCase):
 
         self.assertEqual(summary["refreshed"], 2)
         self.assertEqual(markets, ["mag7_stocks", "mag7_stocks"])
+
+    def test_refresh_service_infers_moex_index_and_futures_markets(self):
+        now = int(datetime(2026, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
+        markets: list[str] = []
+        store = InMemoryHistoricalDataStore()
+
+        def client_factory(market: str) -> FakeHistoricalClient:
+            markets.append(market)
+            return FakeHistoricalClient([_candle(now, 12.0)])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "IMOEX-1d.csv").write_text(
+                "open_time,open,high,low,close,volume\n"
+                f"{now},12,13,11,12,1\n",
+                encoding="utf-8",
+            )
+            futures_dir = base / "russian_futures"
+            futures_dir.mkdir()
+            (futures_dir / "RIM6-1d.csv").write_text(
+                "open_time,open,high,low,close,volume\n"
+                f"{now},113000,114000,112000,113500,1\n",
+                encoding="utf-8",
+            )
+            service = HistoricalDataRefreshService(
+                data_dir=base,
+                client_factory=client_factory,
+                now=lambda: datetime(2026, 6, 16, tzinfo=timezone.utc),
+                store=store,
+                import_legacy_csv=True,
+            )
+
+            summary = service.refresh_all()
+
+        self.assertEqual(summary["refreshed"], 2)
+        self.assertCountEqual(markets, ["russian_indices", "russian_futures"])
+
+    def test_historical_client_accepts_moex_index_and_futures_markets(self):
+        self.assertIsInstance(
+            historical_client_for_market("russian_indices"),
+            MoexSharesMarketDataClient,
+        )
+        self.assertIsInstance(
+            historical_client_for_market("russian_futures"),
+            MoexSharesMarketDataClient,
+        )
 
 
 def _candle(open_time: int, close: float) -> Candle:

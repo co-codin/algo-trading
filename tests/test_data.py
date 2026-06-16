@@ -7,6 +7,9 @@ from urllib.parse import parse_qs, urlparse
 
 from algo_trading.data import (
     BinanceMarketDataClient,
+    MOEX_BLUECHIP_SYMBOLS,
+    MOEX_FUTURES_SYMBOLS,
+    MOEX_INDEX_SYMBOLS,
     MoexSharesMarketDataClient,
     YahooFuturesMarketDataClient,
     _candle_from_kline,
@@ -513,8 +516,46 @@ class DataTests(unittest.TestCase):
         self.assertIn("/engines/stock/markets/index/boards/SNDX/securities/IMOEX/candles.json", requests[0])
         self.assertIn("iss.reverse=true", requests[0])
 
+    def test_moex_client_routes_russian_futures_to_forts_board(self):
+        requests = []
+
+        def opener(url: str, timeout: int):
+            requests.append(url)
+            return FakeResponse(
+                {
+                    "candles": {
+                        "columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"],
+                        "data": [[113730, 112850, 114230, 111730, 0, 63913, "2026-06-16 12:00:00", "2026-06-16 12:04:59"]],
+                    }
+                }
+            )
+
+        candles = MoexSharesMarketDataClient(opener=opener).get_klines("RIM6", "5m", 1)
+
+        self.assertEqual(len(candles), 1)
+        self.assertIn("/engines/futures/markets/forts/boards/RFUD/securities/RIM6/candles.json", requests[0])
+        self.assertIn("iss.reverse=true", requests[0])
+
+    def test_moex_client_accepts_rsi_alias_for_rts_index_future(self):
+        requests = []
+
+        def opener(url: str, timeout: int):
+            requests.append(url)
+            return FakeResponse(
+                {
+                    "candles": {
+                        "columns": ["begin", "open", "high", "low", "close", "volume"],
+                        "data": [["2026-06-16 12:00:00", 113730, 114230, 111730, 112850, 63913]],
+                    }
+                }
+            )
+
+        MoexSharesMarketDataClient(opener=opener).get_klines("RSI", "5m", 1)
+
+        self.assertIn("/securities/RIM6/candles.json", requests[0])
+
     def test_moex_shares_client_rejects_unsupported_symbols(self):
-        with self.assertRaisesRegex(ValueError, "unsupported MOEX bluechip symbol"):
+        with self.assertRaisesRegex(ValueError, "unsupported MOEX symbol"):
             MoexSharesMarketDataClient().get_klines("PENNY", "5m", 1)
 
     def test_moex_shares_client_lists_expanded_russian_universe(self):
@@ -522,8 +563,16 @@ class DataTests(unittest.TestCase):
         symbols = {ticker["symbol"] for ticker in tickers}
 
         self.assertGreaterEqual(len(symbols), 75)
+        self.assertNotIn("IMOEX", symbols)
         for symbol in ["IRAO", "SIBN", "MTSS", "POSI", "PHOR", "FLOT"]:
             self.assertIn(symbol, symbols)
+
+    def test_moex_stock_index_and_futures_universes_are_separate(self):
+        self.assertNotIn("IMOEX", MOEX_BLUECHIP_SYMBOLS)
+        self.assertIn("IMOEX", MOEX_INDEX_SYMBOLS)
+        self.assertIn("RTSI", MOEX_INDEX_SYMBOLS)
+        self.assertIn("IMOEXF", MOEX_FUTURES_SYMBOLS)
+        self.assertIn("RIM6", MOEX_FUTURES_SYMBOLS)
 
     def test_moex_shares_client_sends_optional_bearer_token(self):
         requests = []

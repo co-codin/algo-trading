@@ -46,7 +46,6 @@ MOEX_PUBLIC_ISS_BASE_URL = "https://iss.moex.com/iss"
 MOEX_AUTHENTICATED_ISS_BASE_URL = "https://apim.moex.com/iss"
 MOEX_BLUECHIP_SYMBOLS = frozenset(
     {
-        "IMOEX",
         "AFLT",
         "AFKS",
         "ALRS",
@@ -126,6 +125,31 @@ MOEX_BLUECHIP_SYMBOLS = frozenset(
         "YDEX",
     }
 )
+MOEX_INDEX_SYMBOLS = frozenset({"IMOEX", "RTSI"})
+MOEX_FUTURES_SYMBOLS = frozenset(
+    {
+        "IMOEXF",
+        "MXM6",
+        "MXU6",
+        "MXZ6",
+        "RIM6",
+        "RIU6",
+        "RIZ6",
+    }
+)
+MOEX_SYMBOL_ALIASES = {
+    "RSI": "RIM6",
+    "RTS": "RIM6",
+    "RTS_FUTURE": "RIM6",
+    "RTS_FUTURES": "RIM6",
+    "RTSI_FUTURE": "RIM6",
+    "RTSI_FUTURES": "RIM6",
+    "IMOEX_FUTURE": "IMOEXF",
+    "IMOEX_FUTURES": "IMOEXF",
+    "MOEX_INDEX_FUTURE": "IMOEXF",
+    "MOEX_INDEX_FUTURES": "IMOEXF",
+}
+MOEX_SYMBOLS = MOEX_BLUECHIP_SYMBOLS | MOEX_INDEX_SYMBOLS | MOEX_FUTURES_SYMBOLS
 MAG7_STOCK_SYMBOLS = frozenset(
     {
         "AAPL",
@@ -137,7 +161,6 @@ MAG7_STOCK_SYMBOLS = frozenset(
         "TSLA",
     }
 )
-MOEX_INDEX_SYMBOLS = frozenset({"IMOEX"})
 
 
 class BinanceMarketDataClient:
@@ -451,9 +474,9 @@ class MoexSharesMarketDataClient:
             query_params["iss.reverse"] = "true"
         query = urllib.parse.urlencode(query_params)
         encoded_symbol = urllib.parse.quote(symbol, safe="")
-        market, board = _moex_market_board(symbol)
+        engine, market, board = _moex_market_board(symbol)
         url = (
-            f"{self.base_url}/engines/stock/markets/{market}/boards/{board}/"
+            f"{self.base_url}/engines/{engine}/markets/{market}/boards/{board}/"
             f"securities/{encoded_symbol}/candles.json?{query}"
         )
         request: str | urllib.request.Request = url
@@ -603,15 +626,18 @@ def _add_months(timestamp_ms: int, months: int) -> int:
 
 def _moex_symbol(symbol: str) -> str:
     value = symbol.strip().upper()
-    if value not in MOEX_BLUECHIP_SYMBOLS:
-        raise ValueError(f"unsupported MOEX bluechip symbol: {symbol}")
+    value = MOEX_SYMBOL_ALIASES.get(value, value)
+    if value not in MOEX_SYMBOLS:
+        raise ValueError(f"unsupported MOEX symbol: {symbol}")
     return value
 
 
-def _moex_market_board(symbol: str) -> tuple[str, str]:
+def _moex_market_board(symbol: str) -> tuple[str, str, str]:
+    if symbol in MOEX_FUTURES_SYMBOLS:
+        return "futures", "forts", "RFUD"
     if symbol in MOEX_INDEX_SYMBOLS:
-        return "index", "SNDX"
-    return "shares", "TQBR"
+        return "stock", "index", "SNDX"
+    return "stock", "shares", "TQBR"
 
 
 def _moex_interval(interval: str) -> tuple[int, int | None]:

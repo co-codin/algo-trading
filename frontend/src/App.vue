@@ -10,6 +10,8 @@ import {
   liveSymbolOptions,
   mag7StockSymbolOptions,
   moexBluechipSymbolOptions,
+  moexFuturesSymbolOptions,
+  moexIndexSymbolOptions,
   strategyGroupCatalog,
   type SelectOption,
 } from "./liveConfig";
@@ -230,6 +232,8 @@ const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "commodities", label: t("options.commodities") },
   { value: "mag7_stocks", label: t("options.mag7Stocks") },
   { value: "russian_bluechips", label: t("options.moexBluechips") },
+  { value: "russian_indices", label: t("options.moexIndices") },
+  { value: "russian_futures", label: t("options.moexFutures") },
 ]);
 const liveFuturesSymbolOptions = computed<SelectOption[]>(() => [
   { value: "ES=F", label: t("options.sp500Future") },
@@ -249,6 +253,8 @@ const liveSymbolsByMarket = computed<Record<string, SelectOption[]>>(() => ({
   commodities: commoditySymbolOptions.value,
   mag7_stocks: mag7StockSymbolOptions,
   russian_bluechips: moexBluechipSymbolOptions,
+  russian_indices: moexIndexSymbolOptions,
+  russian_futures: moexFuturesSymbolOptions,
 }));
 const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
   { value: "consensus", label: t("options.consensusSignals") },
@@ -402,7 +408,11 @@ const liveDataHealth = computed<LiveDataHealth>(() => {
       tone: "warning",
     };
   }
-  if (liveMarket.value === "russian_bluechips") {
+  if (
+    liveMarket.value === "russian_bluechips" ||
+    liveMarket.value === "russian_indices" ||
+    liveMarket.value === "russian_futures"
+  ) {
     return {
       label: t("health.exchange"),
       detail: t("health.moexDetail"),

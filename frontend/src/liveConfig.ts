@@ -52,7 +52,6 @@ export const moexBluechipSymbolOptions = [
   { value: "GAZP", label: "GAZP" },
   { value: "GMKN", label: "GMKN" },
   { value: "HEAD", label: "HEAD" },
-  { value: "IMOEX", label: "IMOEX · MOEX Russia Index" },
   { value: "IRAO", label: "IRAO" },
   { value: "IVAT", label: "IVAT" },
   { value: "LENT", label: "LENT" },
@@ -107,6 +106,21 @@ export const moexBluechipSymbolOptions = [
   { value: "WUSH", label: "WUSH" },
   { value: "X5", label: "X5" },
   { value: "YDEX", label: "YDEX" },
+] satisfies SelectOption[];
+
+export const moexIndexSymbolOptions = [
+  { value: "IMOEX", label: "IMOEX · MOEX Russia Index" },
+  { value: "RTSI", label: "RTSI · RTS Index" },
+] satisfies SelectOption[];
+
+export const moexFuturesSymbolOptions = [
+  { value: "IMOEXF", label: "IMOEXF · IMOEX Futures" },
+  { value: "MXM6", label: "MXM6 · MOEX Index Futures" },
+  { value: "MXU6", label: "MXU6 · MOEX Index Futures" },
+  { value: "MXZ6", label: "MXZ6 · MOEX Index Futures" },
+  { value: "RIM6", label: "RIM6 · RTS Index Futures" },
+  { value: "RIU6", label: "RIU6 · RTS Index Futures" },
+  { value: "RIZ6", label: "RIZ6 · RTS Index Futures" },
 ] satisfies SelectOption[];
 
 export const liveIntervalOptions = [

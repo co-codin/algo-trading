@@ -731,7 +731,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('"labels.maxMarkers": "Max markers"', i18n_source)
         self.assertIn('"labels.maxMarkers": "Макс. меток"', i18n_source)
 
-    def test_live_page_exposes_moex_bluechips_market(self):
+    def test_live_page_exposes_separate_moex_stock_index_and_futures_markets(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -744,6 +744,10 @@ class UiTests(unittest.TestCase):
         )
 
         self.assertIn("export const moexBluechipSymbolOptions = [", config_source)
+        stock_options_block = config_source.split(
+            "export const moexBluechipSymbolOptions = [", 1
+        )[1].split("] satisfies SelectOption[];", 1)[0]
+        self.assertNotIn('value: "IMOEX"', stock_options_block)
         self.assertIn('value: "SBER"', config_source)
         self.assertIn('value: "GAZP"', config_source)
         self.assertIn('value: "LKOH"', config_source)
@@ -753,7 +757,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('value: "PLZL"', config_source)
         self.assertIn('value: "MOEX"', config_source)
         self.assertIn('value: "SNGS"', config_source)
-        self.assertIn('value: "IMOEX"', config_source)
         self.assertIn('value: "VTBR"', config_source)
         self.assertIn('value: "ALRS"', config_source)
         self.assertIn('value: "OZON"', config_source)
@@ -765,11 +768,27 @@ class UiTests(unittest.TestCase):
         self.assertIn('value: "POSI"', config_source)
         self.assertIn('value: "PHOR"', config_source)
         self.assertIn('value: "FLOT"', config_source)
+        self.assertIn("export const moexIndexSymbolOptions = [", config_source)
+        self.assertIn('{ value: "IMOEX", label: "IMOEX · MOEX Russia Index" }', config_source)
+        self.assertIn('{ value: "RTSI", label: "RTSI · RTS Index" }', config_source)
+        self.assertIn("export const moexFuturesSymbolOptions = [", config_source)
+        self.assertIn('{ value: "IMOEXF", label: "IMOEXF · IMOEX Futures" }', config_source)
+        self.assertIn('{ value: "RIM6", label: "RIM6 · RTS Index Futures" }', config_source)
         self.assertIn('value: "russian_bluechips"', source)
+        self.assertIn('value: "russian_indices"', source)
+        self.assertIn('value: "russian_futures"', source)
         self.assertIn('t("options.moexBluechips")', source)
+        self.assertIn('t("options.moexIndices")', source)
+        self.assertIn('t("options.moexFutures")', source)
         self.assertIn("russian_bluechips: moexBluechipSymbolOptions", source)
+        self.assertIn("russian_indices: moexIndexSymbolOptions", source)
+        self.assertIn("russian_futures: moexFuturesSymbolOptions", source)
         self.assertIn('"options.moexBluechips": "Russian Stocks"', i18n_source)
+        self.assertIn('"options.moexIndices": "Russian Indices"', i18n_source)
+        self.assertIn('"options.moexFutures": "Russian Futures"', i18n_source)
         self.assertIn('"options.moexBluechips": "Акции РФ"', i18n_source)
+        self.assertIn('"options.moexIndices": "Индексы РФ"', i18n_source)
+        self.assertIn('"options.moexFutures": "Фьючерсы РФ"', i18n_source)
 
     def test_live_moex_symbol_options_are_sorted_alphabetically(self):
         root = Path(__file__).resolve().parents[1]
@@ -1316,7 +1335,7 @@ class UiTests(unittest.TestCase):
 
         payload = live_chart_payload(
             {
-                "market": "russian_bluechips",
+                "market": "russian_indices",
                 "symbol": "IMOEX",
                 "interval": "5m",
                 "limit": 5,
@@ -1331,9 +1350,34 @@ class UiTests(unittest.TestCase):
         )
 
         self.assertEqual(client.kline_symbols, ["IMOEX"])
-        self.assertEqual(payload["market"], "russian_bluechips")
+        self.assertEqual(payload["market"], "russian_indices")
         self.assertEqual(payload["data_source"], "MOEX APIM index")
         self.assertEqual(payload["symbol"], "IMOEX")
+
+    def test_live_chart_payload_accepts_moex_futures_market(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([300, 301, 302, 303, 304])]
+
+        payload = live_chart_payload(
+            {
+                "market": "russian_futures",
+                "symbol": "RIM6",
+                "interval": "5m",
+                "limit": 5,
+                "strategy": "ema-rsi",
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(client.kline_symbols, ["RIM6"])
+        self.assertEqual(payload["market"], "russian_futures")
+        self.assertEqual(payload["data_source"], "MOEX APIM futures")
+        self.assertEqual(payload["symbol"], "RIM6")
 
     def test_live_chart_payload_accepts_commodities_market(self):
         client = FakeClient()
@@ -1400,6 +1444,14 @@ class UiTests(unittest.TestCase):
         )
         self.assertIsInstance(
             market_data_client_from_payload({"market": "russian_bluechips"}),
+            MoexSharesMarketDataClient,
+        )
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "russian_indices"}),
+            MoexSharesMarketDataClient,
+        )
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "russian_futures"}),
             MoexSharesMarketDataClient,
         )
         self.assertIsInstance(
