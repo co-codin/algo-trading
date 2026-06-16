@@ -198,7 +198,6 @@ const liveAlertsEnabled = ref(false);
 const lastAlertSignature = ref("");
 const showSignals = ref(true);
 const liveDataUpdatedAt = ref<string | null>(null);
-const liveChartLoading = ref(false);
 let liveTimer = 0;
 let isApplyingLiveSettingsFromUrl = false;
 
@@ -1018,15 +1017,10 @@ async function loadStrategies() {
   strategies.value = payload.strategies;
 }
 
-async function loadLiveChart(options: { showLoader?: boolean } = {}) {
+async function loadLiveChart() {
   if (!canUseFeatures.value) {
     setLiveStatus(t("auth.inactive"), "error");
     return;
-  }
-  const showLoader = options.showLoader === true;
-  if (showLoader) {
-    liveChartLoading.value = true;
-    setLiveStatus(t("status.loadingChart"), "busy");
   }
   try {
     const query = toQuery({
@@ -1044,10 +1038,6 @@ async function loadLiveChart(options: { showLoader?: boolean } = {}) {
     livePayload.value = null;
     liveDataUpdatedAt.value = null;
     setLiveStatus(errorMessage(error), "error");
-  } finally {
-    if (showLoader) {
-      liveChartLoading.value = false;
-    }
   }
 }
 
@@ -1104,8 +1094,8 @@ function toggleLiveIndicator(indicatorId: string) {
   liveVisibleIndicators.value = [...liveVisibleIndicators.value, indicatorId];
 }
 
-function startLivePolling(options: { showLoader?: boolean } = {}) {
-  void loadLiveChart({ showLoader: options.showLoader === true });
+function startLivePolling() {
+  void loadLiveChart();
   const seconds = Math.max(2, Number(liveRefresh.value || 10));
   liveTimer = window.setInterval(() => void loadLiveChart(), seconds * 1000);
 }
@@ -1120,10 +1110,10 @@ function stopLivePolling() {
 function refreshLiveChart() {
   stopLivePolling();
   if (activeMode.value === "live") {
-    startLivePolling({ showLoader: true });
+    startLivePolling();
     return;
   }
-  void loadLiveChart({ showLoader: true });
+  void loadLiveChart();
 }
 
 async function loadMarketBreadth() {
@@ -1599,7 +1589,7 @@ function errorMessage(error: unknown): string {
           <span>{{ option.label }}</span>
         </label>
       </div>
-      <div class="chart-shell" :class="{ 'is-loading': liveChartLoading }">
+      <div class="chart-shell">
         <div class="chart-legend">
           <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
           <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
@@ -1619,15 +1609,6 @@ function errorMessage(error: unknown): string {
             :short-signal-label="chartLabels.shortSignal"
           />
           <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
-          <div
-            v-if="liveChartLoading"
-            class="chart-loader"
-            role="status"
-            aria-live="polite"
-          >
-            <span class="chart-loader-spinner" aria-hidden="true"></span>
-            <span>{{ t("status.loadingChart") }}</span>
-          </div>
         </div>
       </div>
     </section>

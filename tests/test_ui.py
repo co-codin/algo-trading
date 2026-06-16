@@ -371,7 +371,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("refreshLiveChart();", source)
         self.assertIn("market: liveMarket.value", source)
 
-    def test_live_page_shows_chart_loader_only_for_manual_chart_refresh(self):
+    def test_live_page_does_not_render_chart_loader(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -383,27 +383,18 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("const liveChartLoading = ref(false);", app_source)
-        self.assertIn("async function loadLiveChart(options: { showLoader?: boolean } = {})", app_source)
-        self.assertIn("const showLoader = options.showLoader === true;", app_source)
-        self.assertIn("if (showLoader) {\n    liveChartLoading.value = true;", app_source)
-        self.assertIn("if (showLoader) {\n      liveChartLoading.value = false;", app_source)
-        self.assertIn("void loadLiveChart({ showLoader: options.showLoader === true });", app_source)
+        self.assertIn("async function loadLiveChart()", app_source)
+        self.assertIn("void loadLiveChart();", app_source)
         self.assertIn("window.setInterval(() => void loadLiveChart(), seconds * 1000)", app_source)
-        self.assertIn("startLivePolling({ showLoader: true });", app_source)
-        self.assertIn(':class="{ \'is-loading\': liveChartLoading }"', app_source)
-        self.assertIn('v-if="liveChartLoading"', app_source)
-        self.assertIn('class="chart-loader"', app_source)
-        self.assertIn('role="status"', app_source)
-        self.assertIn('aria-live="polite"', app_source)
-        self.assertIn('class="chart-loader-spinner"', app_source)
-        self.assertIn('{{ t("status.loadingChart") }}', app_source)
-        self.assertIn(".chart-shell.is-loading .tv-chart", style_source)
-        self.assertIn(".chart-loader {", style_source)
-        self.assertIn(".chart-loader-spinner {", style_source)
-        self.assertIn("@keyframes chartLoaderSpin", style_source)
-        self.assertIn('"status.loadingChart": "Loading chart"', i18n_source)
-        self.assertIn('"status.loadingChart": "Загрузка графика"', i18n_source)
+        self.assertIn("startLivePolling();", app_source)
+        self.assertNotIn("liveChartLoading", app_source)
+        self.assertNotIn("showLoader", app_source)
+        self.assertNotIn("chart-loader", app_source)
+        self.assertNotIn("status.loadingChart", app_source)
+        self.assertNotIn("chart-shell.is-loading", style_source)
+        self.assertNotIn(".chart-loader", style_source)
+        self.assertNotIn("chartLoaderSpin", style_source)
+        self.assertNotIn('"status.loadingChart"', i18n_source)
 
     def test_live_chart_refresh_preserves_user_zoom(self):
         root = Path(__file__).resolve().parents[1]

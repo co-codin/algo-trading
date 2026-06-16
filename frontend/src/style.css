@@ -862,41 +862,6 @@ button:focus {
   min-height: 560px;
 }
 
-.chart-shell.is-loading .tv-chart,
-.chart-shell.is-loading .chart-empty {
-  opacity: 0.38;
-}
-
-.chart-loader {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  display: grid;
-  place-items: center;
-  gap: 10px;
-  align-content: center;
-  background: rgba(19, 23, 34, 0.62);
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 700;
-  pointer-events: none;
-}
-
-.chart-loader-spinner {
-  width: 34px;
-  height: 34px;
-  border: 3px solid rgba(134, 137, 147, 0.32);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: chartLoaderSpin 0.8s linear infinite;
-}
-
-@keyframes chartLoaderSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
