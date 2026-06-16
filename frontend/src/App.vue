@@ -39,6 +39,7 @@ import type {
   IndicatorDefinition,
   LiveChartPayload,
   MarketBreadthBar,
+  MarketBreadthGroup,
   MarketBreadthPayload,
   Mode,
   StrategyInfo,
@@ -62,6 +63,18 @@ type LiveDataHealth = {
   label: string;
   detail: string;
   tone: LiveHealthTone;
+};
+type BreadthGroupSummary = {
+  name: string;
+  average: number | null;
+  strongCount: number;
+  weakCount: number;
+  total: number;
+  latestDate: string;
+};
+type BreadthGroupView = {
+  group: MarketBreadthGroup;
+  summary: BreadthGroupSummary;
 };
 type LiveWorkspace = {
   id: string;
@@ -431,7 +444,16 @@ const visibleLiveIndicators = computed<IndicatorDefinition[]>(() => {
     selectedIndicators.has(indicator.id),
   );
 });
-const breadthGroups = computed(() => breadthPayload.value?.groups ?? []);
+const breadthGroups = computed<MarketBreadthGroup[]>(() => breadthPayload.value?.groups ?? []);
+const breadthGroupSummaries = computed<BreadthGroupSummary[]>(() =>
+  breadthGroups.value.map((group) => summarizeBreadthGroup(group)),
+);
+const breadthGroupViews = computed<BreadthGroupView[]>(() =>
+  breadthGroups.value.map((group, index) => ({
+    group,
+    summary: breadthGroupSummaries.value[index],
+  })),
+);
 const breadthSeriesCount = computed(() =>
   Object.keys(breadthPayload.value?.series ?? {}).length,
 );
@@ -1181,6 +1203,10 @@ function latestBreadthClose(symbol: string): string {
   return candle ? formatNumber(candle.close) : "—";
 }
 
+function formatBreadthPercent(value: number | null): string {
+  return value === null ? "—" : `${formatNumber(value)}%`;
+}
+
 function latestBreadthDate(symbol: string): string {
   return latestBreadthCandle(symbol)?.date ?? "—";
 }
@@ -1191,6 +1217,36 @@ function breadthToneClass(symbol: string): string {
     return "";
   }
   return candle.close >= 50 ? "is-positive" : "is-negative";
+}
+
+function breadthSummaryToneClass(summary: BreadthGroupSummary): string {
+  if (summary.average === null) {
+    return "";
+  }
+  return summary.average >= 50 ? "is-positive" : "is-negative";
+}
+
+function summarizeBreadthGroup(group: MarketBreadthGroup): BreadthGroupSummary {
+  const candles = group.items
+    .map((item) => latestBreadthCandle(item.symbol))
+    .filter((candle): candle is MarketBreadthBar => Boolean(candle));
+  const values = candles.map((candle) => candle.close);
+  const average = values.length
+    ? values.reduce((total, value) => total + value, 0) / values.length
+    : null;
+  const strongCount = values.filter((value) => value >= 50).length;
+  const latestDate = candles.reduce(
+    (latest, candle) => (candle.date > latest ? candle.date : latest),
+    "",
+  );
+  return {
+    name: group.name,
+    average,
+    strongCount,
+    weakCount: values.length - strongCount,
+    total: group.items.length,
+    latestDate: latestDate || "—",
+  };
 }
 
 function errorMessage(error: unknown): string {
@@ -1675,41 +1731,99 @@ function errorMessage(error: unknown): string {
             :short-signal-label="chartLabels.shortSignal"
           />
         </section>
-        <div class="breadth-grid">
-          <section v-for="group in breadthGroups" :key="group.name" class="breadth-group">
-            <div class="breadth-group-heading">
-              <h3>{{ group.name }}</h3>
-              <span>% above moving average</span>
+        <div class="breadth-overview-grid">
+          <article
+            v-for="summary in breadthGroupSummaries"
+            :key="`summary-${summary.name}`"
+            class="breadth-overview-card"
+            :class="breadthSummaryToneClass(summary)"
+          >
+            <div class="breadth-overview-title">
+              <span>{{ t("labels.marketBreadthGroup") }}</span>
+              <h3>{{ summary.name }}</h3>
             </div>
-            <article
-              v-for="item in group.items"
-              :key="item.symbol"
-              class="breadth-card"
-              :class="breadthToneClass(item.symbol)"
-            >
-              <div class="breadth-card-heading">
-                <div>
-                  <h4>{{ item.period }}</h4>
-                  <p>{{ item.symbol }}</p>
-                </div>
-                <div class="breadth-latest">
-                  <b>{{ latestBreadthClose(item.symbol) }}</b>
-                  <span>{{ latestBreadthDate(item.symbol) }}</span>
-                </div>
+            <div class="breadth-overview-value">
+              <b>{{ formatBreadthPercent(summary.average) }}</b>
+              <span>{{ t("labels.averageBreadth") }}</span>
+            </div>
+            <dl class="breadth-overview-stats">
+              <div>
+                <dt>{{ t("labels.bullish") }}</dt>
+                <dd>{{ summary.strongCount }}</dd>
               </div>
-              <TradingViewChart
-                v-if="breadthPayload?.series[item.symbol]"
-                :candles="breadthPayload.series[item.symbol].candles"
-                :signals="[]"
-                :show-signals="false"
-                derive-candles-from-close
-                :reset-key="`breadth:${item.symbol}`"
-                :aria-label="`${chartLabels.aria} ${item.symbol}`"
-                :empty-label="chartLabels.empty"
-                :long-signal-label="chartLabels.longSignal"
-                :short-signal-label="chartLabels.shortSignal"
-              />
-            </article>
+              <div>
+                <dt>{{ t("labels.weak") }}</dt>
+                <dd>{{ summary.weakCount }}</dd>
+              </div>
+              <div>
+                <dt>{{ t("labels.series") }}</dt>
+                <dd>{{ summary.total }}</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+
+        <div class="breadth-detail-stack">
+          <section
+            v-for="view in breadthGroupViews"
+            :key="view.group.name"
+            class="breadth-detail-section"
+          >
+            <header class="breadth-detail-header">
+              <div>
+                <span>{{ t("labels.marketBreadthGroup") }}</span>
+                <h3>{{ view.group.name }}</h3>
+              </div>
+              <div class="breadth-detail-meta" :class="breadthSummaryToneClass(view.summary)">
+                <span>
+                  {{ t("labels.averageBreadth") }}
+                  <b>{{ formatBreadthPercent(view.summary.average) }}</b>
+                </span>
+                <span>
+                  {{ t("labels.bullish") }}
+                  <b>{{ view.summary.strongCount }}</b>
+                </span>
+                <span>
+                  {{ t("labels.updated") }}
+                  <b>{{ view.summary.latestDate }}</b>
+                </span>
+              </div>
+            </header>
+            <div class="breadth-detail-grid">
+              <article
+                v-for="item in view.group.items"
+                :key="item.symbol"
+                class="breadth-metric-card"
+                :class="breadthToneClass(item.symbol)"
+              >
+                <header class="breadth-metric-heading">
+                  <div class="breadth-metric-title">
+                    <span>{{ item.symbol }}</span>
+                    <h4>{{ item.period }}</h4>
+                    <p>{{ item.label }}</p>
+                  </div>
+                  <div class="breadth-metric-value">
+                    <b>{{ latestBreadthClose(item.symbol) }}</b>
+                    <span>{{ latestBreadthDate(item.symbol) }}</span>
+                  </div>
+                </header>
+                <div class="breadth-metric-chart">
+                  <TradingViewChart
+                    v-if="breadthPayload?.series[item.symbol]"
+                    :candles="breadthPayload.series[item.symbol].candles"
+                    :signals="[]"
+                    :show-signals="false"
+                    derive-candles-from-close
+                    :reset-key="`breadth:${item.symbol}`"
+                    :aria-label="`${chartLabels.aria} ${item.symbol}`"
+                    :empty-label="chartLabels.empty"
+                    :long-signal-label="chartLabels.longSignal"
+                    :short-signal-label="chartLabels.shortSignal"
+                  />
+                  <div v-else class="empty">{{ t("empty.noCandles") }}</div>
+                </div>
+              </article>
+            </div>
           </section>
         </div>
       </template>

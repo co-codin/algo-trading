@@ -12,16 +12,63 @@
   border-bottom: 1px solid var(--line);
 }
 
-.breadth-grid {
+.breadth-empty {
+  margin: 0 14px 14px;
+}
+
+.breadth-put-call {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-  padding: 14px;
+  gap: 0;
+  margin: 0 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 .breadth-put-call .tv-chart {
   height: 440px;
   min-height: 440px;
+}
+
+.breadth-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1px;
+  margin: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.breadth-detail-stack {
+  display: grid;
+  gap: 14px;
+  padding: 0 14px 14px;
+}
+
+.breadth-detail-section {
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.breadth-detail-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(420px, 1fr);
+  gap: 1px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.breadth-metric-chart .tv-chart {
+  height: 390px;
+  min-height: 390px;
 }
 
 @media (max-width: 1060px) {
@@ -33,5 +80,14 @@
 @media (max-width: 720px) {
   .breadth-summary {
     grid-template-columns: 1fr;
+  }
+
+  .breadth-detail-grid {
+    grid-auto-columns: minmax(320px, 88vw);
+  }
+
+  .breadth-metric-chart .tv-chart {
+    height: 320px;
+    min-height: 320px;
   }
 }

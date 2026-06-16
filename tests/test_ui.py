@@ -530,9 +530,10 @@ class UiTests(unittest.TestCase):
         self.assertIn("async function loadMarketBreadth()", source)
         self.assertIn('requestJson<MarketBreadthPayload>("/api/market-breadth")', source)
         self.assertIn('activeMode === "breadth"', source)
-        self.assertIn('class="breadth-grid"', source)
-        self.assertIn('v-for="group in breadthGroups"', source)
-        self.assertIn('v-for="item in group.items"', source)
+        self.assertIn('class="breadth-overview-grid"', source)
+        self.assertIn('class="breadth-detail-stack"', source)
+        self.assertIn('v-for="view in breadthGroupViews"', source)
+        self.assertIn('v-for="item in view.group.items"', source)
         self.assertIn('breadthPayload?.series[item.symbol]', source)
         self.assertIn('export type MarketBreadthPayload', types_source)
         self.assertIn('"tabs.breadth": "US Market Breadth"', i18n_source)
@@ -1024,7 +1025,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("derive-candles-from-close", app_source)
         self.assertNotIn('series-type="line"', app_source)
 
-    def test_breadth_page_uses_stacked_readable_group_layout(self):
+    def test_breadth_page_uses_overview_and_large_detail_layout(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -1037,17 +1038,29 @@ class UiTests(unittest.TestCase):
             1,
         )[1]
 
-        self.assertIn(".breadth-grid {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);", style_source)
-        self.assertIn("padding: 14px;", style_source)
+        self.assertIn("const breadthGroupSummaries = computed<BreadthGroupSummary[]>(() =>", app_source)
+        self.assertIn('class="breadth-overview-grid"', app_source)
+        self.assertIn('class="breadth-detail-stack"', app_source)
+        self.assertIn('class="breadth-detail-section"', app_source)
+        self.assertIn('class="breadth-metric-card"', app_source)
         self.assertLess(
             breadth_loaded_source.index('class="breadth-put-call"'),
-            breadth_loaded_source.index('class="breadth-grid"'),
+            breadth_loaded_source.index('class="breadth-overview-grid"'),
         )
-        self.assertIn(".breadth-group {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));", style_source)
-        self.assertIn("grid-column: 1 / -1;", style_source)
-        self.assertIn(".breadth-card .tv-chart {\n  height: 360px;", style_source)
+        self.assertLess(
+            breadth_loaded_source.index('class="breadth-overview-grid"'),
+            breadth_loaded_source.index('class="breadth-detail-stack"'),
+        )
+        self.assertIn(".breadth-overview-grid {\n  display: grid;", style_source)
+        self.assertIn(".breadth-detail-section {\n  display: grid;", style_source)
+        self.assertIn("grid-auto-flow: column;", style_source)
+        self.assertIn("grid-auto-columns: minmax(420px, 1fr);", style_source)
+        self.assertIn("overflow-x: auto;", style_source)
+        self.assertNotIn("grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));", style_source)
+        self.assertIn(".breadth-metric-chart .tv-chart {\n  height: 390px;", style_source)
         self.assertIn(".breadth-put-call .tv-chart {\n  height: 440px;", style_source)
-        self.assertIn(".breadth-card .tv-chart {\n    height: 300px;", style_source)
+        self.assertIn(".breadth-metric-chart .tv-chart {\n    height: 320px;", style_source)
+        self.assertNotIn('class="breadth-card"', breadth_loaded_source)
 
     def test_top_symbols_payload_filters_and_ranks(self):
         payload = top_symbols_payload(FakeClient(), top=2)
