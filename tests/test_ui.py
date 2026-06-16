@@ -1,3 +1,4 @@
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -82,6 +83,8 @@ class UiTests(unittest.TestCase):
         self.assertIn("const liveMarketOptions = computed<SelectOption[]>(() => [", source)
         self.assertIn("const liveSymbolsByMarket", source)
         self.assertIn("const liveIntervalOptions = [", source)
+        self.assertIn('value: "1w"', source)
+        self.assertIn('value: "1M"', source)
         self.assertIn("const liveCandleOptions = [", source)
         self.assertIn("const liveStrategyOptions = computed<StrategyOption[]>(() =>", source)
         self.assertIn("const liveSelectedStrategies = ref<string[]>([\"ema-rsi\"]);", source)
@@ -610,11 +613,30 @@ class UiTests(unittest.TestCase):
         self.assertIn('value: "OZON"', source)
         self.assertIn('value: "NLMK"', source)
         self.assertIn('value: "CHMF"', source)
+        self.assertIn('value: "IRAO"', source)
+        self.assertIn('value: "SIBN"', source)
+        self.assertIn('value: "MTSS"', source)
+        self.assertIn('value: "POSI"', source)
+        self.assertIn('value: "PHOR"', source)
+        self.assertIn('value: "FLOT"', source)
         self.assertIn('value: "russian_bluechips"', source)
         self.assertIn('t("options.moexBluechips")', source)
         self.assertIn("russian_bluechips: moexBluechipSymbolOptions", source)
-        self.assertIn('"options.moexBluechips": "Russian Bluechips"', i18n_source)
-        self.assertIn('"options.moexBluechips": "Голубые фишки РФ"', i18n_source)
+        self.assertIn('"options.moexBluechips": "Russian Stocks"', i18n_source)
+        self.assertIn('"options.moexBluechips": "Акции РФ"', i18n_source)
+
+    def test_live_moex_symbol_options_are_sorted_alphabetically(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        options_block = source.split("const moexBluechipSymbolOptions = [", 1)[
+            1
+        ].split("] satisfies SelectOption[];", 1)[0]
+        symbols = re.findall(r'value: "([^"]+)"', options_block)
+
+        self.assertGreater(len(symbols), 50)
+        self.assertEqual(symbols, sorted(symbols))
 
     def test_live_page_exposes_commodities_market(self):
         root = Path(__file__).resolve().parents[1]
@@ -655,7 +677,10 @@ class UiTests(unittest.TestCase):
 
         self.assertIn('const liveSymbolSearch = ref("")', source)
         self.assertIn("const filteredLiveSymbolOptions = computed", source)
-        self.assertIn("liveSymbolSearch.value.trim().toLowerCase()", source)
+        self.assertIn("function normalizeSearchText(value: string | number): string", source)
+        self.assertIn("toLocaleLowerCase()", source)
+        self.assertIn("function optionMatchesSearch(option: SelectOption, query: string): boolean", source)
+        self.assertIn("optionMatchesSearch(option, query)", source)
         self.assertIn('v-model.trim="liveSymbolSearch"', source)
         self.assertIn('type="search"', source)
         self.assertIn("t('labels.symbolSearch')", source)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import csv
 import json
 import os
@@ -46,36 +47,83 @@ MOEX_AUTHENTICATED_ISS_BASE_URL = "https://apim.moex.com/iss"
 MOEX_BLUECHIP_SYMBOLS = frozenset(
     {
         "IMOEX",
-        "SBER",
-        "VTBR",
-        "GAZP",
-        "LKOH",
-        "YDEX",
-        "ROSN",
-        "NVTK",
-        "GMKN",
-        "TATN",
-        "ALRS",
-        "SMLT",
-        "OZON",
-        "PLZL",
-        "PIKK",
+        "AFLT",
         "AFKS",
-        "SGZH",
-        "VKCO",
-        "NLMK",
+        "ALRS",
+        "ASTR",
+        "BANEP",
+        "BELU",
+        "BSPB",
+        "CBOM",
+        "CHMF",
+        "CNRU",
+        "DATA",
+        "DIAS",
+        "DOMRF",
+        "ENPG",
+        "ETLN",
+        "EUTR",
+        "FEES",
+        "FESH",
+        "FIXR",
+        "FLOT",
+        "GAZP",
+        "GMKN",
+        "HEAD",
+        "IRAO",
+        "IVAT",
+        "LENT",
+        "LKOH",
+        "LSNGP",
+        "LSRG",
         "MAGN",
         "MGNT",
-        "AFLT",
-        "RUAL",
-        "MTLR",
-        "CBOM",
-        "TATNP",
-        "X5",
-        "CHMF",
-        "SNGSP",
         "MOEX",
+        "MRKC",
+        "MRKV",
+        "MSNG",
+        "MTLR",
+        "MTLRP",
+        "MTSS",
+        "MVID",
+        "NLMK",
+        "NMTP",
+        "NVTK",
+        "OZON",
+        "PHOR",
+        "PIKK",
+        "PLZL",
+        "POSI",
+        "RAGR",
+        "RASP",
+        "RENI",
+        "RNFT",
+        "ROSN",
+        "RTKM",
+        "RUAL",
+        "SBER",
+        "SBERP",
+        "SELG",
+        "SFIN",
+        "SGZH",
+        "SIBN",
+        "SMLT",
         "SNGS",
+        "SNGSP",
+        "SPBE",
+        "SVCB",
+        "T",
+        "TATN",
+        "TATNP",
+        "TRMK",
+        "TRNFP",
+        "UGLD",
+        "UPRO",
+        "VKCO",
+        "VTBR",
+        "WUSH",
+        "X5",
+        "YDEX",
     }
 )
 MOEX_INDEX_SYMBOLS = frozenset({"IMOEX"})
@@ -105,7 +153,6 @@ class BinanceMarketDataClient:
     ) -> list[Candle]:
         if end_time <= start_time:
             raise ValueError("end time must be after start time")
-        interval_ms = _binance_interval_ms(interval)
         candles: list[Candle] = []
         seen_open_times: set[int] = set()
         cursor = start_time
@@ -130,7 +177,7 @@ class BinanceMarketDataClient:
                     seen_open_times.add(candle.open_time)
 
             last_open_time = max(candle.open_time for candle in page)
-            next_cursor = last_open_time + interval_ms
+            next_cursor = _binance_next_cursor(interval, last_open_time)
             if next_cursor <= cursor:
                 raise ValueError("Binance returned a non-advancing kline page")
             cursor = next_cursor
@@ -484,8 +531,15 @@ def _candle_from_kline(row: Sequence[Any]) -> Candle:
         raise ValueError("invalid kline row") from exc
 
 
-def _binance_interval_ms(interval: str) -> int:
+def _normalize_interval(interval: str) -> str:
     value = interval.strip()
+    if value.endswith("M"):
+        return value
+    return value.lower()
+
+
+def _binance_interval_ms(interval: str) -> int:
+    value = _normalize_interval(interval)
     if len(value) < 2:
         raise ValueError(f"unsupported Binance interval: {interval}")
     if value.endswith("M"):
@@ -507,6 +561,29 @@ def _binance_interval_ms(interval: str) -> int:
         return amount * multipliers[unit]
     except KeyError as exc:
         raise ValueError(f"unsupported Binance interval: {interval}") from exc
+
+
+def _binance_next_cursor(interval: str, open_time: int) -> int:
+    value = _normalize_interval(interval)
+    if value.endswith("M"):
+        try:
+            months = int(value[:-1])
+        except ValueError as exc:
+            raise ValueError(f"unsupported Binance interval: {interval}") from exc
+        if months <= 0:
+            raise ValueError(f"unsupported Binance interval: {interval}")
+        return _add_months(open_time, months)
+    return open_time + _binance_interval_ms(value)
+
+
+def _add_months(timestamp_ms: int, months: int) -> int:
+    current = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+    month_index = (current.year * 12) + current.month - 1 + months
+    year = month_index // 12
+    month = (month_index % 12) + 1
+    day = min(current.day, calendar.monthrange(year, month)[1])
+    shifted = current.replace(year=year, month=month, day=day)
+    return int(shifted.timestamp() * 1000)
 
 
 def _moex_symbol(symbol: str) -> str:
@@ -533,17 +610,24 @@ def _moex_interval(interval: str) -> tuple[int, int | None]:
         "1h": (60, None),
         "4h": (60, 240),
         "1d": (24, None),
+        "1w": (7, None),
+        "1M": (31, None),
     }
     try:
-        return intervals[interval.strip().lower()]
+        return intervals[_normalize_interval(interval)]
     except KeyError as exc:
         raise ValueError(f"unsupported MOEX interval: {interval}") from exc
 
 
 def _moex_window_dates(interval: str) -> tuple[str, str]:
     now = datetime.now(timezone.utc)
-    value = interval.strip().lower()
-    days = 400 if value == "1d" else 45
+    value = _normalize_interval(interval)
+    if value == "1M":
+        days = 3650
+    elif value == "1w":
+        days = 1825
+    else:
+        days = 400 if value == "1d" else 45
     return (now - timedelta(days=days)).date().isoformat(), now.date().isoformat()
 
 
@@ -680,9 +764,11 @@ def _yahoo_interval(interval: str) -> tuple[str, str, int | None]:
         "1h": ("60m", "1mo", None),
         "4h": ("60m", "3mo", 240),
         "1d": ("1d", "1y", None),
+        "1w": ("1wk", "5y", None),
+        "1M": ("1mo", "10y", None),
     }
     try:
-        return intervals[interval.strip().lower()]
+        return intervals[_normalize_interval(interval)]
     except KeyError as exc:
         raise ValueError(f"unsupported futures interval: {interval}") from exc
 

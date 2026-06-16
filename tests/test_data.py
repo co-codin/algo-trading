@@ -143,6 +143,45 @@ class DataTests(unittest.TestCase):
 
         self.assertIn("interval=60m", requests[0].full_url)
 
+    def test_yahoo_futures_client_maps_weekly_and_monthly_intervals(self):
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                {
+                    "chart": {
+                        "result": [
+                            {
+                                "timestamp": [1_700_000_000],
+                                "indicators": {
+                                    "quote": [
+                                        {
+                                            "open": [5000.0],
+                                            "high": [5005.0],
+                                            "low": [4999.0],
+                                            "close": [5003.0],
+                                            "volume": [100],
+                                        }
+                                    ]
+                                },
+                            }
+                        ],
+                        "error": None,
+                    }
+                }
+            )
+
+        client = YahooFuturesMarketDataClient(opener=opener)
+
+        client.get_klines("ES", "1w", 1)
+        client.get_klines("ES", "1M", 1)
+
+        weekly_query = parse_qs(urlparse(requests[0].full_url).query)
+        monthly_query = parse_qs(urlparse(requests[1].full_url).query)
+        self.assertEqual(weekly_query["interval"], ["1wk"])
+        self.assertEqual(monthly_query["interval"], ["1mo"])
+
     def test_yahoo_futures_client_maps_nasdaq_alias_to_yahoo_symbol(self):
         requests = []
 
@@ -443,6 +482,14 @@ class DataTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported MOEX bluechip symbol"):
             MoexSharesMarketDataClient().get_klines("PENNY", "5m", 1)
 
+    def test_moex_shares_client_lists_expanded_russian_universe(self):
+        tickers = MoexSharesMarketDataClient().get_24h_tickers()
+        symbols = {ticker["symbol"] for ticker in tickers}
+
+        self.assertGreaterEqual(len(symbols), 75)
+        for symbol in ["IRAO", "SIBN", "MTSS", "POSI", "PHOR", "FLOT"]:
+            self.assertIn(symbol, symbols)
+
     def test_moex_shares_client_sends_optional_bearer_token(self):
         requests = []
 
@@ -501,6 +548,50 @@ class DataTests(unittest.TestCase):
         self.assertEqual(query["till"], ["2026-06-16"])
         self.assertEqual(query["interval"], ["24"])
         self.assertEqual(len(candles), 2)
+
+    def test_moex_client_maps_weekly_and_monthly_intervals(self):
+        requests = []
+
+        def opener(url: str, timeout: int):
+            requests.append(url)
+            return FakeResponse(
+                {
+                    "candles": {
+                        "columns": [
+                            "open",
+                            "close",
+                            "high",
+                            "low",
+                            "value",
+                            "volume",
+                            "begin",
+                            "end",
+                        ],
+                        "data": [
+                            [
+                                "300.0",
+                                "301.0",
+                                "302.0",
+                                "299.0",
+                                "100000",
+                                "1000",
+                                "2026-06-01 00:00:00",
+                                "2026-06-07 23:59:59",
+                            ]
+                        ],
+                    }
+                }
+            )
+
+        client = MoexSharesMarketDataClient(opener=opener)
+
+        client.get_klines("SBER", "1w", 1)
+        client.get_klines("SBER", "1M", 1)
+
+        weekly_query = parse_qs(urlparse(requests[0]).query)
+        monthly_query = parse_qs(urlparse(requests[1]).query)
+        self.assertEqual(weekly_query["interval"], ["7"])
+        self.assertEqual(monthly_query["interval"], ["31"])
 
 def _binance_kline(open_time: int) -> list[object]:
     return [

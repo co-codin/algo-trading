@@ -71,37 +71,84 @@ const liveSymbolOptions = [
 ] satisfies SelectOption[];
 
 const moexBluechipSymbolOptions = [
-  { value: "IMOEX", label: "IMOEX · MOEX Russia Index" },
-  { value: "SBER", label: "SBER" },
-  { value: "VTBR", label: "VTBR" },
-  { value: "GAZP", label: "GAZP" },
-  { value: "LKOH", label: "LKOH" },
-  { value: "YDEX", label: "YDEX" },
-  { value: "TATN", label: "TATN" },
-  { value: "ROSN", label: "ROSN" },
-  { value: "NVTK", label: "NVTK" },
-  { value: "GMKN", label: "GMKN" },
-  { value: "ALRS", label: "ALRS" },
-  { value: "SMLT", label: "SMLT" },
-  { value: "OZON", label: "OZON" },
-  { value: "PLZL", label: "PLZL" },
-  { value: "PIKK", label: "PIKK" },
   { value: "AFKS", label: "AFKS" },
-  { value: "SGZH", label: "SGZH" },
-  { value: "VKCO", label: "VKCO" },
-  { value: "NLMK", label: "NLMK" },
+  { value: "AFLT", label: "AFLT" },
+  { value: "ALRS", label: "ALRS" },
+  { value: "ASTR", label: "ASTR" },
+  { value: "BANEP", label: "BANEP" },
+  { value: "BELU", label: "BELU" },
+  { value: "BSPB", label: "BSPB" },
+  { value: "CBOM", label: "CBOM" },
+  { value: "CHMF", label: "CHMF" },
+  { value: "CNRU", label: "CNRU" },
+  { value: "DATA", label: "DATA" },
+  { value: "DIAS", label: "DIAS" },
+  { value: "DOMRF", label: "DOMRF" },
+  { value: "ENPG", label: "ENPG" },
+  { value: "ETLN", label: "ETLN" },
+  { value: "EUTR", label: "EUTR" },
+  { value: "FEES", label: "FEES" },
+  { value: "FESH", label: "FESH" },
+  { value: "FIXR", label: "FIXR" },
+  { value: "FLOT", label: "FLOT" },
+  { value: "GAZP", label: "GAZP" },
+  { value: "GMKN", label: "GMKN" },
+  { value: "HEAD", label: "HEAD" },
+  { value: "IMOEX", label: "IMOEX · MOEX Russia Index" },
+  { value: "IRAO", label: "IRAO" },
+  { value: "IVAT", label: "IVAT" },
+  { value: "LENT", label: "LENT" },
+  { value: "LKOH", label: "LKOH" },
+  { value: "LSNGP", label: "LSNGP" },
+  { value: "LSRG", label: "LSRG" },
   { value: "MAGN", label: "MAGN" },
   { value: "MGNT", label: "MGNT" },
-  { value: "AFLT", label: "AFLT" },
-  { value: "RUAL", label: "RUAL" },
-  { value: "MTLR", label: "MTLR" },
-  { value: "CBOM", label: "CBOM" },
-  { value: "TATNP", label: "TATNP" },
-  { value: "X5", label: "X5" },
-  { value: "CHMF", label: "CHMF" },
-  { value: "SNGSP", label: "SNGSP" },
   { value: "MOEX", label: "MOEX" },
+  { value: "MRKC", label: "MRKC" },
+  { value: "MRKV", label: "MRKV" },
+  { value: "MSNG", label: "MSNG" },
+  { value: "MTLR", label: "MTLR" },
+  { value: "MTLRP", label: "MTLRP" },
+  { value: "MTSS", label: "MTSS" },
+  { value: "MVID", label: "MVID" },
+  { value: "NLMK", label: "NLMK" },
+  { value: "NMTP", label: "NMTP" },
+  { value: "NVTK", label: "NVTK" },
+  { value: "OZON", label: "OZON" },
+  { value: "PHOR", label: "PHOR" },
+  { value: "PIKK", label: "PIKK" },
+  { value: "PLZL", label: "PLZL" },
+  { value: "POSI", label: "POSI" },
+  { value: "RAGR", label: "RAGR" },
+  { value: "RASP", label: "RASP" },
+  { value: "RENI", label: "RENI" },
+  { value: "RNFT", label: "RNFT" },
+  { value: "ROSN", label: "ROSN" },
+  { value: "RTKM", label: "RTKM" },
+  { value: "RUAL", label: "RUAL" },
+  { value: "SBER", label: "SBER" },
+  { value: "SBERP", label: "SBERP" },
+  { value: "SELG", label: "SELG" },
+  { value: "SFIN", label: "SFIN" },
+  { value: "SGZH", label: "SGZH" },
+  { value: "SIBN", label: "SIBN" },
+  { value: "SMLT", label: "SMLT" },
   { value: "SNGS", label: "SNGS" },
+  { value: "SNGSP", label: "SNGSP" },
+  { value: "SPBE", label: "SPBE" },
+  { value: "SVCB", label: "SVCB" },
+  { value: "T", label: "T" },
+  { value: "TATN", label: "TATN" },
+  { value: "TATNP", label: "TATNP" },
+  { value: "TRMK", label: "TRMK" },
+  { value: "TRNFP", label: "TRNFP" },
+  { value: "UGLD", label: "UGLD" },
+  { value: "UPRO", label: "UPRO" },
+  { value: "VKCO", label: "VKCO" },
+  { value: "VTBR", label: "VTBR" },
+  { value: "WUSH", label: "WUSH" },
+  { value: "X5", label: "X5" },
+  { value: "YDEX", label: "YDEX" },
 ] satisfies SelectOption[];
 
 const liveIntervalOptions = [
@@ -113,6 +160,8 @@ const liveIntervalOptions = [
   { value: "1h", label: "1h" },
   { value: "4h", label: "4h" },
   { value: "1d", label: "1d" },
+  { value: "1w", label: "1w" },
+  { value: "1M", label: "1M" },
 ] satisfies SelectOption[];
 
 const liveCandleOptions = [
@@ -404,13 +453,11 @@ const activeLiveSymbolOptions = computed(
   () => liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions,
 );
 const filteredLiveSymbolOptions = computed(() => {
-  const query = liveSymbolSearch.value.trim().toLowerCase();
+  const query = liveSymbolSearch.value;
   if (!query) {
     return activeLiveSymbolOptions.value;
   }
-  return activeLiveSymbolOptions.value.filter((option) =>
-    `${option.label} ${option.value}`.toLowerCase().includes(query),
-  );
+  return activeLiveSymbolOptions.value.filter((option) => optionMatchesSearch(option, query));
 });
 const selectedLiveStrategyNames = computed(() => {
   const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
@@ -972,6 +1019,18 @@ async function loadMarketBreadth() {
 
 function strategyTitle(name: string): string {
   return translateStrategyTitle(locale.value, name, name);
+}
+
+function normalizeSearchText(value: string | number): string {
+  return String(value).trim().toLocaleLowerCase();
+}
+
+function optionMatchesSearch(option: SelectOption, query: string): boolean {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) {
+    return true;
+  }
+  return normalizeSearchText(`${option.label} ${option.value}`).includes(normalizedQuery);
 }
 
 function groupSignalsByConsensus(signals: Marker[], minimumConfirmations: number): Marker[] {

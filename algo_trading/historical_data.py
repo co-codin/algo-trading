@@ -32,7 +32,19 @@ _CRYPTO_SPOT_MARKET = "crypto_spot"
 _CME_FUTURES_MARKET = "cme_futures"
 _COMMODITIES_MARKET = "commodities"
 _RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
-_SUPPORTED_INTERVALS = {"1m", "3m", "5m", "10m", "15m", "30m", "1h", "4h", "1d"}
+_SUPPORTED_INTERVALS = {
+    "1m",
+    "3m",
+    "5m",
+    "10m",
+    "15m",
+    "30m",
+    "1h",
+    "4h",
+    "1d",
+    "1w",
+    "1M",
+}
 _US_INDEX_SYMBOLS = {
     "ES",
     "/ES",

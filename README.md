@@ -28,7 +28,7 @@ The frontend is a Vue 3 control panel with direct URLs:
 - `http://127.0.0.1:8765/profile`
 - `http://127.0.0.1:8765/admin`
 
-The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST, the S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`, and Russian blue chips use MOEX APIM share candles when `MOEX_API_KEY` or `MOEXALGO_API_KEY` is configured, falling back to delayed public MOEX ISS candles without a token. Choose `All strategies` to show consensus or capped individual strategy markers instead of flooding the chart with every raw marker.
+The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST, the S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`, and Russian stocks use MOEX APIM share candles when `MOEX_API_KEY` or `MOEXALGO_API_KEY` is configured, falling back to delayed public MOEX ISS candles without a token. Choose `All strategies` to show consensus or capped individual strategy markers instead of flooding the chart with every raw marker.
 
 The `Breadth` page shows cached market-breadth history, including put/call ratio at the top. `Profile` is available for signed-in users. `Admin` is visible only when the signed-in user's `is_admin` flag is true.
 
@@ -122,7 +122,7 @@ python3 -m algo_trading.cli candles --market cme_futures --symbol SP500 --interv
 python3 -m algo_trading.cli candles --market cme_futures --symbol NASDAQ --interval 1d --days 365 --limit 1000 --output historical_data/NASDAQ-1d-365d.csv
 ```
 
-Export the last 365 days of MOEX Russian blue-chip candles. With `MOEX_API_KEY` set, this uses MOEX APIM:
+Export the last 365 days of MOEX Russian stock candles. With `MOEX_API_KEY` set, this uses MOEX APIM:
 
 ```bash
 python3 -m algo_trading.cli candles --market russian_bluechips --symbol TATN --interval 1d --days 365 --limit 1000 --output historical_data/russian_bluechips/TATN-1d-365d.csv
