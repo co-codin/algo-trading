@@ -93,7 +93,7 @@ Both Docker paths mount local `runs/` for command-line simulation outputs. Docke
 
 Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template and set `MOEX_API_KEY` or `MOEXALGO_API_KEY` there when MOEX authenticated data is needed. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker.
 
-Historical candle CSVs are retained for the latest 365 days only. The web app refreshes existing candle CSVs in `historical_data/` every hour (`HISTORICAL_CSV_REFRESH_SECONDS=3600`) and runs a daily prune (`HISTORICAL_CSV_PRUNE_SECONDS=86400`) so rows older than one year are removed. Barchart breadth CSVs use the same 365-day retention.
+Live candle CSVs are retained for the latest 1095 days. The web app refreshes existing candle CSVs in `historical_data/` every hour (`HISTORICAL_CSV_REFRESH_SECONDS=3600`) and runs a daily prune (`HISTORICAL_CSV_PRUNE_SECONDS=86400`) so rows older than three years are removed. Barchart breadth CSVs keep their separate 365-day retention.
 
 The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file containing only the latest 365 days. The exception is `historical_data/breadth/CPC.csv`: it stores the full official Cboe total put/call ratio history from Cboe's ratio archives plus the post-2019 daily market-statistics page, and it is not pruned to one year.
 

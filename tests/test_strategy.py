@@ -76,6 +76,11 @@ class StrategyTests(unittest.TestCase):
                 "volume-breakout",
                 "vwap-trend-continuation",
                 "sma-crossover",
+                "adx-trend",
+                "ichimoku-breakout",
+                "mfi-reversal",
+                "parabolic-sar",
+                "zscore-reversion",
                 "combined-signals",
             ],
         )
@@ -391,6 +396,72 @@ class StrategyTests(unittest.TestCase):
         self.assertIsNotNone(signal)
         self.assertEqual(signal.type, SignalType.ENTER_LONG)
         self.assertEqual(signal.reason, "sma_cross_above")
+
+    def test_adx_trend_enters_long_when_directional_movement_confirms_trend(self):
+        config = StrategyConfig(
+            strategy=StrategyName("adx-trend"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            atr_period=2,
+        )
+
+        signal = first_entry_signal(config, [12, 11, 10, 11, 13, 15, 17])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "adx_trend_long")
+
+    def test_ichimoku_breakout_enters_long_above_cloud(self):
+        config = StrategyConfig(
+            strategy=StrategyName("ichimoku-breakout"),
+            allowed_side=AllowedSide.LONG_ONLY,
+        )
+
+        signal = first_entry_signal(config, ([100.0] * 52) + [102, 104, 106, 108, 110, 112, 114])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "ichimoku_breakout_long")
+
+    def test_mfi_reversal_enters_long_when_money_flow_recovers(self):
+        config = StrategyConfig(
+            strategy=StrategyName("mfi-reversal"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            rsi_period=2,
+            rsi_oversold=30.0,
+            rsi_overbought=70.0,
+        )
+
+        signal = first_entry_signal(config, [10, 9, 8, 9, 10, 11])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "mfi_reversal_long")
+
+    def test_parabolic_sar_enters_long_on_trend_flip(self):
+        config = StrategyConfig(
+            strategy=StrategyName("parabolic-sar"),
+            allowed_side=AllowedSide.LONG_ONLY,
+        )
+
+        signal = first_entry_signal(config, [12, 11, 10, 9, 10, 12, 14, 16])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "parabolic_sar_flip_long")
+
+    def test_zscore_reversion_enters_long_when_price_reclaims_extreme(self):
+        config = StrategyConfig(
+            strategy=StrategyName("zscore-reversion"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            bollinger_period=3,
+            bollinger_stddev=1.0,
+        )
+
+        signal = first_entry_signal(config, [10, 10, 10, 7, 10, 11])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "zscore_reversion_long")
 
     def test_combined_signals_enters_when_members_confirm_within_lookback(self):
         config = StrategyConfig(

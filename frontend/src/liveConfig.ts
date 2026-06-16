@@ -126,7 +126,13 @@ export const strategyGroupCatalog: StrategyGroupDefinition[] = [
   {
     id: "recommended",
     labelKey: "strategyGroups.recommended",
-    strategyNames: ["ema-rsi", "macd", "supertrend", "vwap-trend-continuation"],
+    strategyNames: [
+      "ema-rsi",
+      "macd",
+      "supertrend",
+      "adx-trend",
+      "vwap-trend-continuation",
+    ],
   },
   {
     id: "trend",
@@ -136,6 +142,8 @@ export const strategyGroupCatalog: StrategyGroupDefinition[] = [
       "ema-pullback",
       "atr-trailing-trend",
       "sma-crossover",
+      "ichimoku-breakout",
+      "parabolic-sar",
     ],
   },
   {
@@ -148,6 +156,8 @@ export const strategyGroupCatalog: StrategyGroupDefinition[] = [
       "stoch-rsi-reversal",
       "cci-reversal",
       "williams-r-reversal",
+      "mfi-reversal",
+      "zscore-reversion",
     ],
   },
   {

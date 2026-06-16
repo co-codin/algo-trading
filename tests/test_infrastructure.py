@@ -44,7 +44,7 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn(".env", gitignore.splitlines())
         self.assertIn("MOEX_API_KEY=", env_example)
         self.assertIn("ADMIN_EMAIL=", env_example)
-        self.assertIn("HISTORICAL_CSV_RETENTION_DAYS=365", env_example)
+        self.assertIn("HISTORICAL_CSV_RETENTION_DAYS=1095", env_example)
         self.assertIn("HISTORICAL_CSV_REFRESH_SECONDS=3600", env_example)
         self.assertIn("HISTORICAL_CSV_PRUNE_SECONDS=86400", env_example)
 
@@ -56,7 +56,7 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("./historical_data:/app/historical_data", compose)
         self.assertIn("MARKET_BREADTH_DATA_DIR: /app/historical_data/breadth", compose)
         self.assertIn('HISTORICAL_DATA_DIR: /app/historical_data', compose)
-        self.assertIn('HISTORICAL_CSV_RETENTION_DAYS: "365"', compose)
+        self.assertIn('HISTORICAL_CSV_RETENTION_DAYS: "1095"', compose)
         self.assertIn('HISTORICAL_CSV_REFRESH_SECONDS: "3600"', compose)
         self.assertIn('HISTORICAL_CSV_PRUNE_SECONDS: "86400"', compose)
         self.assertIn('MARKET_BREADTH_RETENTION_DAYS: "365"', compose)

@@ -306,16 +306,14 @@ const liveStrategyGroups = computed<StrategyGroup[]>(() => {
   return groups;
 });
 const filteredLiveStrategyGroups = computed<StrategyGroup[]>(() => {
-  const query = liveStrategySearch.value.trim().toLowerCase();
+  const query = normalizeSearchText(liveStrategySearch.value);
   if (!query) {
     return liveStrategyGroups.value;
   }
   return liveStrategyGroups.value
     .map((group) => {
       const strategies = group.strategies.filter((strategy) =>
-        `${strategy.title} ${strategy.description} ${strategy.name}`
-          .toLowerCase()
-          .includes(query),
+        strategyMatchesSearch(strategy, group, query),
       );
       return {
         ...group,
@@ -1161,6 +1159,17 @@ function strategyTitle(name: string): string {
   return translateStrategyTitle(locale.value, name, name);
 }
 
+function strategyMatchesSearch(
+  strategy: StrategyOption,
+  group: StrategyGroup,
+  normalizedQuery: string,
+): boolean {
+  const searchableText = normalizeSearchText(
+    `${strategy.title} ${strategy.description} ${strategy.name} ${group.label}`,
+  );
+  return searchableText.includes(normalizedQuery);
+}
+
 function formatNumber(value: unknown): string {
   if (value === null || value === undefined || value === "") {
     return "0";
@@ -1670,6 +1679,7 @@ function errorMessage(error: unknown): string {
             :candles="breadthPutCall.candles"
             :signals="[]"
             :show-signals="false"
+            derive-candles-from-close
             :reset-key="`breadth:${breadthPutCall.symbol}`"
             :aria-label="`${chartLabels.aria} ${breadthPutCall.symbol}`"
             :empty-label="chartLabels.empty"
@@ -1704,6 +1714,7 @@ function errorMessage(error: unknown): string {
                 :candles="breadthPayload.series[item.symbol].candles"
                 :signals="[]"
                 :show-signals="false"
+                derive-candles-from-close
                 :reset-key="`breadth:${item.symbol}`"
                 :aria-label="`${chartLabels.aria} ${item.symbol}`"
                 :empty-label="chartLabels.empty"

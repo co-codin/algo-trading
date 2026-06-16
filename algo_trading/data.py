@@ -480,14 +480,18 @@ def load_candles_from_csv(path: str | Path) -> list[Candle]:
         ]
 
 
-def write_candles_to_csv(candles: Sequence[Candle], path: str | Path) -> Path:
+def write_candles_to_csv(
+    candles: Sequence[Candle],
+    path: str | Path,
+    retention_days: int = HISTORICAL_RETENTION_DAYS,
+) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = ["open_time", "open", "high", "low", "close", "volume"]
     with output_path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for candle in trim_candles_to_retention(candles):
+        for candle in trim_candles_to_retention(candles, retention_days):
             writer.writerow(
                 {
                     "open_time": candle.open_time,

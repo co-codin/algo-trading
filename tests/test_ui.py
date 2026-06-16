@@ -238,6 +238,10 @@ class UiTests(unittest.TestCase):
         self.assertIn('class="live-control-section refresh-controls"', source)
         self.assertIn("const liveStrategySearch = ref(\"\");", source)
         self.assertIn("const filteredLiveStrategyGroups = computed<StrategyGroup[]>(() =>", source)
+        self.assertIn("strategyMatchesSearch(strategy, group, query)", source)
+        self.assertIn("function strategyMatchesSearch(", source)
+        self.assertIn("normalizeSearchText", source)
+        self.assertIn("group.label", source)
         self.assertIn('class="strategy-search"', source)
         self.assertIn(':placeholder="t(\'labels.strategySearch\')"', source)
         self.assertIn('v-for="group in filteredLiveStrategyGroups"', source)
@@ -286,6 +290,14 @@ class UiTests(unittest.TestCase):
         self.assertIn('"labels.strategyPickerHint": "Pick one preset or combine strategies by group."', i18n_source)
         self.assertIn('"strategyGroups.recommended": "Рекомендуемые"', i18n_source)
         self.assertIn('"labels.strategyPickerHint": "Выберите пресет или соберите набор по группам."', i18n_source)
+        for strategy_name in (
+            "adx-trend",
+            "ichimoku-breakout",
+            "mfi-reversal",
+            "parabolic-sar",
+            "zscore-reversion",
+        ):
+            self.assertIn(f'"{strategy_name}"', i18n_source)
 
     def test_live_page_exposes_popular_indicator_controls(self):
         root = Path(__file__).resolve().parents[1]
@@ -931,6 +943,22 @@ class UiTests(unittest.TestCase):
         self.assertIn("height: chartHeight(),", chart_source)
         self.assertIn("chart.value?.resize(chartEl.value.clientWidth, chartHeight());", chart_source)
         self.assertNotIn("chart.value?.resize(chartEl.value.clientWidth, 560);", chart_source)
+
+    def test_breadth_scalar_charts_render_as_derived_candles_instead_of_lines(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        chart_source = (
+            root / "frontend" / "src" / "components" / "TradingViewChart.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("deriveCandlesFromClose?: boolean;", chart_source)
+        self.assertIn("deriveCandlesFromClose: false", chart_source)
+        self.assertIn("function toDerivedCandleData(candles: Candle[]): CandlestickData[]", chart_source)
+        self.assertIn("const open = previousClose ?? close;", chart_source)
+        self.assertIn("derive-candles-from-close", app_source)
+        self.assertNotIn('series-type="line"', app_source)
 
     def test_breadth_page_uses_stacked_readable_group_layout(self):
         root = Path(__file__).resolve().parents[1]

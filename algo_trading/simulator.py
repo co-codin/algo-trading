@@ -435,6 +435,16 @@ def _required_candles(config: StrategyConfig) -> int:
         return max(config.slow_ema, config.vwap_period) + 1
     if strategy is StrategyName.SMA_CROSSOVER:
         return config.slow_ema + 1
+    if strategy is StrategyName.ADX_TREND:
+        return (config.atr_period * 2) + 1
+    if strategy is StrategyName.ICHIMOKU_BREAKOUT:
+        return 53
+    if strategy is StrategyName.MFI_REVERSAL:
+        return config.rsi_period + 2
+    if strategy is StrategyName.PARABOLIC_SAR:
+        return 3
+    if strategy is StrategyName.ZSCORE_REVERSION:
+        return config.bollinger_period + 2
     if strategy is StrategyName.COMBINED_SIGNALS:
         return max(
             _required_candles(replace(config, strategy=member))

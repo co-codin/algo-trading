@@ -7,16 +7,21 @@ from algo_trading.indicators import (
     atr,
     bollinger_width,
     commodity_channel_index,
+    directional_movement_index,
     ema,
+    ichimoku_cloud,
     keltner_channels,
+    money_flow_index,
     momentum,
     on_balance_volume,
+    parabolic_sar,
     previous_rolling_high,
     previous_rolling_low,
     rolling_mean,
     rolling_stddev,
     rolling_volume_mean,
     rolling_vwap,
+    rolling_zscore,
     rsi,
     stochastic_rsi,
     williams_r,
@@ -68,6 +73,17 @@ class StrategyContext:
     obv_values: list[float]
     obv_signal_values: list[float]
     volume_mean: list[float]
+    plus_di_values: list[float]
+    minus_di_values: list[float]
+    adx_values: list[float]
+    ichimoku_conversion: list[float]
+    ichimoku_base: list[float]
+    ichimoku_span_a: list[float]
+    ichimoku_span_b: list[float]
+    mfi_values: list[float]
+    parabolic_sar_values: list[float]
+    parabolic_sar_trend: list[int]
+    zscore_values: list[float]
 
 
 class TradingStrategy(Protocol):
@@ -276,6 +292,12 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         config.keltner_multiplier,
     )
     obv_values = on_balance_volume(candles)
+    plus_di_values, minus_di_values, adx_values = directional_movement_index(
+        candles,
+        config.atr_period,
+    )
+    ichimoku_conversion, ichimoku_base, ichimoku_span_a, ichimoku_span_b = ichimoku_cloud(candles)
+    parabolic_sar_values, parabolic_sar_trend = parabolic_sar(candles)
     return StrategyContext(
         candles=candles,
         closes=closes,
@@ -314,6 +336,17 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         obv_values=obv_values,
         obv_signal_values=rolling_mean(obv_values, config.volume_period),
         volume_mean=rolling_volume_mean(candles, config.volume_period),
+        plus_di_values=plus_di_values,
+        minus_di_values=minus_di_values,
+        adx_values=adx_values,
+        ichimoku_conversion=ichimoku_conversion,
+        ichimoku_base=ichimoku_base,
+        ichimoku_span_a=ichimoku_span_a,
+        ichimoku_span_b=ichimoku_span_b,
+        mfi_values=money_flow_index(candles, config.rsi_period),
+        parabolic_sar_values=parabolic_sar_values,
+        parabolic_sar_trend=parabolic_sar_trend,
+        zscore_values=rolling_zscore(closes, config.bollinger_period),
     )
 
 
@@ -1199,6 +1232,216 @@ class SmaCrossoverStrategy:
         return Signal(SignalType.HOLD, "no_signal")
 
 
+class AdxTrendStrategy:
+    name = StrategyName.ADX_TREND
+    description = "ADX trend strength with directional movement confirmation"
+    trend_threshold = 20.0
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.atr_period or index >= len(context.adx_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        trend_confirmed = context.adx_values[index] >= self.trend_threshold
+        if (
+            trend_confirmed
+            and _crossed_above(context.plus_di_values, context.minus_di_values, index)
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "adx_trend_long")
+        if (
+            trend_confirmed
+            and _crossed_below(context.plus_di_values, context.minus_di_values, index)
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "adx_trend_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.adx_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        if side is PositionSide.LONG and context.plus_di_values[index] < context.minus_di_values[index]:
+            return Signal(SignalType.EXIT_LONG, "adx_direction_lost")
+        if side is PositionSide.SHORT and context.minus_di_values[index] < context.plus_di_values[index]:
+            return Signal(SignalType.EXIT_SHORT, "adx_direction_lost")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class IchimokuBreakoutStrategy:
+    name = StrategyName.ICHIMOKU_BREAKOUT
+    description = "Ichimoku cloud breakout with conversion/base confirmation"
+    span_b_period = 52
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < self.span_b_period or index >= len(context.closes):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous_close = context.closes[index - 1]
+        current_close = context.closes[index]
+        previous_cloud_top = _ichimoku_cloud_top(context, index - 1)
+        previous_cloud_bottom = _ichimoku_cloud_bottom(context, index - 1)
+        current_cloud_top = _ichimoku_cloud_top(context, index)
+        current_cloud_bottom = _ichimoku_cloud_bottom(context, index)
+        bullish_confirmation = context.ichimoku_conversion[index] >= context.ichimoku_base[index]
+        bearish_confirmation = context.ichimoku_conversion[index] <= context.ichimoku_base[index]
+        if (
+            previous_close <= previous_cloud_top
+            and current_close > current_cloud_top
+            and bullish_confirmation
+            and _side_allowed(config, PositionSide.LONG)
+        ):
+            return Signal(SignalType.ENTER_LONG, "ichimoku_breakout_long")
+        if (
+            previous_close >= previous_cloud_bottom
+            and current_close < current_cloud_bottom
+            and bearish_confirmation
+            and _side_allowed(config, PositionSide.SHORT)
+        ):
+            return Signal(SignalType.ENTER_SHORT, "ichimoku_breakout_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.closes):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current_close = context.closes[index]
+        if side is PositionSide.LONG and current_close < _ichimoku_cloud_bottom(context, index):
+            return Signal(SignalType.EXIT_LONG, "ichimoku_cloud_lost")
+        if side is PositionSide.SHORT and current_close > _ichimoku_cloud_top(context, index):
+            return Signal(SignalType.EXIT_SHORT, "ichimoku_cloud_lost")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class MfiReversalStrategy:
+    name = StrategyName.MFI_REVERSAL
+    description = "Money Flow Index reversal after leaving extreme levels"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.rsi_period or index >= len(context.mfi_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous = context.mfi_values[index - 1]
+        current = context.mfi_values[index]
+        if previous <= config.rsi_oversold < current and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "mfi_reversal_long")
+        if previous >= config.rsi_overbought > current and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "mfi_reversal_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.mfi_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.mfi_values[index]
+        if side is PositionSide.LONG and current >= config.rsi_midline:
+            return Signal(SignalType.EXIT_LONG, "mfi_midline")
+        if side is PositionSide.SHORT and current <= config.rsi_midline:
+            return Signal(SignalType.EXIT_SHORT, "mfi_midline")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class ParabolicSarStrategy:
+    name = StrategyName.PARABOLIC_SAR
+    description = "Parabolic SAR trend flip"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index >= len(context.parabolic_sar_trend):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous = context.parabolic_sar_trend[index - 1]
+        current = context.parabolic_sar_trend[index]
+        if previous <= 0 < current and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "parabolic_sar_flip_long")
+        if previous >= 0 > current and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "parabolic_sar_flip_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.parabolic_sar_trend):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.parabolic_sar_trend[index]
+        if side is PositionSide.LONG and current < 0:
+            return Signal(SignalType.EXIT_LONG, "parabolic_sar_flip_short")
+        if side is PositionSide.SHORT and current > 0:
+            return Signal(SignalType.EXIT_SHORT, "parabolic_sar_flip_long")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class ZscoreReversionStrategy:
+    name = StrategyName.ZSCORE_REVERSION
+    description = "Rolling z-score mean reversion from statistical extremes"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index <= 0 or index < config.bollinger_period or index >= len(context.zscore_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        previous = context.zscore_values[index - 1]
+        current = context.zscore_values[index]
+        threshold = config.bollinger_stddev
+        if previous <= -threshold < current and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "zscore_reversion_long")
+        if previous >= threshold > current and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "zscore_reversion_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.zscore_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.zscore_values[index]
+        if side is PositionSide.LONG and current >= 0.0:
+            return Signal(SignalType.EXIT_LONG, "zscore_mean_reversion")
+        if side is PositionSide.SHORT and current <= 0.0:
+            return Signal(SignalType.EXIT_SHORT, "zscore_mean_reversion")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
 class CombinedSignalsStrategy:
     name = StrategyName.COMBINED_SIGNALS
     description = "Configurable strategy confirmation ensemble"
@@ -1383,6 +1626,14 @@ def _ribbon_bearish(context: StrategyContext, index: int) -> bool:
     )
 
 
+def _ichimoku_cloud_top(context: StrategyContext, index: int) -> float:
+    return max(context.ichimoku_span_a[index], context.ichimoku_span_b[index])
+
+
+def _ichimoku_cloud_bottom(context: StrategyContext, index: int) -> float:
+    return min(context.ichimoku_span_a[index], context.ichimoku_span_b[index])
+
+
 def _supertrend_direction(candles: list[Candle], config: StrategyConfig) -> list[int]:
     if not candles:
         return []
@@ -1486,5 +1737,10 @@ _STRATEGIES: dict[StrategyName, TradingStrategy] = {
     StrategyName.VOLUME_BREAKOUT: VolumeBreakoutStrategy(),
     StrategyName.VWAP_TREND_CONTINUATION: VwapTrendContinuationStrategy(),
     StrategyName.SMA_CROSSOVER: SmaCrossoverStrategy(),
+    StrategyName.ADX_TREND: AdxTrendStrategy(),
+    StrategyName.ICHIMOKU_BREAKOUT: IchimokuBreakoutStrategy(),
+    StrategyName.MFI_REVERSAL: MfiReversalStrategy(),
+    StrategyName.PARABOLIC_SAR: ParabolicSarStrategy(),
+    StrategyName.ZSCORE_REVERSION: ZscoreReversionStrategy(),
     StrategyName.COMBINED_SIGNALS: CombinedSignalsStrategy(),
 }

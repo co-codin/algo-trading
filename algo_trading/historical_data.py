@@ -22,7 +22,7 @@ HISTORICAL_DATA_DIR = os.environ.get("HISTORICAL_DATA_DIR", "historical_data")
 HISTORICAL_CSV_RETENTION_DAYS = int(
     os.environ.get(
         "HISTORICAL_CSV_RETENTION_DAYS",
-        os.environ.get("HISTORICAL_RETENTION_DAYS", "365"),
+        os.environ.get("HISTORICAL_RETENTION_DAYS", "1095"),
     )
 )
 HISTORICAL_CSV_PAGE_LIMIT = int(os.environ.get("HISTORICAL_CSV_PAGE_LIMIT", "1000"))
@@ -185,6 +185,7 @@ class HistoricalCsvRefreshService:
         write_candles_to_csv(
             self._trim_to_clock_retention(merged, reference_millis=end_time),
             spec.path,
+            retention_days=self._retention_days,
         )
         return True
 
@@ -196,7 +197,7 @@ class HistoricalCsvRefreshService:
         retained = self._trim_to_clock_retention(current)
         if len(retained) == len(current):
             return False
-        write_candles_to_csv(retained, csv_path)
+        write_candles_to_csv(retained, csv_path, retention_days=self._retention_days)
         return True
 
     def _trim_to_clock_retention(

@@ -44,6 +44,11 @@ class StrategyName(str, Enum):
     VOLUME_BREAKOUT = "volume-breakout"
     VWAP_TREND_CONTINUATION = "vwap-trend-continuation"
     SMA_CROSSOVER = "sma-crossover"
+    ADX_TREND = "adx-trend"
+    ICHIMOKU_BREAKOUT = "ichimoku-breakout"
+    MFI_REVERSAL = "mfi-reversal"
+    PARABOLIC_SAR = "parabolic-sar"
+    ZSCORE_REVERSION = "zscore-reversion"
     COMBINED_SIGNALS = "combined-signals"
 
 

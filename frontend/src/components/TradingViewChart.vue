@@ -25,12 +25,14 @@ const props = withDefaults(defineProps<{
   indicators?: IndicatorDefinition[];
   showSignals: boolean;
   resetKey: string;
+  deriveCandlesFromClose?: boolean;
   ariaLabel?: string;
   emptyLabel?: string;
   longSignalLabel?: string;
   shortSignalLabel?: string;
 }>(), {
   indicators: () => [],
+  deriveCandlesFromClose: false,
   ariaLabel: "TradingView live market chart",
   emptyLabel: "No candles returned",
   longSignalLabel: "Long",
@@ -41,10 +43,11 @@ type IndicatorChartSeries = {
   series: ISeriesApi<"Line", Time> | ISeriesApi<"Histogram", Time>;
   type: IndicatorSeriesDefinition["type"];
 };
+type PrimarySeries = ISeriesApi<"Candlestick", Time>;
 
 const chartEl = ref<HTMLElement | null>(null);
 const chart = shallowRef<IChartApi | null>(null);
-const series = shallowRef<ISeriesApi<"Candlestick"> | null>(null);
+const series = shallowRef<PrimarySeries | null>(null);
 const markerApi = shallowRef<ISeriesMarkersPluginApi<Time> | null>(null);
 const indicatorSeries = new Map<string, IndicatorChartSeries>();
 const DEFAULT_CHART_HEIGHT = 560;
@@ -78,9 +81,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  clearIndicatorSeries();
-  resizeObserver?.disconnect();
-  chart.value?.remove();
+  removeChart();
 });
 
 function renderChart() {
@@ -88,9 +89,8 @@ function renderChart() {
     return;
   }
   ensureChart();
-  const candleData = props.candles.map(toCandleData);
   preserveVisibleLogicalRange(() => {
-    series.value?.setData(candleData);
+    setPrimarySeriesData();
     syncIndicatorSeries();
     markerApi.value?.setMarkers(
       visibleMarkers.value
@@ -123,7 +123,10 @@ function preserveVisibleLogicalRange(update: () => void) {
 }
 
 function ensureChart() {
-  if (!chartEl.value || chart.value) {
+  if (!chartEl.value) {
+    return;
+  }
+  if (chart.value) {
     return;
   }
   chart.value = createChart(chartEl.value, {
@@ -153,7 +156,7 @@ function ensureChart() {
     wickUpColor: "#22ab94",
     wickDownColor: "#f23645",
   });
-  markerApi.value = createSeriesMarkers(series.value, []);
+  markerApi.value = createSeriesMarkers(series.value as ISeriesApi<SeriesType, Time>, []);
   resizeObserver = new ResizeObserver(() => {
     if (chartEl.value) {
       chart.value?.resize(chartEl.value.clientWidth, chartHeight());
@@ -174,6 +177,32 @@ function toCandleData(candle: Candle): CandlestickData {
     low: Number(candle.low),
     close: Number(candle.close),
   };
+}
+
+function setPrimarySeriesData() {
+  if (!series.value) {
+    return;
+  }
+  const candles = props.deriveCandlesFromClose
+    ? toDerivedCandleData(props.candles)
+    : props.candles.map(toCandleData);
+  series.value.setData(candles);
+}
+
+function toDerivedCandleData(candles: Candle[]): CandlestickData[] {
+  let previousClose: number | null = null;
+  return candles.map((candle) => {
+    const close = Number(candle.close);
+    const open = previousClose ?? close;
+    previousClose = close;
+    return {
+      time: toChartTime(candle.time),
+      open,
+      high: Math.max(open, close),
+      low: Math.min(open, close),
+      close,
+    };
+  });
 }
 
 function syncIndicatorSeries() {
@@ -251,6 +280,16 @@ function clearIndicatorSeries() {
     chart.value.removeSeries(entry.series as unknown as ISeriesApi<SeriesType, Time>);
   }
   indicatorSeries.clear();
+}
+
+function removeChart() {
+  clearIndicatorSeries();
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  markerApi.value = null;
+  series.value = null;
+  chart.value?.remove();
+  chart.value = null;
 }
 
 function resizeIndicatorPanes() {
