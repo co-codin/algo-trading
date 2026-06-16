@@ -87,11 +87,13 @@ Run with Docker Compose:
 make compose-up
 ```
 
-Both Docker paths mount local `runs/` for command-line simulation outputs. Docker Compose also mounts `historical_data/` so market-breadth CSV history persists across rebuilds.
+Both Docker paths mount local `runs/` for command-line simulation outputs. Docker Compose also mounts `historical_data/` so market-breadth and candle CSV history persists across rebuilds.
 
 Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template and set `MOEX_API_KEY` or `MOEXALGO_API_KEY` there when MOEX authenticated data is needed. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker.
 
-The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file.
+Historical CSVs are retained for the latest 365 days only. The web app refreshes existing candle CSVs in `historical_data/` every hour (`HISTORICAL_CSV_REFRESH_SECONDS=3600`) and runs a daily prune (`HISTORICAL_CSV_PRUNE_SECONDS=86400`) so rows older than one year are removed. Breadth CSVs use the same 365-day retention.
+
+The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file containing only the latest 365 days.
 
 List the most-traded Binance USDT crypto pairs by current 24h quote volume:
 

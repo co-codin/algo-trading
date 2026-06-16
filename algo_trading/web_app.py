@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 import mimetypes
 import os
+import time
 import urllib.parse
 from http import HTTPStatus
 from pathlib import Path
@@ -25,6 +26,7 @@ from algo_trading.auth import (
 )
 from algo_trading.data import BinanceMarketDataClient, MarketDataClient
 from algo_trading.env import load_env_file
+from algo_trading.historical_data import HistoricalCsvRefreshService
 from algo_trading.market_breadth import MarketBreadthService
 from algo_trading.ui import (
     WEB_DIST_ROOT,
@@ -39,6 +41,8 @@ from algo_trading.ui import (
 ADMIN_EMAIL = "cuiyeqing960904@gmail.com"
 ADMIN_PASSWORD = "Vladimir960904"
 EXPIRY_CHECK_SECONDS = 60 * 60
+HISTORICAL_CSV_REFRESH_SECONDS = 60 * 60
+HISTORICAL_CSV_PRUNE_SECONDS = 24 * 60 * 60
 
 
 def parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
@@ -60,7 +64,10 @@ def create_app(
     client_factory: Callable[[], MarketDataClient] = BinanceMarketDataClient,
     auth_store: AuthStore | None = None,
     market_breadth_service: Any | None = None,
+    historical_csv_service: Any | None = None,
     expiry_check_seconds: float | None = None,
+    historical_csv_refresh_seconds: float | None = None,
+    historical_csv_prune_seconds: float | None = None,
     seed_admin: bool = True,
     admin_seed_password: str | None = None,
 ) -> FastAPI:
@@ -70,12 +77,34 @@ def create_app(
     if seed_admin:
         store.seed_admin_user(admin_email(), admin_seed_password or admin_password())
     breadth_service = market_breadth_service or MarketBreadthService()
+    csv_service = historical_csv_service or HistoricalCsvRefreshService()
     expiry_interval = (
         expiry_check_seconds
         if expiry_check_seconds is not None
         else float(os.environ.get("USER_EXPIRY_CHECK_SECONDS", EXPIRY_CHECK_SECONDS))
     )
+    csv_refresh_interval = (
+        historical_csv_refresh_seconds
+        if historical_csv_refresh_seconds is not None
+        else float(
+            os.environ.get(
+                "HISTORICAL_CSV_REFRESH_SECONDS",
+                HISTORICAL_CSV_REFRESH_SECONDS,
+            )
+        )
+    )
+    csv_prune_interval = (
+        historical_csv_prune_seconds
+        if historical_csv_prune_seconds is not None
+        else float(
+            os.environ.get(
+                "HISTORICAL_CSV_PRUNE_SECONDS",
+                HISTORICAL_CSV_PRUNE_SECONDS,
+            )
+        )
+    )
     expiry_task: asyncio.Task[None] | None = None
+    historical_csv_task: asyncio.Task[None] | None = None
 
     def require_user(
         session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
@@ -110,21 +139,49 @@ def create_app(
             store.deactivate_expired_users()
             await asyncio.sleep(max(1.0, expiry_interval))
 
+    async def maintain_historical_csvs_loop() -> None:
+        last_prune = 0.0
+        while True:
+            await asyncio.sleep(max(0.01, csv_refresh_interval))
+            await run_background_call(csv_service.refresh_all)
+            refresh_breadth = getattr(breadth_service, "refresh_default_symbols", None)
+            if callable(refresh_breadth):
+                await run_background_call(refresh_breadth)
+            if csv_prune_interval <= 0:
+                continue
+            now = time.monotonic()
+            if now - last_prune < csv_prune_interval:
+                continue
+            prune_all = getattr(csv_service, "prune_all", None)
+            if callable(prune_all):
+                await run_background_call(prune_all)
+            last_prune = now
+
+    async def run_background_call(callback: Callable[[], Any]) -> None:
+        with suppress(Exception):
+            await asyncio.to_thread(callback)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        nonlocal expiry_task
+        nonlocal expiry_task, historical_csv_task
         store.deactivate_expired_users()
         if expiry_interval > 0:
             expiry_task = asyncio.create_task(deactivate_expired_users_loop())
+        if csv_refresh_interval > 0:
+            historical_csv_task = asyncio.create_task(maintain_historical_csvs_loop())
         try:
             yield
         finally:
-            if expiry_task is None:
-                return
-            expiry_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await expiry_task
+            if expiry_task is not None:
+                expiry_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await expiry_task
             expiry_task = None
+            if historical_csv_task is not None:
+                historical_csv_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await historical_csv_task
+            historical_csv_task = None
 
     app = FastAPI(title="Algo Trading", lifespan=lifespan)
 

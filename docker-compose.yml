@@ -30,6 +30,11 @@ services:
       PYTHONUNBUFFERED: "1"
       DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading
       MARKET_BREADTH_DATA_DIR: /app/historical_data/breadth
+      MARKET_BREADTH_RETENTION_DAYS: "365"
+      HISTORICAL_DATA_DIR: /app/historical_data
+      HISTORICAL_CSV_RETENTION_DAYS: "365"
+      HISTORICAL_CSV_REFRESH_SECONDS: "3600"
+      HISTORICAL_CSV_PRUNE_SECONDS: "86400"
       ADMIN_EMAIL: ${ADMIN_EMAIL:-cuiyeqing960904@gmail.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Vladimir960904}
       MOEX_API_KEY: ${MOEX_API_KEY:-}

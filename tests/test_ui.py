@@ -99,7 +99,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('<select v-model="liveLimit"', source)
         self.assertIn('class="strategy-picker live-strategy-field"', source)
         self.assertIn("toggleLiveStrategy(strategy.name)", source)
-        self.assertIn('v-for="group in liveStrategyGroups"', source)
+        self.assertIn('v-for="group in filteredLiveStrategyGroups"', source)
         self.assertIn('value: "BTCUSDT"', source)
         self.assertIn('value: "ETHUSDT"', source)
         self.assertIn('value: "1m"', source)
@@ -126,6 +126,41 @@ class UiTests(unittest.TestCase):
         self.assertIn("strategy: liveStrategyRequest.value", source)
         self.assertIn("watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], () => {", source)
         self.assertNotIn('<select v-model="settings.strategy"', source)
+
+    def test_live_controls_are_grouped_and_strategy_menu_is_searchable(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
+        style_source = (root / "frontend" / "src" / "style.css").read_text(encoding="utf-8")
+
+        self.assertIn('class="live-control-section market-controls"', source)
+        self.assertIn('class="live-control-section signal-controls"', source)
+        self.assertIn('class="live-control-section refresh-controls"', source)
+        self.assertIn("const liveStrategySearch = ref(\"\");", source)
+        self.assertIn("const filteredLiveStrategyGroups = computed<StrategyGroup[]>(() =>", source)
+        self.assertIn('class="strategy-search"', source)
+        self.assertIn(':placeholder="t(\'labels.strategySearch\')"', source)
+        self.assertIn('v-for="group in filteredLiveStrategyGroups"', source)
+        self.assertIn('"labels.strategySearch": "Search strategies"', i18n_source)
+        self.assertIn('"labels.strategySearch": "Поиск стратегий"', i18n_source)
+        self.assertIn(".live-control-section", style_source)
+        self.assertIn(".market-controls", style_source)
+        self.assertIn(".signal-controls", style_source)
+        self.assertIn(".refresh-controls", style_source)
+
+    def test_removed_frontend_styles_do_not_keep_dead_layout_classes(self):
+        style_source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "style.css"
+        ).read_text(encoding="utf-8")
+
+        for stale_class in (
+            ".workspace",
+            ".lab-layout",
+            ".symbols-row",
+            ".symbol-list",
+            ".symbol-chip",
+        ):
+            self.assertNotIn(stale_class, style_source)
 
     def test_frontend_defines_human_strategy_titles_and_groups(self):
         root = Path(__file__).resolve().parents[1]

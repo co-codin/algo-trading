@@ -8,7 +8,7 @@ import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Protocol
 
 import httpx
@@ -24,6 +24,9 @@ MARKET_BREADTH_CACHE_TTL_SECONDS = int(
 MARKET_BREADTH_DATA_DIR = os.environ.get(
     "MARKET_BREADTH_DATA_DIR",
     "historical_data/breadth",
+)
+MARKET_BREADTH_RETENTION_DAYS = int(
+    os.environ.get("MARKET_BREADTH_RETENTION_DAYS", "365")
 )
 BARCHART_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -201,11 +204,13 @@ class MarketBreadthService:
         ttl_seconds: int = MARKET_BREADTH_CACHE_TTL_SECONDS,
         data_dir: str | Path | None = MARKET_BREADTH_DATA_DIR,
         refresh_seconds: int = MARKET_BREADTH_CACHE_TTL_SECONDS,
+        retention_days: int = MARKET_BREADTH_RETENTION_DAYS,
     ) -> None:
         self._client = client or BarchartBreadthClient()
         self._ttl_seconds = max(0, int(ttl_seconds))
         self._data_dir = Path(data_dir) if data_dir else None
         self._refresh_seconds = max(0, int(refresh_seconds))
+        self._retention_days = max(0, int(retention_days))
         self._cache: dict[str, tuple[float, list[MarketBreadthBar]]] = {}
         self._lock = threading.Lock()
 
@@ -231,6 +236,17 @@ class MarketBreadthService:
             self._cache[symbol] = (now + self._ttl_seconds, bars)
         return list(bars)
 
+    def refresh_default_symbols(self) -> dict[str, int]:
+        summary = {"refreshed": 0, "failed": 0}
+        for symbol in default_symbols():
+            try:
+                self.bars_for_symbol(symbol)
+            except Exception:
+                summary["failed"] += 1
+            else:
+                summary["refreshed"] += 1
+        return summary
+
     def _fetch_and_store_bars(
         self,
         symbol: str,
@@ -245,7 +261,10 @@ class MarketBreadthService:
             raise
         parsed = parse_barchart_csv(body)
         fetched_bars = matching_symbol_bars(symbol, parsed)
-        bars = merge_breadth_bars([*stored_bars, *fetched_bars])
+        bars = trim_breadth_bars_to_retention(
+            [*stored_bars, *fetched_bars],
+            self._retention_days,
+        )
         if not bars:
             bars = fetched_bars
 
@@ -258,7 +277,11 @@ class MarketBreadthService:
         cache_path = self._csv_path(symbol)
         if not cache_path or not cache_path.is_file():
             return []
-        return matching_symbol_bars(symbol, parse_barchart_csv(cache_path.read_bytes()))
+        bars = matching_symbol_bars(symbol, parse_barchart_csv(cache_path.read_bytes()))
+        retained = trim_breadth_bars_to_retention(bars, self._retention_days)
+        if len(retained) != len(bars):
+            write_breadth_bars_to_csv(cache_path, retained)
+        return retained
 
     def _csv_is_fresh(self, path: Path) -> bool:
         if self._refresh_seconds <= 0:
@@ -324,7 +347,7 @@ def write_breadth_bars_to_csv(path: Path, bars: list[MarketBreadthBar]) -> Path:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=MARKET_BREADTH_CSV_FIELDS)
         writer.writeheader()
-        for bar in merge_breadth_bars(bars):
+        for bar in trim_breadth_bars_to_retention(bars):
             writer.writerow(
                 {
                     "symbol": bar.symbol,
@@ -337,6 +360,18 @@ def write_breadth_bars_to_csv(path: Path, bars: list[MarketBreadthBar]) -> Path:
                 }
             )
     return path
+
+
+def trim_breadth_bars_to_retention(
+    bars: list[MarketBreadthBar],
+    retention_days: int = MARKET_BREADTH_RETENTION_DAYS,
+) -> list[MarketBreadthBar]:
+    ordered = merge_breadth_bars(bars)
+    if retention_days <= 0 or not ordered:
+        return ordered
+    latest_date = max(bar.date for bar in ordered)
+    cutoff = latest_date - timedelta(days=retention_days)
+    return [bar for bar in ordered if bar.date >= cutoff]
 
 
 def matching_symbol_bars(

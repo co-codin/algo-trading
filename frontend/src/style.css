@@ -236,17 +236,6 @@ main {
   padding: 12px 18px 18px;
 }
 
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.lab-layout {
-  grid-template-columns: minmax(320px, 460px) minmax(0, 1fr);
-}
-
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -323,13 +312,6 @@ main {
   color: var(--ink);
 }
 
-.symbols-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 76px 104px;
-  gap: 10px;
-  align-items: end;
-}
-
 .field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -365,22 +347,6 @@ select:focus,
 button:focus {
   outline: 2px solid rgba(41, 98, 255, 0.45);
   outline-offset: 1px;
-}
-
-.symbol-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 30px;
-  margin: 10px 0 14px;
-}
-
-.symbol-chip {
-  min-height: 28px;
-  border-color: rgba(34, 171, 148, 0.35);
-  background: rgba(34, 171, 148, 0.08);
-  color: var(--long);
-  font-size: 13px;
 }
 
 .status {
@@ -530,17 +496,37 @@ button:focus {
 
 .live-controls {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-  gap: 10px;
-  align-items: end;
+  grid-template-columns: minmax(360px, 1.15fr) minmax(390px, 1.55fr) minmax(180px, 0.6fr);
+  gap: 12px;
+  align-items: stretch;
   margin-bottom: 0;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
 
+.live-control-section {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+}
+
+.market-controls {
+  grid-template-columns: minmax(120px, 0.9fr) minmax(180px, 1.3fr) minmax(82px, 0.55fr) minmax(86px, 0.55fr);
+}
+
+.signal-controls {
+  grid-template-columns: minmax(240px, 1.5fr) minmax(116px, 0.7fr) minmax(116px, 0.7fr) minmax(110px, 0.65fr);
+}
+
+.refresh-controls {
+  grid-template-columns: minmax(92px, 1fr);
+  align-content: end;
+}
+
 .live-strategy-field {
-  grid-column: span 2;
+  min-width: 0;
 }
 
 .symbol-picker {
@@ -629,6 +615,10 @@ button:focus {
   background: var(--panel-raised);
   padding: 10px;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+}
+
+.strategy-search {
+  min-height: 34px;
 }
 
 .strategy-actions {
@@ -978,13 +968,12 @@ th {
 
 @media (max-width: 1320px) {
   .live-controls {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 1060px) {
-  .topbar,
-  .workspace {
+  .topbar {
     grid-template-columns: 1fr;
   }
 
@@ -1010,14 +999,16 @@ th {
 }
 
 @media (max-width: 720px) {
-  .live-controls,
   .live-market-strip,
   .breadth-summary {
     grid-template-columns: 1fr;
   }
 
-  .live-strategy-field {
-    grid-column: auto;
+  .live-control-section,
+  .market-controls,
+  .signal-controls,
+  .refresh-controls {
+    grid-template-columns: 1fr;
   }
 
   .profile-grid {
@@ -1043,7 +1034,6 @@ th {
     padding-right: 12px;
   }
 
-  .symbols-row,
   .field-grid {
     grid-template-columns: 1fr;
   }

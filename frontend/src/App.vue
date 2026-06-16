@@ -270,6 +270,7 @@ const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
 const liveConsensusMinConfirmations = ref(2);
 const liveMaxSignals = ref(80);
 const liveSelectedStrategies = ref<string[]>(["ema-rsi"]);
+const liveStrategySearch = ref("");
 const liveVisibleIndicators = ref<string[]>([...defaultLiveIndicators]);
 const showSignals = ref(true);
 let liveTimer = 0;
@@ -378,6 +379,26 @@ const liveStrategyGroups = computed<StrategyGroup[]>(() => {
     });
   }
   return groups;
+});
+const filteredLiveStrategyGroups = computed<StrategyGroup[]>(() => {
+  const query = liveStrategySearch.value.trim().toLowerCase();
+  if (!query) {
+    return liveStrategyGroups.value;
+  }
+  return liveStrategyGroups.value
+    .map((group) => {
+      const strategies = group.strategies.filter((strategy) =>
+        `${strategy.title} ${strategy.description} ${strategy.name}`
+          .toLowerCase()
+          .includes(query),
+      );
+      return {
+        ...group,
+        strategyNames: strategies.map((strategy) => strategy.name),
+        strategies,
+      };
+    })
+    .filter((group) => group.strategies.length > 0);
 });
 const activeLiveSymbolOptions = computed(
   () => liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions,
@@ -1200,139 +1221,160 @@ function errorMessage(error: unknown): string {
         </div>
       </div>
       <div class="live-controls">
-        <label>
-          <span>{{ t("labels.market") }}</span>
-          <select v-model="liveMarket">
-            <option
-              v-for="option in liveMarketOptions"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label class="symbol-picker">
-          <span>{{ t("labels.symbol") }}</span>
-          <input
-            v-model.trim="liveSymbolSearch"
-            autocomplete="off"
-            type="search"
-            :placeholder="t('labels.symbolSearch')"
-          >
-          <select v-model="liveSymbol">
-            <option v-if="!filteredLiveSymbolOptions.length" disabled value="">
-              {{ t("empty.noMatchingSymbols") }}
-            </option>
-            <option
-              v-for="option in filteredLiveSymbolOptions"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label>
-          <span>{{ t("labels.interval") }}</span>
-          <select v-model="liveInterval">
-            <option
-              v-for="option in liveIntervalOptions"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label>
-          <span>{{ t("labels.candles") }}</span>
-          <select v-model="liveLimit">
-            <option
-              v-for="option in liveCandleOptions"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <div class="strategy-picker live-strategy-field">
-          <strong class="strategy-picker-label">{{ t("labels.strategy") }}</strong>
-          <details class="strategy-menu" :aria-label="t('labels.strategyPickerHint')">
-            <summary class="strategy-summary">
-              <span>
-                <b>{{ activeLiveStrategyLabel }}</b>
-                <small>{{ selectedLiveStrategyPreview }}</small>
-              </span>
-            </summary>
-            <div class="strategy-menu-body">
-              <div class="strategy-actions">
-                <button class="secondary" type="button" @click="selectAllLiveStrategies">
-                  {{ t("actions.selectAll") }}
-                </button>
-                <button class="secondary" type="button" @click="clearLiveStrategies">
-                  {{ t("actions.clear") }}
-                </button>
-              </div>
-              <section
-                v-for="group in liveStrategyGroups"
-                :key="group.id"
-                class="strategy-group"
+        <div class="live-control-section market-controls">
+          <label>
+            <span>{{ t("labels.market") }}</span>
+            <select v-model="liveMarket">
+              <option
+                v-for="option in liveMarketOptions"
+                :key="option.value"
+                :value="option.value"
               >
-                <div class="strategy-group-heading">
-                  <strong>{{ group.label }}</strong>
-                  <button
-                    class="secondary"
-                    type="button"
-                    @click="selectLiveStrategyGroup(group.strategyNames)"
-                  >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label class="symbol-picker">
+            <span>{{ t("labels.symbol") }}</span>
+            <input
+              v-model.trim="liveSymbolSearch"
+              autocomplete="off"
+              type="search"
+              :placeholder="t('labels.symbolSearch')"
+            >
+            <select v-model="liveSymbol">
+              <option v-if="!filteredLiveSymbolOptions.length" disabled value="">
+                {{ t("empty.noMatchingSymbols") }}
+              </option>
+              <option
+                v-for="option in filteredLiveSymbolOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>{{ t("labels.interval") }}</span>
+            <select v-model="liveInterval">
+              <option
+                v-for="option in liveIntervalOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>{{ t("labels.candles") }}</span>
+            <select v-model="liveLimit">
+              <option
+                v-for="option in liveCandleOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <div class="live-control-section signal-controls">
+          <div class="strategy-picker live-strategy-field">
+            <strong class="strategy-picker-label">{{ t("labels.strategy") }}</strong>
+            <details class="strategy-menu" :aria-label="t('labels.strategyPickerHint')">
+              <summary class="strategy-summary">
+                <span>
+                  <b>{{ activeLiveStrategyLabel }}</b>
+                  <small>{{ selectedLiveStrategyPreview }}</small>
+                </span>
+              </summary>
+              <div class="strategy-menu-body">
+                <input
+                  v-model.trim="liveStrategySearch"
+                  class="strategy-search"
+                  autocomplete="off"
+                  type="search"
+                  :placeholder="t('labels.strategySearch')"
+                >
+                <div class="strategy-actions">
+                  <button class="secondary" type="button" @click="selectAllLiveStrategies">
                     {{ t("actions.selectAll") }}
                   </button>
+                  <button class="secondary" type="button" @click="clearLiveStrategies">
+                    {{ t("actions.clear") }}
+                  </button>
                 </div>
-                <label
-                  v-for="strategy in group.strategies"
-                  :key="strategy.name"
-                  class="strategy-row"
-                  :class="{ 'is-active': liveSelectedStrategies.includes(strategy.name) }"
+                <section
+                  v-for="group in filteredLiveStrategyGroups"
+                  :key="group.id"
+                  class="strategy-group"
                 >
-                  <input
-                    type="checkbox"
-                    :checked="liveSelectedStrategies.includes(strategy.name)"
-                    @change="toggleLiveStrategy(strategy.name)"
+                  <div class="strategy-group-heading">
+                    <strong>{{ group.label }}</strong>
+                    <button
+                      class="secondary"
+                      type="button"
+                      @click="selectLiveStrategyGroup(group.strategyNames)"
+                    >
+                      {{ t("actions.selectAll") }}
+                    </button>
+                  </div>
+                  <label
+                    v-for="strategy in group.strategies"
+                    :key="strategy.name"
+                    class="strategy-row"
+                    :class="{ 'is-active': liveSelectedStrategies.includes(strategy.name) }"
                   >
-                  <span class="strategy-row-copy">
-                    <b>{{ strategyTitle(strategy.name) }}</b>
-                    <small>{{ strategy.description }}</small>
-                  </span>
-                </label>
-              </section>
-            </div>
-          </details>
+                    <input
+                      type="checkbox"
+                      :checked="liveSelectedStrategies.includes(strategy.name)"
+                      @change="toggleLiveStrategy(strategy.name)"
+                    >
+                    <span class="strategy-row-copy">
+                      <b>{{ strategyTitle(strategy.name) }}</b>
+                      <small>{{ strategy.description }}</small>
+                    </span>
+                  </label>
+                </section>
+              </div>
+            </details>
+          </div>
+          <label v-if="isMultiStrategyLive">
+            <span>{{ t("labels.signalView") }}</span>
+            <select v-model="liveSignalDisplayMode">
+              <option
+                v-for="option in liveSignalDisplayOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label v-if="isMultiStrategyLive && liveSignalDisplayMode === 'consensus'">
+            <span>{{ t("labels.minConfirmations") }}</span>
+            <input v-model.number="liveConsensusMinConfirmations" type="number" min="1" max="20">
+          </label>
+          <label v-if="isMultiStrategyLive">
+            <span>{{ t("labels.maxMarkers") }}</span>
+            <input v-model.number="liveMaxSignals" type="number" min="10" max="500">
+          </label>
+          <label class="toggle-row">
+            <input v-model="showSignals" type="checkbox">
+            <span>{{ t("labels.strategyMarkers") }}</span>
+          </label>
         </div>
-        <label v-if="isMultiStrategyLive">
-          <span>{{ t("labels.signalView") }}</span>
-          <select v-model="liveSignalDisplayMode">
-            <option
-              v-for="option in liveSignalDisplayOptions"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label v-if="isMultiStrategyLive && liveSignalDisplayMode === 'consensus'">
-          <span>{{ t("labels.minConfirmations") }}</span>
-          <input v-model.number="liveConsensusMinConfirmations" type="number" min="1" max="20">
-        </label>
-        <label v-if="isMultiStrategyLive">
-          <span>{{ t("labels.maxMarkers") }}</span>
-          <input v-model.number="liveMaxSignals" type="number" min="10" max="500">
-        </label>
-        <label><span>{{ t("labels.refreshSec") }}</span><input v-model="liveRefresh" type="number" min="2" max="300"></label>
-        <label class="toggle-row"><input v-model="showSignals" type="checkbox"><span>{{ t("labels.strategyMarkers") }}</span></label>
-        <button class="primary" type="button" @click="refreshLiveChart">{{ t("actions.refreshChart") }}</button>
+        <div class="live-control-section refresh-controls">
+          <label>
+            <span>{{ t("labels.refreshSec") }}</span>
+            <input v-model="liveRefresh" type="number" min="2" max="300">
+          </label>
+          <button class="primary" type="button" @click="refreshLiveChart">
+            {{ t("actions.refreshChart") }}
+          </button>
+        </div>
       </div>
       <div class="indicator-picker">
         <span>{{ t("labels.indicators") }}</span>

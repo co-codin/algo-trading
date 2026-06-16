@@ -189,6 +189,42 @@ $S5FD,2025-01-04,57,62,56,60,120
             saved_lines = cache_file.read_text(encoding="utf-8").splitlines()
             self.assertIn("$S5FD,2025-01-04,57.0,62.0,56.0,60.0,120.0", saved_lines)
 
+    def test_service_retains_only_latest_one_year_when_rewriting_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            cache_file = data_dir / "S5FD.csv"
+            cache_file.write_text(
+                "symbol,date,open,high,low,close,volume\n"
+                "$S5FD,2025-06-15,40,45,39,41,90\n"
+                "$S5FD,2025-06-16,45,55,40,52,100\n",
+                encoding="utf-8",
+            )
+            stale_time = time.time() - 7200
+            os.utime(cache_file, (stale_time, stale_time))
+            fake_client = FakeBreadthClient(
+                {
+                    "$S5FD": b"""symbol,date,open,high,low,close,volume
+$S5FD,2026-06-16,57,62,56,60,120
+"""
+                }
+            )
+            service = MarketBreadthService(
+                client=fake_client,
+                ttl_seconds=0,
+                data_dir=data_dir,
+                refresh_seconds=3600,
+            )
+
+            bars = service.bars_for_symbol("$S5FD")
+
+            self.assertEqual(
+                [bar.date.isoformat() for bar in bars],
+                ["2025-06-16", "2026-06-16"],
+            )
+            saved_text = cache_file.read_text(encoding="utf-8")
+            self.assertNotIn("2025-06-15", saved_text)
+            self.assertIn("2026-06-16", saved_text)
+
     def test_service_serves_saved_csv_when_hourly_refresh_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp)

@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -22,6 +23,35 @@ class WebAppTests(unittest.TestCase):
             **overrides,
         )
         return TestClient(app)
+
+    def test_app_runs_historical_csv_maintenance_on_interval(self):
+        class FakeHistoricalCsvService:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def refresh_all(self) -> None:
+                self.calls += 1
+
+        class FakeMarketBreadthRefreshService:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def refresh_default_symbols(self) -> None:
+                self.calls += 1
+
+        service = FakeHistoricalCsvService()
+        breadth_service = FakeMarketBreadthRefreshService()
+        client = self.make_client(
+            historical_csv_service=service,
+            market_breadth_service=breadth_service,
+            historical_csv_refresh_seconds=0.01,
+        )
+
+        with client:
+            time.sleep(0.05)
+
+        self.assertGreaterEqual(service.calls, 1)
+        self.assertGreaterEqual(breadth_service.calls, 1)
 
     def test_trading_api_requires_authentication(self):
         client = self.make_client()

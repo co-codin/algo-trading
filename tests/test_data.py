@@ -1,6 +1,8 @@
 import json
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from algo_trading.data import (
@@ -8,7 +10,10 @@ from algo_trading.data import (
     MoexSharesMarketDataClient,
     YahooFuturesMarketDataClient,
     _candle_from_kline,
+    load_candles_from_csv,
+    write_candles_to_csv,
 )
+from algo_trading.models import Candle
 
 
 class FakeResponse:
@@ -26,6 +31,25 @@ class FakeResponse:
 
 
 class DataTests(unittest.TestCase):
+    def test_write_candles_to_csv_retains_only_latest_one_year(self):
+        day_ms = 24 * 60 * 60 * 1000
+        latest = int(datetime(2026, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
+        candles = [
+            _candle(latest - (366 * day_ms), 10.0),
+            _candle(latest - (365 * day_ms), 11.0),
+            _candle(latest, 12.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "BTCUSDT-1d-365d.csv"
+
+            write_candles_to_csv(candles, path)
+            saved = load_candles_from_csv(path)
+
+        self.assertEqual(
+            [candle.open_time for candle in saved],
+            [latest - (365 * day_ms), latest],
+        )
+
     def test_kline_parser_rejects_short_rows_with_clear_error(self):
         with self.assertRaisesRegex(ValueError, "invalid kline row"):
             _candle_from_kline([1, "10"])
@@ -493,6 +517,17 @@ def _binance_kline(open_time: int) -> list[object]:
         "0",
         "0",
     ]
+
+
+def _candle(open_time: int, close: float) -> Candle:
+    return Candle(
+        open_time=open_time,
+        open=close,
+        high=close + 1.0,
+        low=close - 1.0,
+        close=close,
+        volume=1.0,
+    )
 
 
 if __name__ == "__main__":

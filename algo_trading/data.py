@@ -39,6 +39,8 @@ class TransientMarketDataError(RuntimeError):
 
 
 _BINANCE_MAX_KLINE_LIMIT = 1000
+_MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
+HISTORICAL_RETENTION_DAYS = int(os.environ.get("HISTORICAL_RETENTION_DAYS", "365"))
 MOEX_PUBLIC_ISS_BASE_URL = "https://iss.moex.com/iss"
 MOEX_AUTHENTICATED_ISS_BASE_URL = "https://apim.moex.com/iss"
 MOEX_BLUECHIP_SYMBOLS = frozenset(
@@ -438,7 +440,7 @@ def write_candles_to_csv(candles: Sequence[Candle], path: str | Path) -> Path:
     with output_path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for candle in candles:
+        for candle in trim_candles_to_retention(candles):
             writer.writerow(
                 {
                     "open_time": candle.open_time,
@@ -450,6 +452,18 @@ def write_candles_to_csv(candles: Sequence[Candle], path: str | Path) -> Path:
                 }
             )
     return output_path
+
+
+def trim_candles_to_retention(
+    candles: Sequence[Candle],
+    retention_days: int = HISTORICAL_RETENTION_DAYS,
+) -> list[Candle]:
+    deduped = {candle.open_time: candle for candle in candles}
+    ordered = sorted(deduped.values(), key=lambda candle: candle.open_time)
+    if retention_days <= 0 or not ordered:
+        return ordered
+    cutoff = ordered[-1].open_time - (retention_days * _MILLISECONDS_PER_DAY)
+    return [candle for candle in ordered if candle.open_time >= cutoff]
 
 
 def _candle_from_kline(row: Sequence[Any]) -> Candle:

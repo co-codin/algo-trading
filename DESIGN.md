@@ -2,7 +2,7 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-06-15
+- Last refreshed: 2026-06-16
 - Primary product surfaces: Vue control panel, `/live` chart, `/breadth` breadth dashboard, `/profile`, `/admin`.
 - Evidence reviewed: `README.md`, `frontend/src/App.vue`, `frontend/src/style.css`, `frontend/src/components/TradingViewChart.vue`.
 
@@ -14,7 +14,7 @@
 ## Product goals
 - Goals: Let a user inspect public market candles, overlay simulated strategy markers, monitor breadth history, and manage local user access.
 - Non-goals: Real order placement, portfolio allocation, or guaranteed profitability.
-- Success signals: `/live` is chart-first, key controls are visible at a glance, marker meaning is clear, breadth charts are easy to inspect, and all trading actions remain simulated.
+- Success signals: `/live` is chart-first, key controls are grouped by market, signal, and refresh intent, marker meaning is clear, breadth charts are easy to inspect, CSV history stays to one year, and all trading actions remain simulated.
 
 ## Personas and jobs
 - Primary personas: Crypto trader, index trader, Russian equities watcher, developer evaluating signal logic.
@@ -41,7 +41,7 @@
 
 ## Components
 - Existing components to reuse: `TradingViewChart`, tab navigation, panel, status pill, control inputs, metric rows, tables.
-- New/changed components: Live market strip, all-strategies marker controls, breadth chart grid, admin user table, profile form.
+- New/changed components: Live market strip, grouped live controls, searchable strategy picker, all-strategies marker controls, breadth chart grid, admin user table, profile form.
 - Variants and states: Busy/error status colors, selected tab, marker toggles, empty chart state.
 - Token/component ownership: CSS variables in `frontend/src/style.css`; chart palette in `TradingViewChart.vue`.
 
@@ -73,7 +73,7 @@
 ## Implementation constraints
 - Framework/styling system: Vue 3 plus plain CSS variables.
 - Design-token constraints: Keep tokens centralized in `frontend/src/style.css`; avoid new design-system dependencies.
-- Performance constraints: Chart refreshes must stay bounded by selected candle count.
+- Performance constraints: Chart refreshes must stay bounded by selected candle count; historical CSV maintenance refreshes hourly and prunes rows older than one year daily.
 - Compatibility constraints: Served by the Python UI and Docker image; no external account credentials.
 - Test/screenshot expectations: Static UI tests cover key selectors and terminal palette; `make check` and Docker smoke tests verify integration.
 
