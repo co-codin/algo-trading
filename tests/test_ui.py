@@ -372,6 +372,33 @@ class UiTests(unittest.TestCase):
         self.assertIn("refreshLiveChart();", source)
         self.assertIn("market: liveMarket.value", source)
 
+    def test_live_page_shows_chart_loader_while_fetching_data(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        style_source = (root / "frontend" / "src" / "style.css").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('const liveChartLoading = computed(() => liveStatusType.value === "busy")', app_source)
+        self.assertIn(':class="{ \'is-loading\': liveChartLoading }"', app_source)
+        self.assertIn('v-if="liveChartLoading"', app_source)
+        self.assertIn('class="chart-loader"', app_source)
+        self.assertIn('role="status"', app_source)
+        self.assertIn('aria-live="polite"', app_source)
+        self.assertIn('class="chart-loader-spinner"', app_source)
+        self.assertIn('{{ t("status.loadingChart") }}', app_source)
+        self.assertIn(".chart-shell.is-loading .tv-chart", style_source)
+        self.assertIn(".chart-loader {", style_source)
+        self.assertIn(".chart-loader-spinner {", style_source)
+        self.assertIn("@keyframes chartLoaderSpin", style_source)
+        self.assertIn('"status.loadingChart": "Loading chart"', i18n_source)
+        self.assertIn('"status.loadingChart": "Загрузка графика"', i18n_source)
+
     def test_live_chart_refresh_preserves_user_zoom(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(

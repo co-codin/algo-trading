@@ -387,6 +387,7 @@ const selectedLiveStrategyPreview = computed(() => {
 const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
 const liveDataUpdatedLabel = computed(() => formatDateTime(liveDataUpdatedAt.value));
+const liveChartLoading = computed(() => liveStatusType.value === "busy");
 const liveDataHealth = computed<LiveDataHealth>(() => {
   if (liveStatusType.value === "error") {
     return {
@@ -1590,25 +1591,36 @@ function errorMessage(error: unknown): string {
           <span>{{ option.label }}</span>
         </label>
       </div>
-      <div class="chart-shell">
+      <div class="chart-shell" :class="{ 'is-loading': liveChartLoading }">
         <div class="chart-legend">
           <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
           <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">{{ t("chart.tradingView") }}</a>
         </div>
-        <TradingViewChart
-          v-if="livePayload"
-          :candles="livePayload.candles"
-          :signals="displayedSignals"
-          :indicators="visibleLiveIndicators"
-          :show-signals="showSignals"
-          :reset-key="liveChartResetKey"
-          :aria-label="chartLabels.aria"
-          :empty-label="chartLabels.empty"
-          :long-signal-label="chartLabels.longSignal"
-          :short-signal-label="chartLabels.shortSignal"
-        />
-        <div v-else class="empty">{{ t("empty.loadChart") }}</div>
+        <div class="chart-stage">
+          <TradingViewChart
+            v-if="livePayload"
+            :candles="livePayload.candles"
+            :signals="displayedSignals"
+            :indicators="visibleLiveIndicators"
+            :show-signals="showSignals"
+            :reset-key="liveChartResetKey"
+            :aria-label="chartLabels.aria"
+            :empty-label="chartLabels.empty"
+            :long-signal-label="chartLabels.longSignal"
+            :short-signal-label="chartLabels.shortSignal"
+          />
+          <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
+          <div
+            v-if="liveChartLoading"
+            class="chart-loader"
+            role="status"
+            aria-live="polite"
+          >
+            <span class="chart-loader-spinner" aria-hidden="true"></span>
+            <span>{{ t("status.loadingChart") }}</span>
+          </div>
+        </div>
       </div>
     </section>
 
