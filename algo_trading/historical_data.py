@@ -14,12 +14,27 @@ from algo_trading.data import (
     MoexSharesMarketDataClient,
     YahooFuturesMarketDataClient,
     load_candles_from_csv,
-    trim_candles_to_retention,
-    write_candles_to_csv,
+)
+from algo_trading.historical_store import (
+    CandleSeries,
+    HistoricalDataStore,
+    historical_store_from_env,
 )
 from algo_trading.models import Candle
 
 HISTORICAL_DATA_DIR = os.environ.get("HISTORICAL_DATA_DIR", "historical_data")
+HISTORICAL_RETENTION_DAYS = int(
+    os.environ.get(
+        "HISTORICAL_RETENTION_DAYS",
+        os.environ.get("HISTORICAL_CSV_RETENTION_DAYS", "1095"),
+    )
+)
+HISTORICAL_PAGE_LIMIT = int(
+    os.environ.get(
+        "HISTORICAL_PAGE_LIMIT",
+        os.environ.get("HISTORICAL_CSV_PAGE_LIMIT", "1000"),
+    )
+)
 HISTORICAL_CSV_RETENTION_DAYS = int(
     os.environ.get(
         "HISTORICAL_CSV_RETENTION_DAYS",
@@ -100,46 +115,94 @@ class HistoricalCsvSpec:
     interval: str
 
 
-class HistoricalCsvRefreshService:
+class HistoricalDataRefreshService:
     def __init__(
         self,
         data_dir: str | Path = HISTORICAL_DATA_DIR,
         client_factory: Callable[[str], HistoricalMarketDataClient] | None = None,
         now: Callable[[], datetime] | None = None,
-        retention_days: int = HISTORICAL_CSV_RETENTION_DAYS,
-        page_limit: int = HISTORICAL_CSV_PAGE_LIMIT,
+        retention_days: int = HISTORICAL_RETENTION_DAYS,
+        page_limit: int = HISTORICAL_PAGE_LIMIT,
+        store: HistoricalDataStore | None = None,
+        import_legacy_csv: bool = False,
     ) -> None:
         self._data_dir = Path(data_dir)
         self._client_factory = client_factory or historical_client_for_market
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._retention_days = max(0, int(retention_days))
         self._page_limit = max(1, int(page_limit))
+        self._store = store or historical_store_from_env()
+        self._store.ensure_schema()
+        self._import_legacy_csv = import_legacy_csv
 
     def refresh_all(self) -> dict[str, int]:
         summary = {"discovered": 0, "refreshed": 0, "pruned": 0, "failed": 0}
-        for spec in self.discover_files():
+        if self._import_legacy_csv:
+            self.import_legacy_csv_files()
+        for series in self._store.list_candle_series():
             summary["discovered"] += 1
             try:
-                if self.refresh_file(spec):
+                if self.refresh_series(series):
                     summary["refreshed"] += 1
-                if self.prune_file(spec.path):
-                    summary["pruned"] += 1
             except Exception:
                 summary["failed"] += 1
-                try:
-                    if self.prune_file(spec.path):
-                        summary["pruned"] += 1
-                except Exception:
-                    pass
+        prune_summary = self.prune_all(import_legacy=False)
+        summary["pruned"] = prune_summary["pruned"]
         return summary
 
-    def prune_all(self) -> dict[str, int]:
+    def prune_all(self, import_legacy: bool = True) -> dict[str, int]:
         summary = {"discovered": 0, "pruned": 0, "failed": 0}
+        if import_legacy and self._import_legacy_csv:
+            self.import_legacy_csv_files()
+        summary["discovered"] = len(self._store.list_candle_series())
+        try:
+            summary["pruned"] = self._store.prune_candles(self._retention_cutoff_millis())
+        except Exception:
+            summary["failed"] = 1
+        return summary
+
+    def refresh_series(self, series: CandleSeries) -> bool:
+        end_time = self._current_millis()
+        start_time = self._retention_cutoff_millis(reference_millis=end_time)
+        fetched = self._client_factory(series.market).get_historical_klines(
+            series.symbol,
+            series.interval,
+            start_time,
+            end_time,
+            self._page_limit,
+        )
+        if not fetched:
+            return False
+        self._store.upsert_candles(
+            series.market,
+            series.symbol,
+            series.interval,
+            self._trim_to_clock_retention(fetched, reference_millis=end_time),
+            source=series.market,
+        )
+        self._store.mark_candle_series_refreshed(
+            series.market,
+            series.symbol,
+            series.interval,
+        )
+        return True
+
+    def import_legacy_csv_files(self) -> dict[str, int]:
+        summary = {"discovered": 0, "imported": 0, "failed": 0}
         for spec in self.discover_files():
             summary["discovered"] += 1
             try:
-                if self.prune_file(spec.path):
-                    summary["pruned"] += 1
+                candles = load_candles_from_csv(spec.path)
+                if not candles:
+                    continue
+                self._store.upsert_candles(
+                    spec.market,
+                    spec.symbol,
+                    spec.interval,
+                    self._trim_to_clock_retention(candles),
+                    source="legacy-csv",
+                )
+                summary["imported"] += 1
             except Exception:
                 summary["failed"] += 1
         return summary
@@ -171,51 +234,44 @@ class HistoricalCsvRefreshService:
         return specs
 
     def refresh_file(self, spec: HistoricalCsvSpec) -> bool:
-        end_time = self._current_millis()
-        start_time = end_time - (self._retention_days * _MILLISECONDS_PER_DAY)
-        existing = load_candles_from_csv(spec.path) if spec.path.is_file() else []
-        fetched = self._client_factory(spec.market).get_historical_klines(
-            spec.symbol,
-            spec.interval,
-            start_time,
-            end_time,
-            self._page_limit,
-        )
-        merged = [*existing, *fetched]
-        if not merged:
-            return False
-        write_candles_to_csv(
-            self._trim_to_clock_retention(merged, reference_millis=end_time),
-            spec.path,
-            retention_days=self._retention_days,
-        )
-        return True
+        if spec.path.is_file():
+            self._store.upsert_candles(
+                spec.market,
+                spec.symbol,
+                spec.interval,
+                load_candles_from_csv(spec.path),
+                source="legacy-csv",
+            )
+        return self.refresh_series(CandleSeries(spec.market, spec.symbol, spec.interval))
 
     def prune_file(self, path: str | Path) -> bool:
-        csv_path = Path(path)
-        if not csv_path.is_file():
-            return False
-        current = load_candles_from_csv(csv_path)
-        retained = self._trim_to_clock_retention(current)
-        if len(retained) == len(current):
-            return False
-        write_candles_to_csv(retained, csv_path, retention_days=self._retention_days)
-        return True
+        return False
 
     def _trim_to_clock_retention(
         self,
         candles: Sequence[Candle],
         reference_millis: int | None = None,
     ) -> list[Candle]:
-        retained = trim_candles_to_retention(candles, self._retention_days)
+        deduped = {candle.open_time: candle for candle in candles}
+        retained = sorted(deduped.values(), key=lambda candle: candle.open_time)
         if self._retention_days <= 0:
             return retained
-        now_millis = reference_millis if reference_millis is not None else self._current_millis()
-        cutoff = now_millis - (self._retention_days * _MILLISECONDS_PER_DAY)
+        cutoff = self._retention_cutoff_millis(reference_millis=reference_millis)
         return [candle for candle in retained if candle.open_time >= cutoff]
+
+    def _retention_cutoff_millis(self, reference_millis: int | None = None) -> int:
+        now_millis = (
+            reference_millis
+            if reference_millis is not None
+            else self._current_millis()
+        )
+        return now_millis - (self._retention_days * _MILLISECONDS_PER_DAY)
 
     def _current_millis(self) -> int:
         return int(self._now().astimezone(timezone.utc).timestamp() * 1000)
+
+
+HistoricalCsvRefreshService = HistoricalDataRefreshService
 
 
 def historical_client_for_market(market: str) -> HistoricalMarketDataClient:

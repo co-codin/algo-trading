@@ -12,6 +12,19 @@ Run the full test suite:
 python3 -m unittest discover -v
 ```
 
+Install development tooling and enable the local pre-commit hook:
+
+```bash
+python3 -m pip install -e ".[dev]"
+pre-commit install
+```
+
+Run the Python linter:
+
+```bash
+make lint
+```
+
 Start the local browser UI:
 
 ```bash
@@ -75,6 +88,12 @@ Run all local checks:
 make check
 ```
 
+Run all configured pre-commit hooks manually:
+
+```bash
+pre-commit run --all-files
+```
+
 Build and run the UI in Docker:
 
 ```bash
@@ -91,11 +110,11 @@ make compose-up
 
 Both Docker paths mount local `runs/` for command-line simulation outputs. Docker Compose also mounts `historical_data/` so market-breadth and candle CSV history persists across rebuilds.
 
-Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template and set `MOEX_API_KEY` or `MOEXALGO_API_KEY` there when MOEX authenticated data is needed. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker.
+Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template and set `MOEX_API_KEY` or `MOEXALGO_API_KEY` there when MOEX authenticated data is needed. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker. Leave `REDIS_URL` unset for local in-process background maintenance unless you are also running Redis and `python -m algo_trading.worker`.
 
-Live candle CSVs are retained for the latest 1095 days. The web app refreshes existing candle CSVs in `historical_data/` every hour (`HISTORICAL_CSV_REFRESH_SECONDS=3600`) and runs a daily prune (`HISTORICAL_CSV_PRUNE_SECONDS=86400`) so rows older than three years are removed. Barchart breadth CSVs keep their separate 365-day retention.
+Live candle CSVs are retained for the latest 1095 days. The web app schedules refresh jobs for existing candle CSVs in `historical_data/` every hour (`HISTORICAL_CSV_REFRESH_SECONDS=3600`) and schedules a daily prune (`HISTORICAL_CSV_PRUNE_SECONDS=86400`) so rows older than three years are removed. With Docker Compose, those jobs are stored in Redis and executed by the `worker` service. Without `REDIS_URL`, local runs execute the same maintenance in the FastAPI process.
 
-The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file containing only the latest 365 days. The exception is `historical_data/breadth/CPC.csv`: it stores the full official Cboe total put/call ratio history from Cboe's ratio archives plus the post-2019 daily market-statistics page, and it is not pruned to one year.
+The `US Market Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file containing only the latest 365 days. The exception is `historical_data/breadth/CPC.csv`: it stores the full official Cboe total put/call ratio history from Cboe's ratio archives plus the post-2019 daily market-statistics page, and it is not pruned to one year.
 
 List the most-traded Binance USDT crypto pairs by current 24h quote volume:
 

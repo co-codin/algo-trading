@@ -14,6 +14,7 @@ from algo_trading.data import (
     TransientMarketDataError,
     YahooFuturesMarketDataClient,
 )
+from algo_trading.historical_store import HistoricalDataStore
 from algo_trading.models import (
     AllowedSide,
     Candle,
@@ -38,6 +39,8 @@ CME_FUTURES_MARKET = "cme_futures"
 COMMODITIES_MARKET = "commodities"
 MAG7_STOCKS_MARKET = "mag7_stocks"
 RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
+_DEFAULT_LIVE_CACHE_STALENESS_MS = 60_000
+_LIVE_CACHE_STALENESS_MULTIPLIER = 2
 FRONTEND_ROUTES = frozenset(
     {
         "",
@@ -80,6 +83,7 @@ def top_symbols_payload(client: MarketDataClient, top: int = 10) -> dict[str, An
 def live_chart_payload(
     payload: dict[str, Any],
     client: MarketDataClient | None = None,
+    historical_store: HistoricalDataStore | None = None,
 ) -> dict[str, Any]:
     market = _market_from_payload(payload)
     market_client = client or market_data_client_from_payload(payload)
@@ -96,16 +100,34 @@ def live_chart_payload(
         default_interval="1m",
     )
     config = configs[0]
-    candles = _get_klines_with_retries(
-        market_client,
+    data_source = _data_source_label(market, market_client, config.symbol)
+    candles = _load_fresh_live_candles(
+        historical_store,
+        market,
         config.symbol,
         config.interval,
-        limit,
-        retries,
-        retry_delay,
+        limit=limit,
     )
     if not candles:
-        raise ValueError("market-data client returned no candles")
+        candles = _get_klines_with_retries(
+            market_client,
+            config.symbol,
+            config.interval,
+            limit,
+            retries,
+            retry_delay,
+        )
+        if not candles:
+            raise ValueError("market-data client returned no candles")
+        candles = _persist_and_load_live_candles(
+            historical_store,
+            market,
+            config.symbol,
+            config.interval,
+            candles,
+            limit=limit,
+            source=data_source,
+        )
     signals = (
         _all_strategy_signal_markers(candles, configs)
         if len(configs) > 1
@@ -114,7 +136,7 @@ def live_chart_payload(
     return {
         "ok": True,
         "market": market,
-        "data_source": _data_source_label(market, market_client, config.symbol),
+        "data_source": data_source,
         "symbol": config.symbol,
         "interval": config.interval,
         "strategy": strategy_value,
@@ -122,6 +144,101 @@ def live_chart_payload(
         "signals": signals,
         "indicators": _popular_indicator_payload(candles, config),
     }
+
+
+def _load_fresh_live_candles(
+    historical_store: HistoricalDataStore | None,
+    market: str,
+    symbol: str,
+    interval: str,
+    *,
+    limit: int,
+) -> list[Candle]:
+    if historical_store is None:
+        return []
+    try:
+        stored = historical_store.load_candles(
+            market,
+            symbol,
+            interval,
+            limit=limit,
+        )
+    except Exception:
+        return []
+    if len(stored) < limit or not _live_candles_are_fresh(stored, interval):
+        return []
+    return stored
+
+
+def _live_candles_are_fresh(candles: list[Candle], interval: str) -> bool:
+    if not candles:
+        return False
+    newest_open_time = max(candle.open_time for candle in candles)
+    allowed_age_ms = max(
+        _interval_millis(interval) * _LIVE_CACHE_STALENESS_MULTIPLIER,
+        _DEFAULT_LIVE_CACHE_STALENESS_MS,
+    )
+    return newest_open_time >= _current_millis() - allowed_age_ms
+
+
+def _persist_and_load_live_candles(
+    historical_store: HistoricalDataStore | None,
+    market: str,
+    symbol: str,
+    interval: str,
+    candles: list[Candle],
+    *,
+    limit: int,
+    source: str,
+) -> list[Candle]:
+    if historical_store is None:
+        return candles
+    try:
+        historical_store.upsert_candles(
+            market,
+            symbol,
+            interval,
+            candles,
+            source=source,
+        )
+        stored = historical_store.load_candles(
+            market,
+            symbol,
+            interval,
+            limit=limit,
+        )
+    except Exception:
+        return candles
+    return stored or candles
+
+
+def _current_millis() -> int:
+    return int(time.time() * 1000)
+
+
+def _interval_millis(interval: str) -> int:
+    value = str(interval).strip()
+    if not value:
+        return _DEFAULT_LIVE_CACHE_STALENESS_MS
+    unit = value[-1]
+    amount_value = value[:-1]
+    try:
+        amount = int(amount_value)
+    except ValueError:
+        return _DEFAULT_LIVE_CACHE_STALENESS_MS
+    if amount <= 0:
+        return _DEFAULT_LIVE_CACHE_STALENESS_MS
+    if unit == "m":
+        return amount * 60_000
+    if unit == "h":
+        return amount * 60 * 60_000
+    if unit == "d":
+        return amount * 24 * 60 * 60_000
+    if unit == "w":
+        return amount * 7 * 24 * 60 * 60_000
+    if unit == "M":
+        return amount * 31 * 24 * 60 * 60_000
+    return _DEFAULT_LIVE_CACHE_STALENESS_MS
 
 
 def market_data_client_from_payload(payload: dict[str, Any]) -> MarketDataClient:

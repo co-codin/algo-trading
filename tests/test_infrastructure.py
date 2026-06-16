@@ -15,6 +15,23 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("uvicorn[standard]", dependencies)
         self.assertIn("psycopg[binary]", dependencies)
         self.assertIn("httpx", dependencies)
+        self.assertIn("redis", dependencies)
+        self.assertIn("rq", dependencies)
+
+    def test_project_configures_ruff_and_pre_commit_linting(self):
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        pre_commit = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+
+        dev_dependencies = "\n".join(
+            project["project"].get("optional-dependencies", {}).get("dev", [])
+        )
+        self.assertIn("ruff", dev_dependencies)
+        self.assertIn("pre-commit", dev_dependencies)
+        self.assertEqual(project["tool"]["ruff"]["target-version"], "py311")
+        self.assertIn("ruff-check", pre_commit)
+        self.assertIn("lint: lint-python", makefile)
+        self.assertIn("check: lint test typecheck compile frontend-check", makefile)
 
     def test_dockerfile_installs_project_and_uses_public_healthcheck(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -37,6 +54,20 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("MOEX_API_KEY: ${MOEX_API_KEY:-}", compose)
         self.assertIn("MOEXALGO_API_KEY: ${MOEXALGO_API_KEY:-}", compose)
 
+    def test_compose_adds_redis_queue_and_worker(self):
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn("redis:", compose)
+        self.assertIn("image: redis:7-alpine", compose)
+        self.assertIn('"redis-cli", "ping"', compose)
+        self.assertIn("redis-data:", compose)
+        self.assertIn("worker:", compose)
+        self.assertIn("command: python -m algo_trading.worker", compose)
+        self.assertIn("REDIS_URL: redis://redis:6379/0", compose)
+        self.assertIn("RQ_QUEUE: maintenance", compose)
+        self.assertIn("Redis.from_url(os.environ['REDIS_URL']).ping()", compose)
+        self.assertIn("condition: service_healthy", compose)
+
     def test_env_template_is_tracked_while_local_env_is_ignored(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -44,6 +75,8 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn(".env", gitignore.splitlines())
         self.assertIn("MOEX_API_KEY=", env_example)
         self.assertIn("ADMIN_EMAIL=", env_example)
+        self.assertIn("# REDIS_URL=redis://localhost:6379/0", env_example)
+        self.assertIn("RQ_QUEUE=maintenance", env_example)
         self.assertIn("HISTORICAL_CSV_RETENTION_DAYS=1095", env_example)
         self.assertIn("HISTORICAL_CSV_REFRESH_SECONDS=3600", env_example)
         self.assertIn("HISTORICAL_CSV_PRUNE_SECONDS=86400", env_example)

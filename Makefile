@@ -9,11 +9,12 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test typecheck compile frontend-install frontend-build frontend-check js-check check docker-build docker-run docker-smoke compose-up compose-down clean
+.PHONY: help lint lint-python test typecheck compile frontend-install frontend-build frontend-check js-check check docker-build docker-run docker-smoke compose-up compose-down clean
 
 help:
 	@printf '%s\n' \
 		'Targets:' \
+		'  make lint           Run Ruff Python lint checks' \
 		'  make check          Run unit tests, mypy, compileall, and Vue build check' \
 		'  make frontend-build Build the Vue frontend into algo_trading/web/dist' \
 		'  make docker-build   Build the local Docker image' \
@@ -22,6 +23,11 @@ help:
 		'  make compose-up     Start the UI with docker compose' \
 		'  make compose-down   Stop compose services' \
 		'  make clean          Remove Python/tool caches'
+
+lint: lint-python
+
+lint-python:
+	$(PYTHON) -m ruff check algo_trading tests
 
 test:
 	$(PYTHON) -m unittest discover -v
@@ -43,7 +49,7 @@ frontend-check:
 
 js-check: frontend-check
 
-check: test typecheck compile frontend-check
+check: lint test typecheck compile frontend-check
 
 docker-build:
 	docker build -t $(IMAGE) .

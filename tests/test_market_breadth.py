@@ -2,9 +2,10 @@ import os
 import tempfile
 import time
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
+from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.market_breadth import (
     ALLOWED_MARKET_BREADTH_SYMBOLS,
     MARKET_BREADTH_GROUPS,
@@ -327,6 +328,61 @@ $CPC,2025-01-03,0.8,0.9,0.7,0.85,0
 
             self.assertEqual([bar.close for bar in second_bars], [52.0, 57.0])
             self.assertEqual(second_client.calls, [])
+
+    def test_service_persists_breadth_bars_to_store_and_reuses_fresh_store(self):
+        store = InMemoryHistoricalDataStore()
+        fake_client = FakeBreadthClient({"$S5FD": CSV_BODY})
+        service = MarketBreadthService(
+            client=fake_client,
+            ttl_seconds=0,
+            data_dir=None,
+            refresh_seconds=3600,
+            store=store,
+        )
+
+        first_bars = service.bars_for_symbol("$S5FD")
+
+        self.assertEqual(fake_client.calls, [("$S5FD", {"data": "daily"})])
+        self.assertEqual([bar.close for bar in first_bars], [52.0, 57.0])
+        self.assertEqual(
+            [bar.close for bar in store.load_breadth_bars("$S5FD")],
+            [52.0, 57.0],
+        )
+
+        second_client = FakeBreadthClient({})
+        second_service = MarketBreadthService(
+            client=second_client,
+            ttl_seconds=0,
+            data_dir=None,
+            refresh_seconds=3600,
+            store=store,
+        )
+
+        second_bars = second_service.bars_for_symbol("$S5FD")
+
+        self.assertEqual([bar.close for bar in second_bars], [52.0, 57.0])
+        self.assertEqual(second_client.calls, [])
+
+    def test_service_returns_stored_breadth_bars_when_refresh_fails(self):
+        store = InMemoryHistoricalDataStore()
+        store.upsert_breadth_bars(
+            "$S5FD",
+            [parse_barchart_csv(CSV_BODY)[0]],
+            source="seed",
+        )
+        store.advance_time(timedelta(hours=2))
+        service = MarketBreadthService(
+            client=FailingBreadthClient(),
+            ttl_seconds=0,
+            data_dir=None,
+            refresh_seconds=3600,
+            store=store,
+        )
+
+        bars = service.bars_for_symbol("$S5FD")
+
+        self.assertEqual([bar.date.isoformat() for bar in bars], ["2025-01-02"])
+        self.assertEqual(bars[0].close, 52.0)
 
     def test_service_refreshes_stale_csv_hourly_and_merges_new_rows(self):
         with tempfile.TemporaryDirectory() as tmp:

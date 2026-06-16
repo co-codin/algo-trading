@@ -1,5 +1,6 @@
 import re
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from algo_trading.data import (
     TransientMarketDataError,
     YahooFuturesMarketDataClient,
 )
+from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.models import Candle
 from algo_trading.ui import (
     is_frontend_route,
@@ -272,9 +274,6 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
-            encoding="utf-8"
-        )
-        style_source = (root / "frontend" / "src" / "style.css").read_text(
             encoding="utf-8"
         )
 
@@ -538,8 +537,8 @@ class UiTests(unittest.TestCase):
         self.assertIn('v-for="item in group.items"', source)
         self.assertIn('breadthPayload?.series[item.symbol]', source)
         self.assertIn('export type MarketBreadthPayload', types_source)
-        self.assertIn('"tabs.breadth": "Breadth"', i18n_source)
-        self.assertIn('"tabs.breadth": "Ширина"', i18n_source)
+        self.assertIn('"tabs.breadth": "US Market Breadth"', i18n_source)
+        self.assertIn('"tabs.breadth": "Ширина рынка США"', i18n_source)
 
     def test_frontend_defines_bilingual_i18n_contract(self):
         root = Path(__file__).resolve().parents[1]
@@ -1513,6 +1512,83 @@ class UiTests(unittest.TestCase):
         self.assertEqual(len(client.kline_symbols), 1)
         self.assertEqual(payload["symbol"], "BTCUSDT")
         self.assertEqual(len(payload["candles"]), 12)
+
+    def test_live_chart_payload_persists_and_returns_db_candles(self):
+        client = FakeClient()
+        client.candles = [candle(2000, 12), candle(3000, 13)]
+        store = InMemoryHistoricalDataStore()
+        store.upsert_candles(
+            "crypto_spot",
+            "BTCUSDT",
+            "5m",
+            [candle(1000, 11)],
+            source="seed",
+        )
+
+        payload = live_chart_payload(
+            {
+                "market": "crypto_spot",
+                "symbol": "BTCUSDT",
+                "interval": "5m",
+                "limit": 3,
+                "fast_ema": 1,
+                "slow_ema": 2,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+            historical_store=store,
+        )
+
+        self.assertEqual(
+            [item["time"] for item in payload["candles"]],
+            [1000, 2000, 3000],
+        )
+        self.assertEqual(
+            [
+                stored.open_time
+                for stored in store.load_candles("crypto_spot", "BTCUSDT", "5m")
+            ],
+            [1000, 2000, 3000],
+        )
+
+    def test_live_chart_payload_uses_fresh_stored_candles_without_provider_call(self):
+        client = FakeClient()
+        store = InMemoryHistoricalDataStore()
+        latest_open_time = int(time.time() * 1000) - (60 * 1000)
+        store.upsert_candles(
+            "crypto_spot",
+            "BTCUSDT",
+            "5m",
+            [
+                candle(latest_open_time - (5 * 60 * 1000), 11),
+                candle(latest_open_time, 12),
+            ],
+            source="seed",
+        )
+
+        payload = live_chart_payload(
+            {
+                "market": "crypto_spot",
+                "symbol": "BTCUSDT",
+                "interval": "5m",
+                "limit": 2,
+                "fast_ema": 1,
+                "slow_ema": 2,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+            historical_store=store,
+        )
+
+        self.assertEqual(client.kline_symbols, [])
+        self.assertEqual(
+            [item["time"] for item in payload["candles"]],
+            [latest_open_time - (5 * 60 * 1000), latest_open_time],
+        )
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,16 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   algo-trading:
     build:
       context: .
@@ -20,6 +30,8 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "127.0.0.1:${PORT:-8765}:8765"
@@ -29,6 +41,8 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading
+      REDIS_URL: redis://redis:6379/0
+      RQ_QUEUE: maintenance
       MARKET_BREADTH_DATA_DIR: /app/historical_data/breadth
       MARKET_BREADTH_RETENTION_DAYS: "365"
       HISTORICAL_DATA_DIR: /app/historical_data
@@ -40,5 +54,42 @@ services:
       MOEX_API_KEY: ${MOEX_API_KEY:-}
       MOEXALGO_API_KEY: ${MOEXALGO_API_KEY:-}
 
+  worker:
+    build:
+      context: .
+    image: binance-algo-trading:local
+    command: python -m algo_trading.worker
+    user: "${UID:-1000}:${GID:-1000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./historical_data:/app/historical_data
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading
+      REDIS_URL: redis://redis:6379/0
+      RQ_QUEUE: maintenance
+      MARKET_BREADTH_DATA_DIR: /app/historical_data/breadth
+      MARKET_BREADTH_RETENTION_DAYS: "365"
+      HISTORICAL_DATA_DIR: /app/historical_data
+      HISTORICAL_CSV_RETENTION_DAYS: "1095"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-cuiyeqing960904@gmail.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Vladimir960904}
+      MOEX_API_KEY: ${MOEX_API_KEY:-}
+      MOEXALGO_API_KEY: ${MOEXALGO_API_KEY:-}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os; from redis import Redis; Redis.from_url(os.environ['REDIS_URL']).ping()\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 volumes:
   postgres-data:
+  redis-data:

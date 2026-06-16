@@ -15,6 +15,8 @@ from typing import Any, Protocol
 
 import httpx
 
+from algo_trading.historical_store import HistoricalDataStore
+
 BARCHART_HOME = "https://www.barchart.com/"
 BARCHART_QUERY_URL = (
     "https://www.barchart.com/proxies/timeseries/historical/queryeod.ashx"
@@ -311,6 +313,7 @@ class MarketBreadthService:
         data_dir: str | Path | None = MARKET_BREADTH_DATA_DIR,
         refresh_seconds: int = MARKET_BREADTH_CACHE_TTL_SECONDS,
         retention_days: int = MARKET_BREADTH_RETENTION_DAYS,
+        store: HistoricalDataStore | None = None,
     ) -> None:
         self._client = client or BarchartBreadthClient()
         self._put_call_client = put_call_client or CboePutCallClient()
@@ -318,26 +321,42 @@ class MarketBreadthService:
         self._data_dir = Path(data_dir) if data_dir else None
         self._refresh_seconds = max(0, int(refresh_seconds))
         self._retention_days = max(0, int(retention_days))
+        self._store = store
         self._cache: dict[str, tuple[float, list[MarketBreadthBar]]] = {}
         self._lock = threading.Lock()
 
     def payload(self, symbols: list[str] | None = None) -> dict[str, Any]:
         return market_breadth_payload(self, symbols=symbols)
 
-    def bars_for_symbol(self, symbol: str) -> list[MarketBreadthBar]:
+    def bars_for_symbol(
+        self,
+        symbol: str,
+        *,
+        force_refresh: bool = False,
+    ) -> list[MarketBreadthBar]:
         symbol = normalize_breadth_symbol(symbol)
         now = time.monotonic()
-        with self._lock:
-            cached = self._cache.get(symbol)
-            if cached and cached[0] > now:
-                return list(cached[1])
+        if not force_refresh:
+            with self._lock:
+                cached = self._cache.get(symbol)
+                if cached and cached[0] > now:
+                    return list(cached[1])
 
-        stored_bars = self._read_cached_bars(symbol)
-        cache_path = self._csv_path(symbol)
-        if stored_bars and cache_path and self._csv_is_fresh(cache_path):
+        stored_bars = self._read_store_cached_bars(symbol)
+        if stored_bars and not force_refresh and self._store_is_fresh(symbol):
             bars = stored_bars
         else:
-            bars = self._fetch_and_store_bars(symbol, stored_bars)
+            csv_bars = [] if stored_bars else self._read_csv_cached_bars(symbol)
+            cache_path = self._csv_path(symbol)
+            if (
+                csv_bars
+                and not force_refresh
+                and cache_path
+                and self._csv_is_fresh(cache_path)
+            ):
+                bars = csv_bars
+            else:
+                bars = self._fetch_and_store_bars(symbol, stored_bars or csv_bars)
 
         with self._lock:
             self._cache[symbol] = (now + self._ttl_seconds, bars)
@@ -347,7 +366,7 @@ class MarketBreadthService:
         summary = {"refreshed": 0, "failed": 0}
         for symbol in default_symbols():
             try:
-                self.bars_for_symbol(symbol)
+                self.bars_for_symbol(symbol, force_refresh=True)
             except Exception:
                 summary["failed"] += 1
             else:
@@ -378,13 +397,7 @@ class MarketBreadthService:
         if not bars:
             bars = fetched_bars
 
-        cache_path = self._csv_path(symbol)
-        if cache_path and bars:
-            write_breadth_bars_to_csv(
-                cache_path,
-                bars,
-                retention_days=self._retention_days,
-            )
+        self._write_cached_bars(symbol, bars, retention_days=self._retention_days)
         return bars
 
     def _fetch_and_store_put_call_bars(
@@ -413,9 +426,8 @@ class MarketBreadthService:
             bars = merge_breadth_bars([*official_bars, *stored_bars])
             if not bars and stored_bars:
                 return stored_bars
-            cache_path = self._csv_path(PUT_CALL_SYMBOL)
-            if cache_path and bars and not stored_bars:
-                write_breadth_bars_to_csv(cache_path, bars, retention_days=0)
+            if bars and not stored_bars:
+                self._write_cached_bars(PUT_CALL_SYMBOL, bars, retention_days=0)
             return bars
 
         usable_stored_bars = (
@@ -457,12 +469,21 @@ class MarketBreadthService:
         if not bars and stored_bars:
             return stored_bars
 
-        cache_path = self._csv_path(PUT_CALL_SYMBOL)
-        if cache_path and bars:
-            write_breadth_bars_to_csv(cache_path, bars, retention_days=0)
+        self._write_cached_bars(PUT_CALL_SYMBOL, bars, retention_days=0)
         return bars
 
-    def _read_cached_bars(self, symbol: str) -> list[MarketBreadthBar]:
+    def _read_store_cached_bars(self, symbol: str) -> list[MarketBreadthBar]:
+        if self._store is None:
+            return []
+        try:
+            bars = self._store.load_breadth_bars(symbol)
+        except Exception:
+            return []
+        if symbol == PUT_CALL_SYMBOL:
+            return merge_breadth_bars(bars)
+        return trim_breadth_bars_to_retention(bars, self._retention_days)
+
+    def _read_csv_cached_bars(self, symbol: str) -> list[MarketBreadthBar]:
         cache_path = self._csv_path(symbol)
         if not cache_path or not cache_path.is_file():
             return []
@@ -477,6 +498,33 @@ class MarketBreadthService:
                 retention_days=self._retention_days,
             )
         return retained
+
+    def _write_cached_bars(
+        self,
+        symbol: str,
+        bars: list[MarketBreadthBar],
+        *,
+        retention_days: int,
+    ) -> None:
+        if not bars:
+            return
+        retained = trim_breadth_bars_to_retention(bars, retention_days)
+        if self._store is not None:
+            try:
+                self._store.upsert_breadth_bars(symbol, retained, source="market-breadth")
+            except Exception:
+                pass
+        cache_path = self._csv_path(symbol)
+        if cache_path:
+            write_breadth_bars_to_csv(cache_path, retained, retention_days=retention_days)
+
+    def _store_is_fresh(self, symbol: str) -> bool:
+        if self._store is None:
+            return False
+        try:
+            return self._store.is_breadth_fresh(symbol, self._refresh_seconds)
+        except Exception:
+            return False
 
     def _csv_is_fresh(self, path: Path) -> bool:
         if self._refresh_seconds <= 0:

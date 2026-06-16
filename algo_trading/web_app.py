@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 import mimetypes
 import os
 import time
-import urllib.parse
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
@@ -26,7 +25,10 @@ from algo_trading.auth import (
 )
 from algo_trading.data import BinanceMarketDataClient, MarketDataClient
 from algo_trading.env import load_env_file
+from algo_trading.historical_store import HistoricalDataStore, historical_store_from_env
 from algo_trading.historical_data import HistoricalCsvRefreshService
+from algo_trading import jobs as background_jobs
+from algo_trading.job_queue import JobQueue, job_queue_from_env
 from algo_trading.market_breadth import MarketBreadthService
 from algo_trading.ui import (
     WEB_DIST_ROOT,
@@ -68,6 +70,8 @@ def create_app(
     expiry_check_seconds: float | None = None,
     historical_csv_refresh_seconds: float | None = None,
     historical_csv_prune_seconds: float | None = None,
+    historical_store: HistoricalDataStore | None = None,
+    job_queue: JobQueue | None = None,
     seed_admin: bool = True,
     admin_seed_password: str | None = None,
 ) -> FastAPI:
@@ -76,8 +80,11 @@ def create_app(
     store.ensure_schema()
     if seed_admin:
         store.seed_admin_user(admin_email(), admin_seed_password or admin_password())
-    breadth_service = market_breadth_service or MarketBreadthService()
+    history_store = historical_store or historical_store_from_env()
+    history_store.ensure_schema()
+    breadth_service = market_breadth_service or MarketBreadthService(store=history_store)
     csv_service = historical_csv_service or HistoricalCsvRefreshService()
+    background_queue = job_queue if job_queue is not None else job_queue_from_env()
     expiry_interval = (
         expiry_check_seconds
         if expiry_check_seconds is not None
@@ -136,17 +143,32 @@ def create_app(
 
     async def deactivate_expired_users_loop() -> None:
         while True:
-            store.deactivate_expired_users()
+            await enqueue_or_run_background_job(
+                background_jobs.deactivate_expired_users,
+                store.deactivate_expired_users,
+                job_id_prefix="deactivate-expired-users",
+                description="Deactivate users whose access has expired",
+            )
             await asyncio.sleep(max(1.0, expiry_interval))
 
     async def maintain_historical_csvs_loop() -> None:
         last_prune = 0.0
         while True:
             await asyncio.sleep(max(0.01, csv_refresh_interval))
-            await run_background_call(csv_service.refresh_all)
+            await enqueue_or_run_background_job(
+                background_jobs.refresh_historical_csvs,
+                csv_service.refresh_all,
+                job_id_prefix="refresh-historical-csvs",
+                description="Refresh live-page historical candle CSV files",
+            )
             refresh_breadth = getattr(breadth_service, "refresh_default_symbols", None)
             if callable(refresh_breadth):
-                await run_background_call(refresh_breadth)
+                await enqueue_or_run_background_job(
+                    background_jobs.refresh_market_breadth,
+                    refresh_breadth,
+                    job_id_prefix="refresh-market-breadth",
+                    description="Refresh US market breadth CSV files",
+                )
             if csv_prune_interval <= 0:
                 continue
             now = time.monotonic()
@@ -154,8 +176,33 @@ def create_app(
                 continue
             prune_all = getattr(csv_service, "prune_all", None)
             if callable(prune_all):
-                await run_background_call(prune_all)
+                await enqueue_or_run_background_job(
+                    background_jobs.prune_historical_csvs,
+                    prune_all,
+                    job_id_prefix="prune-historical-csvs",
+                    description="Prune expired historical candle CSV rows",
+                )
             last_prune = now
+
+    async def enqueue_or_run_background_job(
+        queued_callback: Callable[[], Any],
+        direct_callback: Callable[[], Any],
+        *,
+        job_id_prefix: str,
+        description: str,
+    ) -> None:
+        if background_queue is not None:
+            try:
+                await asyncio.to_thread(
+                    background_queue.enqueue,
+                    queued_callback,
+                    job_id_prefix=job_id_prefix,
+                    description=description,
+                )
+                return
+            except Exception:
+                pass
+        await run_background_call(direct_callback)
 
     async def run_background_call(callback: Callable[[], Any]) -> None:
         with suppress(Exception):
@@ -335,6 +382,7 @@ def create_app(
         return live_chart_payload(
             payload,
             _live_client_for_handler(payload, client_factory),
+            historical_store=history_store,
         )
 
     @app.get("/api/market-breadth")

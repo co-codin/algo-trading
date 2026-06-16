@@ -8,6 +8,8 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from algo_trading.auth import InMemoryAuthStore, utcnow
+from algo_trading.historical_store import InMemoryHistoricalDataStore
+from algo_trading.models import Candle
 from algo_trading.web_app import create_app
 
 
@@ -52,6 +54,62 @@ class WebAppTests(unittest.TestCase):
 
         self.assertGreaterEqual(service.calls, 1)
         self.assertGreaterEqual(breadth_service.calls, 1)
+
+    def test_app_enqueues_maintenance_jobs_when_queue_is_configured(self):
+        class FakeHistoricalCsvService:
+            def __init__(self) -> None:
+                self.refresh_calls = 0
+                self.prune_calls = 0
+
+            def refresh_all(self) -> None:
+                self.refresh_calls += 1
+
+            def prune_all(self) -> None:
+                self.prune_calls += 1
+
+        class FakeMarketBreadthRefreshService:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def refresh_default_symbols(self) -> None:
+                self.calls += 1
+
+        class FakeJobQueue:
+            def __init__(self) -> None:
+                self.jobs: list[str] = []
+
+            def enqueue(
+                self,
+                callback: Any,
+                *,
+                job_id_prefix: str,
+                description: str,
+            ) -> str:
+                self.jobs.append(callback.__name__)
+                return f"job-{len(self.jobs)}"
+
+        service = FakeHistoricalCsvService()
+        breadth_service = FakeMarketBreadthRefreshService()
+        queue = FakeJobQueue()
+        client = self.make_client(
+            historical_csv_service=service,
+            market_breadth_service=breadth_service,
+            job_queue=queue,
+            historical_csv_refresh_seconds=0.01,
+            historical_csv_prune_seconds=0.01,
+            expiry_check_seconds=0.01,
+        )
+
+        with client:
+            time.sleep(0.05)
+
+        self.assertIn("refresh_historical_csvs", queue.jobs)
+        self.assertIn("refresh_market_breadth", queue.jobs)
+        self.assertIn("prune_historical_csvs", queue.jobs)
+        self.assertIn("deactivate_expired_users", queue.jobs)
+        self.assertEqual(service.refresh_calls, 0)
+        self.assertEqual(service.prune_calls, 0)
+        self.assertEqual(breadth_service.calls, 0)
 
     def test_trading_api_requires_authentication(self):
         client = self.make_client()
@@ -126,6 +184,67 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(protected.status_code, 200)
         self.assertTrue(protected.json()["ok"])
+
+    def test_live_chart_route_persists_fetched_candles_to_historical_store(self):
+        class FakeMarketClient:
+            def get_24h_tickers(self) -> list[dict[str, object]]:
+                return []
+
+            def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+                return [
+                    Candle(
+                        open_time=1000,
+                        open=10,
+                        high=11,
+                        low=9,
+                        close=10,
+                        volume=1,
+                    ),
+                    Candle(
+                        open_time=2000,
+                        open=11,
+                        high=12,
+                        low=10,
+                        close=11,
+                        volume=1,
+                    ),
+                ][:limit]
+
+        auth_store = InMemoryAuthStore()
+        historical_store = InMemoryHistoricalDataStore()
+        client = self.make_client(
+            auth_store=auth_store,
+            client_factory=FakeMarketClient,
+            historical_store=historical_store,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice", "password": "password123"},
+        )
+        auth_store.set_user_access(
+            auth_store.list_users()[0].id,
+            is_active=True,
+            activated_at=utcnow(),
+        )
+
+        response = client.get(
+            "/api/live-chart?market=crypto_spot&symbol=BTCUSDT&interval=5m"
+            "&limit=2&fast_ema=1&slow_ema=2&rsi_period=2"
+            "&rsi_overbought=100&rsi_oversold=0"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [
+                stored.open_time
+                for stored in historical_store.load_candles(
+                    "crypto_spot",
+                    "BTCUSDT",
+                    "5m",
+                )
+            ],
+            [1000, 2000],
+        )
 
     def test_login_and_logout_manage_session_access(self):
         client = self.make_client()
