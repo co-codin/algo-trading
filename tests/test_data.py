@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 from algo_trading.data import (
@@ -150,6 +151,46 @@ class DataTests(unittest.TestCase):
         YahooFuturesMarketDataClient(opener=opener).get_klines("nasdaq", "1d", 1)
 
         self.assertIn("NQ%3DF", requests[0].full_url)
+
+    def test_yahoo_futures_client_maps_commodity_aliases(self):
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                {
+                    "chart": {
+                        "result": [
+                            {
+                                "timestamp": [1_700_000_000],
+                                "indicators": {
+                                    "quote": [
+                                        {
+                                            "open": [100.0],
+                                            "high": [101.0],
+                                            "low": [99.0],
+                                            "close": [100.5],
+                                            "volume": [100],
+                                        }
+                                    ]
+                                },
+                            }
+                        ],
+                        "error": None,
+                    }
+                }
+            )
+
+        client = YahooFuturesMarketDataClient(opener=opener)
+        for symbol in ("gold", "silver", "naturalgas", "brent", "platinum", "palladium", "copper"):
+            client.get_klines(symbol, "1d", 1)
+
+        requested_urls = [request.full_url for request in requests]
+        for encoded_symbol in ("GC%3DF", "SI%3DF", "NG%3DF", "BZ%3DF", "PL%3DF", "PA%3DF", "HG%3DF"):
+            self.assertTrue(
+                any(encoded_symbol in url for url in requested_urls),
+                msg=f"missing {encoded_symbol}",
+            )
 
     def test_yahoo_historical_klines_uses_period_window(self):
         requests = []
@@ -324,6 +365,56 @@ class DataTests(unittest.TestCase):
         self.assertIn("/engines/stock/markets/shares/boards/TQBR/securities/SBER/candles.json", request_url)
         self.assertIn("interval=1", request_url)
 
+    def test_moex_shares_client_requests_latest_live_page(self):
+        requests = []
+
+        def opener(url: str, timeout: int):
+            requests.append(url)
+            return FakeResponse(
+                {
+                    "candles": {
+                        "columns": ["begin", "open", "high", "low", "close", "volume"],
+                        "data": [
+                            ["2026-06-16 12:03:00", 303, 304, 302, 303.5, 100],
+                            ["2026-06-16 12:02:00", 302, 303, 301, 302.5, 90],
+                            ["2026-06-16 12:01:00", 301, 302, 300, 301.5, 80],
+                        ],
+                    }
+                }
+            )
+
+        candles = MoexSharesMarketDataClient(opener=opener).get_klines("SBER", "1m", 2)
+
+        query = parse_qs(urlparse(requests[0]).query)
+        self.assertEqual(query["iss.reverse"], ["true"])
+        self.assertEqual(
+            [datetime.fromtimestamp(candle.open_time / 1000, tz=timezone.utc) for candle in candles],
+            [
+                datetime(2026, 6, 16, 12, 2, tzinfo=timezone.utc),
+                datetime(2026, 6, 16, 12, 3, tzinfo=timezone.utc),
+            ],
+        )
+
+    def test_moex_client_routes_imoex_to_index_board(self):
+        requests = []
+
+        def opener(url: str, timeout: int):
+            requests.append(url)
+            return FakeResponse(
+                {
+                    "candles": {
+                        "columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"],
+                        "data": [["2540.0", "2541.0", "2542.0", "2539.0", "100000", "0", "2026-06-16 12:00:00", "2026-06-16 12:04:59"]],
+                    }
+                }
+            )
+
+        candles = MoexSharesMarketDataClient(opener=opener).get_klines("IMOEX", "5m", 1)
+
+        self.assertEqual(len(candles), 1)
+        self.assertIn("/engines/stock/markets/index/boards/SNDX/securities/IMOEX/candles.json", requests[0])
+        self.assertIn("iss.reverse=true", requests[0])
+
     def test_moex_shares_client_rejects_unsupported_symbols(self):
         with self.assertRaisesRegex(ValueError, "unsupported MOEX bluechip symbol"):
             MoexSharesMarketDataClient().get_klines("PENNY", "5m", 1)
@@ -349,6 +440,43 @@ class DataTests(unittest.TestCase):
         )
 
         self.assertEqual(requests[0].get_header("Authorization"), "Bearer fake-token")
+        self.assertTrue(requests[0].full_url.startswith("https://apim.moex.com/iss/"))
+
+    def test_moex_shares_client_fetches_historical_window(self):
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                {
+                    "candles": {
+                        "columns": ["begin", "open", "high", "low", "close", "volume"],
+                        "data": [
+                            ["2025-06-16 00:00:00", 300, 302, 299, 301, 1000],
+                            ["2026-06-15 00:00:00", 301, 303, 300, 302, 1500],
+                        ],
+                    }
+                }
+            )
+
+        start_time = int(datetime(2025, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
+        end_time = int(datetime(2026, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
+
+        candles = MoexSharesMarketDataClient(opener=opener).get_historical_klines(
+            "TATN",
+            "1d",
+            start_time,
+            end_time,
+            1000,
+        )
+
+        request_url = requests[0]
+        query = parse_qs(urlparse(request_url).query)
+        self.assertIn("/securities/TATN/candles.json", request_url)
+        self.assertEqual(query["from"], ["2025-06-16"])
+        self.assertEqual(query["till"], ["2026-06-16"])
+        self.assertEqual(query["interval"], ["24"])
+        self.assertEqual(len(candles), 2)
 
 def _binance_kline(open_time: int) -> list[object]:
     return [

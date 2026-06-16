@@ -241,6 +241,29 @@ class UiTests(unittest.TestCase):
         self.assertIn("getVisibleLogicalRange()", chart_source)
         self.assertIn("setVisibleLogicalRange(visibleRange)", chart_source)
 
+    def test_live_indicator_toggle_preserves_chart_focus(self):
+        root = Path(__file__).resolve().parents[1]
+        chart_source = (
+            root / "frontend" / "src" / "components" / "TradingViewChart.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("() => [props.candles, visibleMarkers.value],", chart_source)
+        self.assertNotIn(
+            "() => [props.candles, visibleMarkers.value, props.indicators]",
+            chart_source,
+        )
+        self.assertIn("watch(\n  () => props.indicators,", chart_source)
+        self.assertIn("function syncVisibleIndicators()", chart_source)
+        indicator_sync = chart_source.split(
+            "function syncVisibleIndicators()",
+            1,
+        )[1].split("\nfunction ", 1)[0]
+        self.assertIn("preserveVisibleLogicalRange(() => {", indicator_sync)
+        self.assertIn("syncIndicatorSeries();", indicator_sync)
+        self.assertNotIn("series.value?.setData", indicator_sync)
+        self.assertNotIn("markerApi.value?.setMarkers", indicator_sync)
+        self.assertNotIn("fitContent", indicator_sync)
+
     def test_all_strategies_selection_stays_live_only(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
@@ -540,12 +563,94 @@ class UiTests(unittest.TestCase):
         self.assertIn('value: "SBER"', source)
         self.assertIn('value: "GAZP"', source)
         self.assertIn('value: "LKOH"', source)
-        self.assertIn('value: "YNDX"', source)
+        self.assertIn('value: "YDEX"', source)
+        self.assertIn('value: "TATN"', source)
+        self.assertIn('value: "GMKN"', source)
+        self.assertIn('value: "PLZL"', source)
+        self.assertIn('value: "MOEX"', source)
+        self.assertIn('value: "SNGS"', source)
+        self.assertIn('value: "IMOEX"', source)
+        self.assertIn('value: "VTBR"', source)
+        self.assertIn('value: "ALRS"', source)
+        self.assertIn('value: "OZON"', source)
+        self.assertIn('value: "NLMK"', source)
+        self.assertIn('value: "CHMF"', source)
         self.assertIn('value: "russian_bluechips"', source)
         self.assertIn('t("options.moexBluechips")', source)
         self.assertIn("russian_bluechips: moexBluechipSymbolOptions", source)
         self.assertIn('"options.moexBluechips": "Russian Bluechips"', i18n_source)
         self.assertIn('"options.moexBluechips": "Голубые фишки РФ"', i18n_source)
+
+    def test_live_page_exposes_commodities_market(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("const commoditySymbolOptions = computed<SelectOption[]>(() => [", source)
+        self.assertIn('value: "commodities"', source)
+        self.assertIn('t("options.commodities")', source)
+        self.assertIn("commodities: commoditySymbolOptions.value", source)
+        for option_key in (
+            "commodityGold",
+            "commoditySilver",
+            "commodityNaturalGas",
+            "commodityBrentOil",
+            "commodityPlatinum",
+            "commodityPalladium",
+            "commodityCopper",
+        ):
+            self.assertIn(f't("options.{option_key}")', source)
+        for symbol in ("GC=F", "SI=F", "NG=F", "BZ=F", "PL=F", "PA=F", "HG=F"):
+            self.assertIn(f'value: "{symbol}"', source)
+        self.assertIn('"options.commodities": "Commodities"', i18n_source)
+        self.assertIn('"options.commodities": "Сырьевые товары"', i18n_source)
+
+    def test_live_page_filters_symbol_picker_by_search_text(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('const liveSymbolSearch = ref("")', source)
+        self.assertIn("const filteredLiveSymbolOptions = computed", source)
+        self.assertIn("liveSymbolSearch.value.trim().toLowerCase()", source)
+        self.assertIn('v-model.trim="liveSymbolSearch"', source)
+        self.assertIn('type="search"', source)
+        self.assertIn("t('labels.symbolSearch')", source)
+        self.assertIn("filteredLiveSymbolOptions", source)
+        self.assertIn('t("empty.noMatchingSymbols")', source)
+        self.assertIn('"labels.symbolSearch": "Search symbol"', i18n_source)
+        self.assertIn('"empty.noMatchingSymbols": "No symbols match that search"', i18n_source)
+
+    def test_live_page_syncs_market_symbol_and_indicators_to_url(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("function applyLiveSettingsFromLocation()", source)
+        self.assertIn("function syncLiveUrl()", source)
+        self.assertIn("new URLSearchParams(window.location.search)", source)
+        self.assertIn('params.set("market", liveMarket.value)', source)
+        self.assertIn('params.set("symbol", liveSymbol.value)', source)
+        self.assertIn('params.set("indicators", liveVisibleIndicators.value.join(","))', source)
+        self.assertIn('window.history.replaceState({ mode: "live" }, "", nextUrl)', source)
+        self.assertIn("watch([liveMarket, liveSymbol, liveVisibleIndicators],", source)
+        self.assertIn("applyLiveSettingsFromLocation();\n  setMode(modeFromLocation(), false);", source)
+        popstate_body = source.split("function handlePopState()", 1)[1].split(
+            "\nfunction ",
+            1,
+        )[0]
+        self.assertIn("const nextMode = modeFromLocation();", popstate_body)
+        self.assertIn('if (nextMode === "live")', popstate_body)
+        self.assertIn("applyLiveSettingsFromLocation();", popstate_body)
+        self.assertIn("setMode(nextMode, false);", popstate_body)
 
     def test_live_page_does_not_show_paper_trade_markers(self):
         source = (
@@ -932,12 +1037,66 @@ class UiTests(unittest.TestCase):
 
         self.assertEqual(client.kline_symbols, ["SBER"])
         self.assertEqual(payload["market"], "russian_bluechips")
-        self.assertEqual(payload["data_source"], "MOEX ISS shares")
+        self.assertEqual(payload["data_source"], "MOEX shares")
         self.assertEqual(payload["symbol"], "SBER")
+
+    def test_live_chart_payload_labels_moex_index_source(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([300, 301, 302, 303, 304])]
+
+        payload = live_chart_payload(
+            {
+                "market": "russian_bluechips",
+                "symbol": "IMOEX",
+                "interval": "5m",
+                "limit": 5,
+                "strategy": "ema-rsi",
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(client.kline_symbols, ["IMOEX"])
+        self.assertEqual(payload["market"], "russian_bluechips")
+        self.assertEqual(payload["data_source"], "MOEX APIM index")
+        self.assertEqual(payload["symbol"], "IMOEX")
+
+    def test_live_chart_payload_accepts_commodities_market(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([2000, 2001, 2002, 2003, 2004])]
+
+        payload = live_chart_payload(
+            {
+                "market": "commodities",
+                "symbol": "GC=F",
+                "interval": "5m",
+                "limit": 5,
+                "strategy": "ema-rsi",
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(client.kline_symbols, ["GC=F"])
+        self.assertEqual(payload["market"], "commodities")
+        self.assertEqual(payload["data_source"], "Yahoo Finance delayed commodity futures")
+        self.assertEqual(payload["symbol"], "GC=F")
 
     def test_market_data_client_from_payload_selects_futures_provider(self):
         self.assertIsInstance(
             market_data_client_from_payload({"market": "cme_futures"}),
+            YahooFuturesMarketDataClient,
+        )
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "commodities"}),
             YahooFuturesMarketDataClient,
         )
         self.assertIsInstance(

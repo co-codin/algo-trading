@@ -34,6 +34,7 @@ WEB_DIST_ROOT = WEB_ROOT / "dist"
 ALL_STRATEGIES_VALUE = "all"
 CRYPTO_SPOT_MARKET = "crypto_spot"
 CME_FUTURES_MARKET = "cme_futures"
+COMMODITIES_MARKET = "commodities"
 RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 FRONTEND_ROUTES = frozenset(
     {
@@ -111,7 +112,7 @@ def live_chart_payload(
     return {
         "ok": True,
         "market": market,
-        "data_source": _data_source_label(market),
+        "data_source": _data_source_label(market, market_client, config.symbol),
         "symbol": config.symbol,
         "interval": config.interval,
         "strategy": strategy_value,
@@ -123,7 +124,7 @@ def live_chart_payload(
 
 def market_data_client_from_payload(payload: dict[str, Any]) -> MarketDataClient:
     market = _market_from_payload(payload)
-    if market == CME_FUTURES_MARKET:
+    if market in (CME_FUTURES_MARKET, COMMODITIES_MARKET):
         return YahooFuturesMarketDataClient()
     if market == RUSSIAN_BLUECHIPS_MARKET:
         return MoexSharesMarketDataClient()
@@ -186,6 +187,10 @@ def _market_from_payload(payload: dict[str, Any]) -> str:
         "cme": CME_FUTURES_MARKET,
         "cme_futures": CME_FUTURES_MARKET,
         "us_index_futures": CME_FUTURES_MARKET,
+        "commodity": COMMODITIES_MARKET,
+        "commodities": COMMODITIES_MARKET,
+        "metals": COMMODITIES_MARKET,
+        "energy": COMMODITIES_MARKET,
         "moex": RUSSIAN_BLUECHIPS_MARKET,
         "russian": RUSSIAN_BLUECHIPS_MARKET,
         "russian_bluechips": RUSSIAN_BLUECHIPS_MARKET,
@@ -201,16 +206,29 @@ def _live_symbol_from_payload(payload: dict[str, Any], market: str) -> str:
     default_symbol = "BTCUSDT"
     if market == CME_FUTURES_MARKET:
         default_symbol = "ES=F"
+    if market == COMMODITIES_MARKET:
+        default_symbol = "GC=F"
     if market == RUSSIAN_BLUECHIPS_MARKET:
         default_symbol = "SBER"
     return str(payload.get("symbol") or default_symbol).upper()
 
 
-def _data_source_label(market: str) -> str:
+def _data_source_label(
+    market: str,
+    client: MarketDataClient | None = None,
+    symbol: str = "",
+) -> str:
     if market == CME_FUTURES_MARKET:
         return "Yahoo Finance delayed CME futures"
+    if market == COMMODITIES_MARKET:
+        return "Yahoo Finance delayed commodity futures"
     if market == RUSSIAN_BLUECHIPS_MARKET:
-        return "MOEX ISS shares"
+        if symbol.upper() == "IMOEX":
+            return "MOEX APIM index"
+        source_name = getattr(client, "source_name", None)
+        if isinstance(source_name, str):
+            return source_name
+        return "MOEX shares"
     return "Binance Spot public REST"
 
 

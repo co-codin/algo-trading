@@ -39,22 +39,44 @@ class TransientMarketDataError(RuntimeError):
 
 
 _BINANCE_MAX_KLINE_LIMIT = 1000
+MOEX_PUBLIC_ISS_BASE_URL = "https://iss.moex.com/iss"
+MOEX_AUTHENTICATED_ISS_BASE_URL = "https://apim.moex.com/iss"
 MOEX_BLUECHIP_SYMBOLS = frozenset(
     {
+        "IMOEX",
         "SBER",
+        "VTBR",
         "GAZP",
         "LKOH",
-        "YNDX",
         "YDEX",
         "ROSN",
         "NVTK",
         "GMKN",
         "TATN",
+        "ALRS",
+        "SMLT",
+        "OZON",
         "PLZL",
+        "PIKK",
+        "AFKS",
+        "SGZH",
+        "VKCO",
+        "NLMK",
+        "MAGN",
+        "MGNT",
+        "AFLT",
+        "RUAL",
+        "MTLR",
+        "CBOM",
+        "TATNP",
+        "X5",
+        "CHMF",
+        "SNGSP",
         "MOEX",
         "SNGS",
     }
 )
+MOEX_INDEX_SYMBOLS = frozenset({"IMOEX"})
 
 
 class BinanceMarketDataClient:
@@ -278,28 +300,66 @@ class YahooFuturesMarketDataClient:
 class MoexSharesMarketDataClient:
     def __init__(
         self,
-        base_url: str = "https://iss.moex.com/iss",
+        base_url: str | None = None,
         opener: Callable[..., Any] = urllib.request.urlopen,
         timeout: int = 20,
         api_key: str | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
         self.opener = opener
         self.timeout = timeout
         fallback_api_key = (
             os.environ.get("MOEX_API_KEY") or os.environ.get("MOEXALGO_API_KEY") or ""
         )
         self.api_key = (api_key if api_key is not None else fallback_api_key).strip()
+        resolved_base_url = base_url or (
+            MOEX_AUTHENTICATED_ISS_BASE_URL if self.api_key else MOEX_PUBLIC_ISS_BASE_URL
+        )
+        self.base_url = resolved_base_url.rstrip("/")
+
+    @property
+    def source_name(self) -> str:
+        return "MOEX APIM shares" if self.api_key else "MOEX ISS delayed shares"
 
     def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
         if limit <= 0:
             raise ValueError("limit must be positive")
-        moex_symbol = _moex_bluechip_symbol(symbol)
+        moex_symbol = _moex_symbol(symbol)
         moex_interval, aggregate_minutes = _moex_interval(interval)
-        candles = self._request_candles(moex_symbol, moex_interval, interval)
+        candles = self._request_candles(moex_symbol, moex_interval, interval, latest=True)
         if aggregate_minutes is not None:
             candles = _aggregate_candles(candles, aggregate_minutes)
         return candles[-limit:]
+
+    def get_historical_klines(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: int,
+        end_time: int,
+        limit: int,
+    ) -> list[Candle]:
+        if end_time <= start_time:
+            raise ValueError("end time must be after start time")
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        moex_symbol = _moex_symbol(symbol)
+        moex_interval, aggregate_minutes = _moex_interval(interval)
+        from_date = _date_from_milliseconds(start_time)
+        till_date = _date_from_milliseconds(end_time)
+        candles = self._request_candles(
+            moex_symbol,
+            moex_interval,
+            interval,
+            from_date=from_date,
+            till_date=till_date,
+        )
+        if aggregate_minutes is not None:
+            candles = _aggregate_candles(candles, aggregate_minutes)
+        return [
+            candle
+            for candle in candles
+            if start_time <= candle.open_time < end_time
+        ][:limit]
 
     def get_24h_tickers(self) -> list[dict[str, object]]:
         return [
@@ -316,19 +376,24 @@ class MoexSharesMarketDataClient:
         symbol: str,
         moex_interval: int,
         requested_interval: str,
+        from_date: str | None = None,
+        till_date: str | None = None,
+        latest: bool = False,
     ) -> list[Candle]:
-        from_date, till_date = _moex_window_dates(requested_interval)
-        query = urllib.parse.urlencode(
-            {
-                "from": from_date,
-                "till": till_date,
-                "interval": str(moex_interval),
-                "start": "0",
-            }
-        )
+        default_from_date, default_till_date = _moex_window_dates(requested_interval)
+        query_params = {
+            "from": from_date or default_from_date,
+            "till": till_date or default_till_date,
+            "interval": str(moex_interval),
+            "start": "0",
+        }
+        if latest:
+            query_params["iss.reverse"] = "true"
+        query = urllib.parse.urlencode(query_params)
         encoded_symbol = urllib.parse.quote(symbol, safe="")
+        market, board = _moex_market_board(symbol)
         url = (
-            f"{self.base_url}/engines/stock/markets/shares/boards/TQBR/"
+            f"{self.base_url}/engines/stock/markets/{market}/boards/{board}/"
             f"securities/{encoded_symbol}/candles.json?{query}"
         )
         request: str | urllib.request.Request = url
@@ -346,7 +411,8 @@ class MoexSharesMarketDataClient:
             raise ValueError(f"MOEX ISS HTTP {exc.code}") from exc
         except (TimeoutError, URLError) as exc:
             raise TransientMarketDataError("transient MOEX ISS market-data failure") from exc
-        return _candles_from_moex_payload(payload)
+        candles = _candles_from_moex_payload(payload)
+        return sorted(candles, key=lambda candle: candle.open_time)
 
 
 def load_candles_from_csv(path: str | Path) -> list[Candle]:
@@ -429,11 +495,17 @@ def _binance_interval_ms(interval: str) -> int:
         raise ValueError(f"unsupported Binance interval: {interval}") from exc
 
 
-def _moex_bluechip_symbol(symbol: str) -> str:
+def _moex_symbol(symbol: str) -> str:
     value = symbol.strip().upper()
     if value not in MOEX_BLUECHIP_SYMBOLS:
         raise ValueError(f"unsupported MOEX bluechip symbol: {symbol}")
     return value
+
+
+def _moex_market_board(symbol: str) -> tuple[str, str]:
+    if symbol in MOEX_INDEX_SYMBOLS:
+        return "index", "SNDX"
+    return "shares", "TQBR"
 
 
 def _moex_interval(interval: str) -> tuple[int, int | None]:
@@ -459,6 +531,10 @@ def _moex_window_dates(interval: str) -> tuple[str, str]:
     value = interval.strip().lower()
     days = 400 if value == "1d" else 45
     return (now - timedelta(days=days)).date().isoformat(), now.date().isoformat()
+
+
+def _date_from_milliseconds(value: int) -> str:
+    return datetime.fromtimestamp(value / 1000, tz=timezone.utc).date().isoformat()
 
 
 def _candles_from_moex_payload(payload: Any) -> list[Candle]:
@@ -540,6 +616,39 @@ def _yahoo_futures_symbol(symbol: str) -> str:
         "NASDAQ-100": "NQ=F",
         "NASDAQ_FUTURE": "NQ=F",
         "NASDAQ-FUTURE": "NQ=F",
+        "GC": "GC=F",
+        "/GC": "GC=F",
+        "GC=F": "GC=F",
+        "GOLD": "GC=F",
+        "SI": "SI=F",
+        "/SI": "SI=F",
+        "SI=F": "SI=F",
+        "SILVER": "SI=F",
+        "NG": "NG=F",
+        "/NG": "NG=F",
+        "NG=F": "NG=F",
+        "NATGAS": "NG=F",
+        "NATURALGAS": "NG=F",
+        "NATURAL_GAS": "NG=F",
+        "NATURAL-GAS": "NG=F",
+        "BZ": "BZ=F",
+        "/BZ": "BZ=F",
+        "BZ=F": "BZ=F",
+        "BRENT": "BZ=F",
+        "BRENT_OIL": "BZ=F",
+        "BRENT-OIL": "BZ=F",
+        "PL": "PL=F",
+        "/PL": "PL=F",
+        "PL=F": "PL=F",
+        "PLATINUM": "PL=F",
+        "PA": "PA=F",
+        "/PA": "PA=F",
+        "PA=F": "PA=F",
+        "PALLADIUM": "PA=F",
+        "HG": "HG=F",
+        "/HG": "HG=F",
+        "HG=F": "HG=F",
+        "COPPER": "HG=F",
     }
     try:
         return aliases[value]

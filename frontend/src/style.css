@@ -543,6 +543,11 @@ button:focus {
   grid-column: span 2;
 }
 
+.symbol-picker {
+  display: grid;
+  gap: 6px;
+}
+
 .strategy-picker {
   position: relative;
   display: grid;

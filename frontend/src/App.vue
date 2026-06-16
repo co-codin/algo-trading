@@ -71,12 +71,37 @@ const liveSymbolOptions = [
 ] satisfies SelectOption[];
 
 const moexBluechipSymbolOptions = [
+  { value: "IMOEX", label: "IMOEX · MOEX Russia Index" },
   { value: "SBER", label: "SBER" },
+  { value: "VTBR", label: "VTBR" },
   { value: "GAZP", label: "GAZP" },
   { value: "LKOH", label: "LKOH" },
-  { value: "YNDX", label: "YNDX" },
+  { value: "YDEX", label: "YDEX" },
+  { value: "TATN", label: "TATN" },
   { value: "ROSN", label: "ROSN" },
   { value: "NVTK", label: "NVTK" },
+  { value: "GMKN", label: "GMKN" },
+  { value: "ALRS", label: "ALRS" },
+  { value: "SMLT", label: "SMLT" },
+  { value: "OZON", label: "OZON" },
+  { value: "PLZL", label: "PLZL" },
+  { value: "PIKK", label: "PIKK" },
+  { value: "AFKS", label: "AFKS" },
+  { value: "SGZH", label: "SGZH" },
+  { value: "VKCO", label: "VKCO" },
+  { value: "NLMK", label: "NLMK" },
+  { value: "MAGN", label: "MAGN" },
+  { value: "MGNT", label: "MGNT" },
+  { value: "AFLT", label: "AFLT" },
+  { value: "RUAL", label: "RUAL" },
+  { value: "MTLR", label: "MTLR" },
+  { value: "CBOM", label: "CBOM" },
+  { value: "TATNP", label: "TATNP" },
+  { value: "X5", label: "X5" },
+  { value: "CHMF", label: "CHMF" },
+  { value: "SNGSP", label: "SNGSP" },
+  { value: "MOEX", label: "MOEX" },
+  { value: "SNGS", label: "SNGS" },
 ] satisfies SelectOption[];
 
 const liveIntervalOptions = [
@@ -237,6 +262,7 @@ const breadthStatus = ref(t("status.ready"));
 const breadthStatusType = ref<StatusType>("");
 const liveMarket = ref("crypto_spot");
 const liveSymbol = ref("BTCUSDT");
+const liveSymbolSearch = ref("");
 const liveInterval = ref("5m");
 const liveLimit = ref<string | number>(180);
 const liveRefresh = ref("10");
@@ -247,6 +273,7 @@ const liveSelectedStrategies = ref<string[]>(["ema-rsi"]);
 const liveVisibleIndicators = ref<string[]>([...defaultLiveIndicators]);
 const showSignals = ref(true);
 let liveTimer = 0;
+let isApplyingLiveSettingsFromUrl = false;
 
 const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
 const isAdminUser = computed(() =>
@@ -274,14 +301,25 @@ const filteredAdminUsers = computed(() => {
 const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "crypto_spot", label: t("options.cryptoSpot") },
   { value: "cme_futures", label: t("options.usIndexFutures") },
+  { value: "commodities", label: t("options.commodities") },
   { value: "russian_bluechips", label: t("options.moexBluechips") },
 ]);
 const liveFuturesSymbolOptions = computed<SelectOption[]>(() => [
   { value: "ES=F", label: t("options.sp500Future") },
 ]);
+const commoditySymbolOptions = computed<SelectOption[]>(() => [
+  { value: "GC=F", label: t("options.commodityGold") },
+  { value: "SI=F", label: t("options.commoditySilver") },
+  { value: "NG=F", label: t("options.commodityNaturalGas") },
+  { value: "BZ=F", label: t("options.commodityBrentOil") },
+  { value: "PL=F", label: t("options.commodityPlatinum") },
+  { value: "PA=F", label: t("options.commodityPalladium") },
+  { value: "HG=F", label: t("options.commodityCopper") },
+]);
 const liveSymbolsByMarket = computed<Record<string, SelectOption[]>>(() => ({
   crypto_spot: liveSymbolOptions,
   cme_futures: liveFuturesSymbolOptions.value,
+  commodities: commoditySymbolOptions.value,
   russian_bluechips: moexBluechipSymbolOptions,
 }));
 const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
@@ -344,6 +382,15 @@ const liveStrategyGroups = computed<StrategyGroup[]>(() => {
 const activeLiveSymbolOptions = computed(
   () => liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions,
 );
+const filteredLiveSymbolOptions = computed(() => {
+  const query = liveSymbolSearch.value.trim().toLowerCase();
+  if (!query) {
+    return activeLiveSymbolOptions.value;
+  }
+  return activeLiveSymbolOptions.value.filter((option) =>
+    `${option.label} ${option.value}`.toLowerCase().includes(query),
+  );
+});
 const selectedLiveStrategyNames = computed(() => {
   const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
   const selectedNames = liveSelectedStrategies.value.filter((name) => availableNames.has(name));
@@ -433,6 +480,10 @@ const displayedSignals = computed(() => {
 });
 
 watch(liveMarket, () => {
+  liveSymbolSearch.value = "";
+  if (isApplyingLiveSettingsFromUrl) {
+    return;
+  }
   liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
 });
 
@@ -449,6 +500,12 @@ watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], ()
     refreshLiveChart();
   }
 });
+
+watch([liveMarket, liveSymbol, liveVisibleIndicators], () => {
+  if (activeMode.value === "live" && !isApplyingLiveSettingsFromUrl) {
+    syncLiveUrl();
+  }
+}, { deep: true });
 
 watch(locale, () => {
   if (!liveStatusType.value) {
@@ -488,7 +545,11 @@ onBeforeUnmount(() => {
 });
 
 function handlePopState() {
-  setMode(modeFromLocation(), false);
+  const nextMode = modeFromLocation();
+  if (nextMode === "live") {
+    applyLiveSettingsFromLocation();
+  }
+  setMode(nextMode, false);
 }
 
 function modeFromLocation(): Mode {
@@ -516,8 +577,10 @@ function setMode(mode: Mode, updateUrl = true) {
   if (nextMode !== "live") {
     resetLiveStrategies();
   }
-  if (updateUrl && window.location.pathname !== modeRoutes[nextMode]) {
-    window.history.pushState({ mode: nextMode }, "", modeRoutes[nextMode]);
+  const nextUrl = nextMode === "live" ? liveUrlPath() : modeRoutes[nextMode];
+  const currentUrl = `${window.location.pathname}${window.location.search}`;
+  if (updateUrl && currentUrl !== nextUrl) {
+    window.history.pushState({ mode: nextMode }, "", nextUrl);
   }
   if (nextMode === "live") {
     startLivePolling();
@@ -572,7 +635,72 @@ async function bootstrapAuthenticatedApp() {
   } else {
     strategies.value = [];
   }
+  applyLiveSettingsFromLocation();
   setMode(modeFromLocation(), false);
+}
+
+function applyLiveSettingsFromLocation() {
+  if (modeFromLocation() !== "live") {
+    return;
+  }
+  const params = new URLSearchParams(window.location.search);
+  isApplyingLiveSettingsFromUrl = true;
+  try {
+    const market = params.get("market");
+    if (market && liveSymbolsByMarket.value[market]) {
+      liveMarket.value = market;
+    }
+    const symbolOptions = liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions;
+    const symbol = (params.get("symbol") ?? "").trim().toUpperCase();
+    const matchedSymbol = symbolOptions.find(
+      (option) => String(option.value).toUpperCase() === symbol,
+    );
+    if (matchedSymbol) {
+      liveSymbol.value = String(matchedSymbol.value);
+    } else if (!symbolOptions.some((option) => String(option.value) === liveSymbol.value)) {
+      liveSymbol.value = String(symbolOptions[0]?.value ?? "BTCUSDT");
+    }
+    if (params.has("indicators")) {
+      liveVisibleIndicators.value = parseLiveIndicators(params.get("indicators"));
+    }
+  } finally {
+    queueMicrotask(() => {
+      isApplyingLiveSettingsFromUrl = false;
+    });
+  }
+}
+
+function syncLiveUrl() {
+  const nextUrl = liveUrlPath();
+  const currentUrl = `${window.location.pathname}${window.location.search}`;
+  if (currentUrl !== nextUrl) {
+    window.history.replaceState({ mode: "live" }, "", nextUrl);
+  }
+}
+
+function liveUrlPath() {
+  const params = new URLSearchParams();
+  params.set("market", liveMarket.value);
+  params.set("symbol", liveSymbol.value);
+  params.set("indicators", liveVisibleIndicators.value.join(","));
+  return `${modeRoutes.live}?${params.toString()}`;
+}
+
+function parseLiveIndicators(value: string | null) {
+  if (!value) {
+    return [];
+  }
+  const availableIndicators = new Set(
+    popularIndicatorOptions.value.map((option) => String(option.value)),
+  );
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((indicator) => indicator.trim().toLowerCase())
+        .filter((indicator) => availableIndicators.has(indicator)),
+    ),
+  ];
 }
 
 async function loadProfile() {
@@ -1084,11 +1212,20 @@ function errorMessage(error: unknown): string {
             </option>
           </select>
         </label>
-        <label>
+        <label class="symbol-picker">
           <span>{{ t("labels.symbol") }}</span>
+          <input
+            v-model.trim="liveSymbolSearch"
+            autocomplete="off"
+            type="search"
+            :placeholder="t('labels.symbolSearch')"
+          >
           <select v-model="liveSymbol">
+            <option v-if="!filteredLiveSymbolOptions.length" disabled value="">
+              {{ t("empty.noMatchingSymbols") }}
+            </option>
             <option
-              v-for="option in activeLiveSymbolOptions"
+              v-for="option in filteredLiveSymbolOptions"
               :key="option.value"
               :value="option.value"
             >

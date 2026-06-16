@@ -60,12 +60,21 @@ watch(() => props.resetKey, () => {
 });
 
 watch(
-  () => [props.candles, visibleMarkers.value, props.indicators],
+  () => [props.candles, visibleMarkers.value],
   async () => {
     await nextTick();
     renderChart();
   },
   { deep: true, immediate: true },
+);
+
+watch(
+  () => props.indicators,
+  async () => {
+    await nextTick();
+    syncVisibleIndicators();
+  },
+  { deep: true },
 );
 
 onBeforeUnmount(() => {
@@ -80,15 +89,31 @@ function renderChart() {
   }
   ensureChart();
   const candleData = props.candles.map(toCandleData);
+  preserveVisibleLogicalRange(() => {
+    series.value?.setData(candleData);
+    syncIndicatorSeries();
+    markerApi.value?.setMarkers(
+      visibleMarkers.value
+        .filter((marker): marker is SeriesMarker<Time> => marker !== null)
+        .sort((left, right) => Number(left.time) - Number(right.time)),
+    );
+  });
+}
+
+function syncVisibleIndicators() {
+  if (!chartEl.value || props.candles.length === 0) {
+    return;
+  }
+  ensureChart();
+  preserveVisibleLogicalRange(() => {
+    syncIndicatorSeries();
+  });
+}
+
+function preserveVisibleLogicalRange(update: () => void) {
   const timeScale = chart.value?.timeScale();
   const visibleRange = shouldFitContent ? null : timeScale?.getVisibleLogicalRange();
-  series.value?.setData(candleData);
-  syncIndicatorSeries();
-  markerApi.value?.setMarkers(
-    visibleMarkers.value
-      .filter((marker): marker is SeriesMarker<Time> => marker !== null)
-      .sort((left, right) => Number(left.time) - Number(right.time)),
-  );
+  update();
   if (shouldFitContent) {
     timeScale?.fitContent();
     shouldFitContent = false;

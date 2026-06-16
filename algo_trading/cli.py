@@ -9,6 +9,7 @@ from algo_trading.data import (
     BinanceMarketDataClient,
     HistoricalMarketDataClient,
     MarketDataClient,
+    MoexSharesMarketDataClient,
     TransientMarketDataError,
     YahooFuturesMarketDataClient,
     load_candles_from_csv,
@@ -30,6 +31,8 @@ from algo_trading.symbols import parse_symbol_list, ranked_usdt_symbols
 _MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
 _CRYPTO_SPOT_MARKET = "crypto_spot"
 _CME_FUTURES_MARKET = "cme_futures"
+_COMMODITIES_MARKET = "commodities"
+_RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +136,14 @@ def _market_from_name(value: str) -> str:
         "us_index_futures": _CME_FUTURES_MARKET,
         "yahoo": _CME_FUTURES_MARKET,
         "yahoo_futures": _CME_FUTURES_MARKET,
+        "commodity": _COMMODITIES_MARKET,
+        "commodities": _COMMODITIES_MARKET,
+        "metals": _COMMODITIES_MARKET,
+        "energy": _COMMODITIES_MARKET,
+        "moex": _RUSSIAN_BLUECHIPS_MARKET,
+        "russian": _RUSSIAN_BLUECHIPS_MARKET,
+        "russian_bluechips": _RUSSIAN_BLUECHIPS_MARKET,
+        "ru_bluechips": _RUSSIAN_BLUECHIPS_MARKET,
     }
     try:
         return aliases[market]
@@ -143,8 +154,10 @@ def _market_from_name(value: str) -> str:
 def _market_client_for_name(market: str) -> HistoricalMarketDataClient:
     if market == _CRYPTO_SPOT_MARKET:
         return BinanceMarketDataClient()
-    if market == _CME_FUTURES_MARKET:
+    if market in (_CME_FUTURES_MARKET, _COMMODITIES_MARKET):
         return YahooFuturesMarketDataClient()
+    if market == _RUSSIAN_BLUECHIPS_MARKET:
+        return MoexSharesMarketDataClient()
     raise ValueError(f"unsupported market: {market}")
 
 
@@ -356,7 +369,7 @@ def _add_candles_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     parser.add_argument(
         "--market",
         default=_CRYPTO_SPOT_MARKET,
-        help="market provider: crypto_spot/binance or cme_futures/yahoo",
+        help="market provider: crypto_spot/binance, cme_futures/yahoo, commodities, or russian_bluechips/moex",
     )
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--interval", default="1h")
