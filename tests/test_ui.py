@@ -75,17 +75,20 @@ def trending_candles() -> list[Candle]:
 
 class UiTests(unittest.TestCase):
     def test_live_market_controls_are_selectable(self):
-        source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
-        ).read_text(encoding="utf-8")
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
+            encoding="utf-8"
+        )
 
-        self.assertIn("const liveSymbolOptions = [", source)
+        self.assertIn("liveSymbolOptions", source)
+        self.assertIn("export const liveSymbolOptions = [", config_source)
         self.assertIn("const liveMarketOptions = computed<SelectOption[]>(() => [", source)
         self.assertIn("const liveSymbolsByMarket", source)
-        self.assertIn("const liveIntervalOptions = [", source)
-        self.assertIn('value: "1w"', source)
-        self.assertIn('value: "1M"', source)
-        self.assertIn("const liveCandleOptions = [", source)
+        self.assertIn("liveIntervalOptions", source)
+        self.assertIn('value: "1w"', config_source)
+        self.assertIn('value: "1M"', config_source)
+        self.assertIn("liveCandleOptions", source)
         self.assertIn("const liveStrategyOptions = computed<StrategyOption[]>(() =>", source)
         self.assertIn("const liveSelectedStrategies = ref<string[]>([\"ema-rsi\"]);", source)
         self.assertIn("const liveStrategyRequest = computed(() =>", source)
@@ -103,12 +106,12 @@ class UiTests(unittest.TestCase):
         self.assertIn('class="strategy-picker live-strategy-field"', source)
         self.assertIn("toggleLiveStrategy(strategy.name)", source)
         self.assertIn('v-for="group in filteredLiveStrategyGroups"', source)
-        self.assertIn('value: "BTCUSDT"', source)
-        self.assertIn('value: "ETHUSDT"', source)
-        self.assertIn('value: "1m"', source)
-        self.assertIn('value: "1h"', source)
-        self.assertIn("value: 180", source)
-        self.assertIn("value: 500", source)
+        self.assertIn('value: "BTCUSDT"', config_source)
+        self.assertIn('value: "ETHUSDT"', config_source)
+        self.assertIn('value: "1m"', config_source)
+        self.assertIn('value: "1h"', config_source)
+        self.assertIn("value: 180", config_source)
+        self.assertIn("value: 500", config_source)
 
     def test_live_page_uses_strategy_multiselect(self):
         source = (
@@ -121,7 +124,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("selectedLiveStrategyPreview", source)
         self.assertIn("const liveStrategyMenu = ref<HTMLDetailsElement | null>(null)", source)
         self.assertIn("const liveStrategyGroups = computed<StrategyGroup[]>(() =>", source)
-        self.assertIn("const strategyGroupCatalog", source)
+        self.assertIn("strategyGroupCatalog", source)
         self.assertIn("toggleLiveStrategy(strategy.name)", source)
         self.assertIn("selectLiveStrategyGroup(group.strategyNames)", source)
         self.assertIn("selectAllLiveStrategies", source)
@@ -135,11 +138,100 @@ class UiTests(unittest.TestCase):
         self.assertIn("watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], () => {", source)
         self.assertNotIn('<select v-model="settings.strategy"', source)
 
+    def test_project_documents_focused_skills(self):
+        root = Path(__file__).resolve().parents[1]
+        skill_paths = (
+            root / "docs" / "skills" / "live-chart-ux.md",
+            root / "docs" / "skills" / "market-data-integrations.md",
+            root / "docs" / "skills" / "auth-admin-ops.md",
+            root / "docs" / "skills" / "refactoring.md",
+        )
+
+        for skill_path in skill_paths:
+            self.assertTrue(skill_path.exists(), f"{skill_path} is missing")
+            source = skill_path.read_text(encoding="utf-8")
+            self.assertIn("# ", source)
+            self.assertIn("## When To Use", source)
+            self.assertIn("## Checklist", source)
+            self.assertIn("## Verification", source)
+
+        skills_index = (root / "SKILLS.md").read_text(encoding="utf-8")
+        self.assertIn("docs/skills/live-chart-ux.md", skills_index)
+        self.assertIn("docs/skills/market-data-integrations.md", skills_index)
+        self.assertIn("docs/skills/auth-admin-ops.md", skills_index)
+        self.assertIn("docs/skills/refactoring.md", skills_index)
+
+    def test_live_page_exposes_saved_workspaces_alerts_health_and_snapshot(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
+        style_source = (root / "frontend" / "src" / "styles" / "live.css").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("LIVE_WORKSPACE_STORAGE_KEY", app_source)
+        self.assertIn("const liveWorkspaces = ref<LiveWorkspace[]>([]);", app_source)
+        self.assertIn("saveLiveWorkspace", app_source)
+        self.assertIn("applyLiveWorkspace", app_source)
+        self.assertIn("deleteLiveWorkspace", app_source)
+        self.assertIn("class=\"workspace-controls\"", app_source)
+        self.assertIn("class=\"workspace-list\"", app_source)
+
+        self.assertIn("const liveAlertsEnabled = ref(false);", app_source)
+        self.assertIn("const lastAlertSignature = ref(\"\");", app_source)
+        self.assertIn("maybeNotifyLiveAlert", app_source)
+        self.assertIn("Notification.permission", app_source)
+        self.assertIn("class=\"alert-controls\"", app_source)
+
+        self.assertIn("const liveDataHealth = computed", app_source)
+        self.assertIn("class=\"health-badge\"", app_source)
+        self.assertIn("class=\"health-strip\"", app_source)
+        self.assertIn("livePayload?.data_source", app_source)
+
+        self.assertIn("exportLiveSnapshot", app_source)
+        self.assertIn("URL.createObjectURL", app_source)
+        self.assertIn("algo-live-snapshot", app_source)
+        self.assertIn('t("actions.exportSnapshot")', app_source)
+
+        self.assertIn('"actions.saveWorkspace": "Save workspace"', i18n_source)
+        self.assertIn('"actions.exportSnapshot": "Export snapshot"', i18n_source)
+        self.assertIn('"labels.dataHealth": "Data health"', i18n_source)
+        self.assertIn('"labels.alerts": "Alerts"', i18n_source)
+        self.assertIn('"actions.saveWorkspace": "Сохранить рабочее место"', i18n_source)
+        self.assertIn('"actions.exportSnapshot": "Экспорт снимка"', i18n_source)
+
+        self.assertIn(".workspace-controls", style_source)
+        self.assertIn(".health-badge", style_source)
+        self.assertIn(".alert-controls", style_source)
+
+    def test_frontend_splits_live_configuration_and_styles(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        main_source = (root / "frontend" / "src" / "main.ts").read_text(encoding="utf-8")
+        style_source = (root / "frontend" / "src" / "style.css").read_text(encoding="utf-8")
+        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(encoding="utf-8")
+        helpers_source = (root / "frontend" / "src" / "liveUtils.ts").read_text(encoding="utf-8")
+
+        self.assertIn("from \"./liveConfig\"", app_source)
+        self.assertIn("from \"./liveUtils\"", app_source)
+        self.assertIn("export const liveSymbolOptions", config_source)
+        self.assertIn("export const moexBluechipSymbolOptions", config_source)
+        self.assertIn("export const strategyGroupCatalog", config_source)
+        self.assertIn("export function groupSignalsByConsensus", helpers_source)
+        self.assertIn("export function limitRecentSignals", helpers_source)
+        self.assertNotIn("const moexBluechipSymbolOptions = [", app_source)
+        self.assertNotIn("function groupSignalsByConsensus(", app_source)
+
+        self.assertIn('import "./style.css";', main_source)
+        self.assertIn('@import "./styles/live.css";', style_source)
+        self.assertIn('@import "./styles/breadth.css";', style_source)
+        self.assertIn('@import "./styles/account.css";', style_source)
+
     def test_live_controls_are_grouped_and_strategy_menu_is_searchable(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
-        style_source = (root / "frontend" / "src" / "style.css").read_text(encoding="utf-8")
+        style_source = (root / "frontend" / "src" / "styles" / "live.css").read_text(encoding="utf-8")
 
         self.assertIn('class="live-control-section market-controls"', source)
         self.assertIn('class="live-control-section signal-controls"', source)
@@ -239,7 +331,7 @@ class UiTests(unittest.TestCase):
 
     def test_live_crypto_spot_symbols_are_limited_to_btc_and_eth(self):
         source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "liveConfig.ts"
         ).read_text(encoding="utf-8")
         options_source = source.split("const liveSymbolOptions = [", 1)[1].split(
             "] satisfies SelectOption[];",
@@ -546,16 +638,18 @@ class UiTests(unittest.TestCase):
         self.assertIn(':short-signal-label="chartLabels.shortSignal"', app_source)
 
     def test_live_all_strategy_view_collapses_markers_by_consensus(self):
-        source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
-        ).read_text(encoding="utf-8")
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        helper_source = (root / "frontend" / "src" / "liveUtils.ts").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn('type SignalDisplayMode = "consensus" | "individual";', source)
         self.assertIn(
             'const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");',
             source,
         )
-        self.assertIn("const liveConsensusMinConfirmations = ref(2);", source)
+        self.assertIn("const liveConsensusMinConfirmations = ref(5);", source)
         self.assertIn(
             "const liveSignalDisplayOptions = computed<SelectOption[]>(() => [",
             source,
@@ -567,7 +661,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("!isMultiStrategyLive.value", source)
         self.assertIn("liveConsensusMinConfirmations.value", source)
         self.assertIn("groupSignalsByConsensus", source)
-        self.assertIn("formatConsensusReason", source)
+        self.assertIn("formatConsensusReason", helper_source)
         self.assertIn(':signals="displayedSignals"', source)
         self.assertIn('v-model="liveSignalDisplayMode"', source)
         self.assertIn('v-model.number="liveConsensusMinConfirmations"', source)
@@ -586,11 +680,14 @@ class UiTests(unittest.TestCase):
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
             encoding="utf-8"
         )
+        helper_source = (root / "frontend" / "src" / "liveUtils.ts").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("const liveMaxSignals = ref(80);", source)
         self.assertIn("limitRecentSignals(consensusSignals.value, liveMaxSignals.value)", source)
         self.assertIn("limitRecentSignals(rawSignals, liveMaxSignals.value)", source)
-        self.assertIn("function limitRecentSignals(signals: Marker[], limit: number): Marker[]", source)
+        self.assertIn("export function limitRecentSignals(signals: Marker[], limit: number): Marker[]", helper_source)
         self.assertIn('v-model.number="liveMaxSignals"', source)
         self.assertIn('t("labels.maxMarkers")', source)
         self.assertIn('"labels.maxMarkers": "Max markers"', i18n_source)
@@ -601,32 +698,35 @@ class UiTests(unittest.TestCase):
         source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
         )
+        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
+            encoding="utf-8"
+        )
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("const moexBluechipSymbolOptions = [", source)
-        self.assertIn('value: "SBER"', source)
-        self.assertIn('value: "GAZP"', source)
-        self.assertIn('value: "LKOH"', source)
-        self.assertIn('value: "YDEX"', source)
-        self.assertIn('value: "TATN"', source)
-        self.assertIn('value: "GMKN"', source)
-        self.assertIn('value: "PLZL"', source)
-        self.assertIn('value: "MOEX"', source)
-        self.assertIn('value: "SNGS"', source)
-        self.assertIn('value: "IMOEX"', source)
-        self.assertIn('value: "VTBR"', source)
-        self.assertIn('value: "ALRS"', source)
-        self.assertIn('value: "OZON"', source)
-        self.assertIn('value: "NLMK"', source)
-        self.assertIn('value: "CHMF"', source)
-        self.assertIn('value: "IRAO"', source)
-        self.assertIn('value: "SIBN"', source)
-        self.assertIn('value: "MTSS"', source)
-        self.assertIn('value: "POSI"', source)
-        self.assertIn('value: "PHOR"', source)
-        self.assertIn('value: "FLOT"', source)
+        self.assertIn("export const moexBluechipSymbolOptions = [", config_source)
+        self.assertIn('value: "SBER"', config_source)
+        self.assertIn('value: "GAZP"', config_source)
+        self.assertIn('value: "LKOH"', config_source)
+        self.assertIn('value: "YDEX"', config_source)
+        self.assertIn('value: "TATN"', config_source)
+        self.assertIn('value: "GMKN"', config_source)
+        self.assertIn('value: "PLZL"', config_source)
+        self.assertIn('value: "MOEX"', config_source)
+        self.assertIn('value: "SNGS"', config_source)
+        self.assertIn('value: "IMOEX"', config_source)
+        self.assertIn('value: "VTBR"', config_source)
+        self.assertIn('value: "ALRS"', config_source)
+        self.assertIn('value: "OZON"', config_source)
+        self.assertIn('value: "NLMK"', config_source)
+        self.assertIn('value: "CHMF"', config_source)
+        self.assertIn('value: "IRAO"', config_source)
+        self.assertIn('value: "SIBN"', config_source)
+        self.assertIn('value: "MTSS"', config_source)
+        self.assertIn('value: "POSI"', config_source)
+        self.assertIn('value: "PHOR"', config_source)
+        self.assertIn('value: "FLOT"', config_source)
         self.assertIn('value: "russian_bluechips"', source)
         self.assertIn('t("options.moexBluechips")', source)
         self.assertIn("russian_bluechips: moexBluechipSymbolOptions", source)
@@ -635,7 +735,7 @@ class UiTests(unittest.TestCase):
 
     def test_live_moex_symbol_options_are_sorted_alphabetically(self):
         root = Path(__file__).resolve().parents[1]
-        source = (root / "frontend" / "src" / "App.vue").read_text(
+        source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
             encoding="utf-8"
         )
         options_block = source.split("const moexBluechipSymbolOptions = [", 1)[
@@ -682,15 +782,18 @@ class UiTests(unittest.TestCase):
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
             encoding="utf-8"
         )
-        style_source = (root / "frontend" / "src" / "style.css").read_text(
+        style_source = (root / "frontend" / "src" / "styles" / "live.css").read_text(
+            encoding="utf-8"
+        )
+        helper_source = (root / "frontend" / "src" / "liveUtils.ts").read_text(
             encoding="utf-8"
         )
 
         self.assertIn('const liveSymbolSearch = ref("")', source)
         self.assertIn("const filteredLiveSymbolOptions = computed", source)
-        self.assertIn("function normalizeSearchText(value: string | number): string", source)
-        self.assertIn("toLocaleLowerCase()", source)
-        self.assertIn("function optionMatchesSearch(option: SelectOption, query: string): boolean", source)
+        self.assertIn("export function normalizeSearchText(value: string | number): string", helper_source)
+        self.assertIn("toLowerCase()", helper_source)
+        self.assertIn("export function optionMatchesSearch(option: SelectOption, query: string): boolean", helper_source)
         self.assertIn("optionMatchesSearch(option, query)", source)
         self.assertIn("const hasLiveSymbolSearch = computed", source)
         self.assertIn("let liveSymbolSearchTimer = 0", source)

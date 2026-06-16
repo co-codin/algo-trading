@@ -3,6 +3,22 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { requestJson, toQuery } from "./api";
 import TradingViewChart from "./components/TradingViewChart.vue";
 import {
+  LIVE_WORKSPACE_STORAGE_KEY,
+  defaultLiveIndicators,
+  liveCandleOptions,
+  liveIntervalOptions,
+  liveSymbolOptions,
+  moexBluechipSymbolOptions,
+  strategyGroupCatalog,
+  type SelectOption,
+} from "./liveConfig";
+import {
+  groupSignalsByConsensus,
+  limitRecentSignals,
+  normalizeSearchText,
+  optionMatchesSearch,
+} from "./liveUtils";
+import {
   LOCALE_STORAGE_KEY,
   SUPPORTED_LOCALES,
   normalizeLocale,
@@ -22,16 +38,11 @@ import type {
   MarketBreadthBar,
   MarketBreadthPayload,
   Mode,
-  Marker,
   StrategyInfo,
   StrategyPayload,
 } from "./types";
 
 type StatusType = "" | "busy" | "error";
-type SelectOption = {
-  label: string;
-  value: string | number;
-};
 type SignalDisplayMode = "consensus" | "individual";
 type StrategyOption = StrategyInfo & {
   title: string;
@@ -43,10 +54,26 @@ type StrategyGroup = {
   strategyNames: string[];
   strategies: StrategyOption[];
 };
-type StrategyGroupDefinition = {
+type LiveHealthTone = "good" | "warning" | "error";
+type LiveDataHealth = {
+  label: string;
+  detail: string;
+  tone: LiveHealthTone;
+};
+type LiveWorkspace = {
   id: string;
-  labelKey: MessageKey;
-  strategyNames: string[];
+  name: string;
+  market: string;
+  symbol: string;
+  interval: string;
+  limit: string | number;
+  indicators: string[];
+  strategies: string[];
+  signalDisplayMode: SignalDisplayMode;
+  consensusMinConfirmations: number;
+  maxSignals: number;
+  showSignals: boolean;
+  savedAt: string;
 };
 
 const routeModes: Record<string, Mode> = {
@@ -64,164 +91,6 @@ const modeRoutes: Record<Mode, string> = {
   profile: "/profile",
   admin: "/admin",
 };
-
-const liveSymbolOptions = [
-  { value: "BTCUSDT", label: "BTCUSDT" },
-  { value: "ETHUSDT", label: "ETHUSDT" },
-] satisfies SelectOption[];
-
-const moexBluechipSymbolOptions = [
-  { value: "AFKS", label: "AFKS" },
-  { value: "AFLT", label: "AFLT" },
-  { value: "ALRS", label: "ALRS" },
-  { value: "ASTR", label: "ASTR" },
-  { value: "BANEP", label: "BANEP" },
-  { value: "BELU", label: "BELU" },
-  { value: "BSPB", label: "BSPB" },
-  { value: "CBOM", label: "CBOM" },
-  { value: "CHMF", label: "CHMF" },
-  { value: "CNRU", label: "CNRU" },
-  { value: "DATA", label: "DATA" },
-  { value: "DIAS", label: "DIAS" },
-  { value: "DOMRF", label: "DOMRF" },
-  { value: "ENPG", label: "ENPG" },
-  { value: "ETLN", label: "ETLN" },
-  { value: "EUTR", label: "EUTR" },
-  { value: "FEES", label: "FEES" },
-  { value: "FESH", label: "FESH" },
-  { value: "FIXR", label: "FIXR" },
-  { value: "FLOT", label: "FLOT" },
-  { value: "GAZP", label: "GAZP" },
-  { value: "GMKN", label: "GMKN" },
-  { value: "HEAD", label: "HEAD" },
-  { value: "IMOEX", label: "IMOEX · MOEX Russia Index" },
-  { value: "IRAO", label: "IRAO" },
-  { value: "IVAT", label: "IVAT" },
-  { value: "LENT", label: "LENT" },
-  { value: "LKOH", label: "LKOH" },
-  { value: "LSNGP", label: "LSNGP" },
-  { value: "LSRG", label: "LSRG" },
-  { value: "MAGN", label: "MAGN" },
-  { value: "MGNT", label: "MGNT" },
-  { value: "MOEX", label: "MOEX" },
-  { value: "MRKC", label: "MRKC" },
-  { value: "MRKV", label: "MRKV" },
-  { value: "MSNG", label: "MSNG" },
-  { value: "MTLR", label: "MTLR" },
-  { value: "MTLRP", label: "MTLRP" },
-  { value: "MTSS", label: "MTSS" },
-  { value: "MVID", label: "MVID" },
-  { value: "NLMK", label: "NLMK" },
-  { value: "NMTP", label: "NMTP" },
-  { value: "NVTK", label: "NVTK" },
-  { value: "OZON", label: "OZON" },
-  { value: "PHOR", label: "PHOR" },
-  { value: "PIKK", label: "PIKK" },
-  { value: "PLZL", label: "PLZL" },
-  { value: "POSI", label: "POSI" },
-  { value: "RAGR", label: "RAGR" },
-  { value: "RASP", label: "RASP" },
-  { value: "RENI", label: "RENI" },
-  { value: "RNFT", label: "RNFT" },
-  { value: "ROSN", label: "ROSN" },
-  { value: "RTKM", label: "RTKM" },
-  { value: "RUAL", label: "RUAL" },
-  { value: "SBER", label: "SBER" },
-  { value: "SBERP", label: "SBERP" },
-  { value: "SELG", label: "SELG" },
-  { value: "SFIN", label: "SFIN" },
-  { value: "SGZH", label: "SGZH" },
-  { value: "SIBN", label: "SIBN" },
-  { value: "SMLT", label: "SMLT" },
-  { value: "SNGS", label: "SNGS" },
-  { value: "SNGSP", label: "SNGSP" },
-  { value: "SPBE", label: "SPBE" },
-  { value: "SVCB", label: "SVCB" },
-  { value: "T", label: "T" },
-  { value: "TATN", label: "TATN" },
-  { value: "TATNP", label: "TATNP" },
-  { value: "TRMK", label: "TRMK" },
-  { value: "TRNFP", label: "TRNFP" },
-  { value: "UGLD", label: "UGLD" },
-  { value: "UPRO", label: "UPRO" },
-  { value: "VKCO", label: "VKCO" },
-  { value: "VTBR", label: "VTBR" },
-  { value: "WUSH", label: "WUSH" },
-  { value: "X5", label: "X5" },
-  { value: "YDEX", label: "YDEX" },
-] satisfies SelectOption[];
-
-const liveIntervalOptions = [
-  { value: "1m", label: "1m" },
-  { value: "3m", label: "3m" },
-  { value: "5m", label: "5m" },
-  { value: "15m", label: "15m" },
-  { value: "30m", label: "30m" },
-  { value: "1h", label: "1h" },
-  { value: "4h", label: "4h" },
-  { value: "1d", label: "1d" },
-  { value: "1w", label: "1w" },
-  { value: "1M", label: "1M" },
-] satisfies SelectOption[];
-
-const liveCandleOptions = [
-  { value: 80, label: "80" },
-  { value: 180, label: "180" },
-  { value: 300, label: "300" },
-  { value: 500, label: "500" },
-  { value: 1000, label: "1000" },
-] satisfies SelectOption[];
-
-const defaultLiveIndicators = ["ema", "vwap", "volume", "rsi", "macd"];
-const strategyGroupCatalog: StrategyGroupDefinition[] = [
-  {
-    id: "recommended",
-    labelKey: "strategyGroups.recommended",
-    strategyNames: ["ema-rsi", "macd", "supertrend", "vwap-trend-continuation"],
-  },
-  {
-    id: "trend",
-    labelKey: "strategyGroups.trend",
-    strategyNames: [
-      "ema-ribbon",
-      "ema-pullback",
-      "atr-trailing-trend",
-      "sma-crossover",
-    ],
-  },
-  {
-    id: "reversal",
-    labelKey: "strategyGroups.reversal",
-    strategyNames: [
-      "bollinger-reversion",
-      "rsi-reversal",
-      "vwap-reversion",
-      "stoch-rsi-reversal",
-      "cci-reversal",
-      "williams-r-reversal",
-    ],
-  },
-  {
-    id: "breakout",
-    labelKey: "strategyGroups.breakout",
-    strategyNames: [
-      "donchian-breakout",
-      "keltner-breakout",
-      "bollinger-squeeze-release",
-      "momentum-scalping",
-    ],
-  },
-  {
-    id: "volume",
-    labelKey: "strategyGroups.volume",
-    strategyNames: ["obv-trend", "volume-breakout"],
-  },
-  {
-    id: "ensemble",
-    labelKey: "strategyGroups.ensemble",
-    strategyNames: ["combined-signals"],
-  },
-];
 
 const settings = reactive<Record<string, string>>({
   interval: "1h",
@@ -316,13 +185,18 @@ const liveInterval = ref("5m");
 const liveLimit = ref<string | number>(180);
 const liveRefresh = ref("10");
 const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
-const liveConsensusMinConfirmations = ref(2);
+const liveConsensusMinConfirmations = ref(5);
 const liveMaxSignals = ref(80);
 const liveSelectedStrategies = ref<string[]>(["ema-rsi"]);
 const liveStrategySearch = ref("");
 const liveStrategyMenu = ref<HTMLDetailsElement | null>(null);
 const liveVisibleIndicators = ref<string[]>([...defaultLiveIndicators]);
+const liveWorkspaces = ref<LiveWorkspace[]>([]);
+const liveWorkspaceName = ref("");
+const liveAlertsEnabled = ref(false);
+const lastAlertSignature = ref("");
 const showSignals = ref(true);
+const liveDataUpdatedAt = ref<string | null>(null);
 let liveTimer = 0;
 let liveSymbolSearchTimer = 0;
 let isApplyingLiveSettingsFromUrl = false;
@@ -512,6 +386,35 @@ const selectedLiveStrategyPreview = computed(() => {
 });
 const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
+const liveDataUpdatedLabel = computed(() => formatDateTime(liveDataUpdatedAt.value));
+const liveDataHealth = computed<LiveDataHealth>(() => {
+  if (liveStatusType.value === "error") {
+    return {
+      label: t("health.error"),
+      detail: liveStatus.value,
+      tone: "error",
+    };
+  }
+  if (!livePayload.value) {
+    return {
+      label: t("health.waiting"),
+      detail: t("empty.loadChart"),
+      tone: "warning",
+    };
+  }
+  if (liveMarket.value === "russian_bluechips") {
+    return {
+      label: t("health.exchange"),
+      detail: t("health.moexDetail"),
+      tone: "warning",
+    };
+  }
+  return {
+    label: t("health.live"),
+    detail: livePayload.value.data_source,
+    tone: "good",
+  };
+});
 const visibleLiveIndicators = computed<IndicatorDefinition[]>(() => {
   const selectedIndicators = new Set(liveVisibleIndicators.value);
   return (livePayload.value?.indicators ?? []).filter((indicator) =>
@@ -595,6 +498,10 @@ watch([liveMarket, liveSymbol, liveVisibleIndicators, liveStrategyRequest], () =
   }
 }, { deep: true });
 
+watch(displayedSignals, () => {
+  maybeNotifyLiveAlert();
+});
+
 watch(locale, () => {
   if (!liveStatusType.value) {
     liveStatus.value = t("status.ready");
@@ -614,6 +521,7 @@ watch(locale, () => {
 });
 
 onMounted(async () => {
+  loadLiveWorkspaces();
   window.addEventListener("popstate", handlePopState);
   await loadCurrentUser();
   if (authUser.value) {
@@ -822,6 +730,165 @@ function parseLiveStrategyRequest(value: string | null): string[] {
   return requestedNames.length ? requestedNames : [fallback];
 }
 
+function loadLiveWorkspaces() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LIVE_WORKSPACE_STORAGE_KEY) ?? "[]");
+    liveWorkspaces.value = Array.isArray(parsed)
+      ? parsed.filter(isLiveWorkspace).slice(0, 8)
+      : [];
+  } catch {
+    liveWorkspaces.value = [];
+  }
+}
+
+function persistLiveWorkspaces() {
+  localStorage.setItem(LIVE_WORKSPACE_STORAGE_KEY, JSON.stringify(liveWorkspaces.value));
+}
+
+function saveLiveWorkspace() {
+  const now = new Date();
+  const workspace: LiveWorkspace = {
+    id: `${now.getTime()}`,
+    name: liveWorkspaceName.value.trim() || `${liveSymbol.value} ${liveInterval.value}`,
+    market: liveMarket.value,
+    symbol: liveSymbol.value,
+    interval: liveInterval.value,
+    limit: liveLimit.value,
+    indicators: [...liveVisibleIndicators.value],
+    strategies: [...selectedLiveStrategyNames.value],
+    signalDisplayMode: liveSignalDisplayMode.value,
+    consensusMinConfirmations: liveConsensusMinConfirmations.value,
+    maxSignals: liveMaxSignals.value,
+    showSignals: showSignals.value,
+    savedAt: now.toISOString(),
+  };
+  liveWorkspaces.value = [
+    workspace,
+    ...liveWorkspaces.value.filter((existing) => existing.name !== workspace.name),
+  ].slice(0, 8);
+  liveWorkspaceName.value = "";
+  persistLiveWorkspaces();
+  setLiveStatus(t("status.workspaceSaved"));
+}
+
+function applyLiveWorkspace(workspace: LiveWorkspace) {
+  liveMarket.value = workspace.market;
+  const symbolOptions = liveSymbolsByMarket.value[workspace.market] ?? liveSymbolOptions;
+  const symbolExists = symbolOptions.some(
+    (option) => String(option.value) === workspace.symbol,
+  );
+  liveSymbol.value = symbolExists
+    ? workspace.symbol
+    : String(symbolOptions[0]?.value ?? "BTCUSDT");
+  liveInterval.value = workspace.interval;
+  liveLimit.value = workspace.limit;
+  liveVisibleIndicators.value = [...workspace.indicators];
+  liveSignalDisplayMode.value = workspace.signalDisplayMode;
+  liveConsensusMinConfirmations.value = workspace.consensusMinConfirmations;
+  liveMaxSignals.value = workspace.maxSignals;
+  showSignals.value = workspace.showSignals;
+  setLiveStrategies(workspace.strategies);
+  syncLiveUrl();
+  setLiveStatus(`${t("status.workspaceLoaded")} ${workspace.name}`);
+}
+
+function deleteLiveWorkspace(workspaceId: string) {
+  liveWorkspaces.value = liveWorkspaces.value.filter(
+    (workspace) => workspace.id !== workspaceId,
+  );
+  persistLiveWorkspaces();
+}
+
+function isLiveWorkspace(value: unknown): value is LiveWorkspace {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const workspace = value as Partial<LiveWorkspace>;
+  return (
+    typeof workspace.id === "string" &&
+    typeof workspace.name === "string" &&
+    typeof workspace.market === "string" &&
+    typeof workspace.symbol === "string" &&
+    typeof workspace.interval === "string" &&
+    Array.isArray(workspace.indicators) &&
+    Array.isArray(workspace.strategies)
+  );
+}
+
+async function toggleLiveAlerts() {
+  if (!liveAlertsEnabled.value) {
+    return;
+  }
+  if (!("Notification" in window)) {
+    liveAlertsEnabled.value = false;
+    setLiveStatus(t("status.alertsUnavailable"), "error");
+    return;
+  }
+  if (Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+  if (Notification.permission !== "granted") {
+    liveAlertsEnabled.value = false;
+    setLiveStatus(t("status.alertsBlocked"), "error");
+    return;
+  }
+  setLiveStatus(t("status.alertsEnabled"));
+  maybeNotifyLiveAlert();
+}
+
+function maybeNotifyLiveAlert() {
+  if (
+    !liveAlertsEnabled.value ||
+    !("Notification" in window) ||
+    Notification.permission !== "granted"
+  ) {
+    return;
+  }
+  const latestSignal = displayedSignals.value.at(-1);
+  if (!latestSignal) {
+    return;
+  }
+  const signature = `${liveSymbol.value}:${latestSignal.time}:${latestSignal.type}:${latestSignal.reason}`;
+  if (signature === lastAlertSignature.value) {
+    return;
+  }
+  lastAlertSignature.value = signature;
+  new Notification(`${liveSymbol.value} ${latestSignal.type}`, {
+    body: latestSignal.reason,
+  });
+}
+
+function exportLiveSnapshot() {
+  const snapshot = {
+    exported_at: new Date().toISOString(),
+    workspace: {
+      market: liveMarket.value,
+      symbol: liveSymbol.value,
+      interval: liveInterval.value,
+      limit: liveLimit.value,
+      indicators: liveVisibleIndicators.value,
+      strategies: selectedLiveStrategyNames.value,
+      signal_display_mode: liveSignalDisplayMode.value,
+      consensus_min_confirmations: liveConsensusMinConfirmations.value,
+      max_signals: liveMaxSignals.value,
+      show_signals: showSignals.value,
+    },
+    data_health: liveDataHealth.value,
+    payload: livePayload.value,
+  };
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `algo-live-snapshot-${liveSymbol.value}-${Date.now()}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function loadProfile() {
   const payload = await requestJson<AuthMePayload>("/api/profile");
   authUser.value = payload.user;
@@ -975,18 +1042,20 @@ async function loadLiveChart() {
   }
   setLiveStatus(t("status.loadingChart"), "busy");
   try {
-      const query = toQuery({
-        ...settings,
-        market: liveMarket.value,
-        symbol: liveSymbol.value,
-        interval: liveInterval.value,
-        limit: liveLimit.value,
-        strategy: liveStrategyRequest.value,
+    const query = toQuery({
+      ...settings,
+      market: liveMarket.value,
+      symbol: liveSymbol.value,
+      interval: liveInterval.value,
+      limit: liveLimit.value,
+      strategy: liveStrategyRequest.value,
     });
     livePayload.value = await requestJson<LiveChartPayload>(`/api/live-chart?${query}`);
+    liveDataUpdatedAt.value = new Date().toISOString();
     setLiveStatus(`${t("status.updated")} ${new Date().toLocaleTimeString()}`);
   } catch (error) {
     livePayload.value = null;
+    liveDataUpdatedAt.value = null;
     setLiveStatus(errorMessage(error), "error");
   }
 }
@@ -1005,6 +1074,9 @@ function setLiveStrategies(strategyNames: string[]) {
   const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
   const nextNames = strategyNames.filter((strategyName) => availableNames.has(strategyName));
   liveSelectedStrategies.value = nextNames.length ? nextNames : [strategies.value[0]?.name ?? "ema-rsi"];
+  if (liveSelectedStrategies.value.length > 1) {
+    liveSignalDisplayMode.value = "consensus";
+  }
 }
 
 function selectLiveStrategyGroup(strategyNames: string[]) {
@@ -1087,67 +1159,6 @@ async function loadMarketBreadth() {
 
 function strategyTitle(name: string): string {
   return translateStrategyTitle(locale.value, name, name);
-}
-
-function normalizeSearchText(value: string | number): string {
-  return String(value).trim().toLocaleLowerCase();
-}
-
-function optionMatchesSearch(option: SelectOption, query: string): boolean {
-  const normalizedQuery = normalizeSearchText(query);
-  if (!normalizedQuery) {
-    return true;
-  }
-  return normalizeSearchText(`${option.label} ${option.value}`).includes(normalizedQuery);
-}
-
-function groupSignalsByConsensus(signals: Marker[], minimumConfirmations: number): Marker[] {
-  const minimum = Math.max(1, Math.floor(Number(minimumConfirmations) || 1));
-  const groups = new Map<string, Marker[]>();
-  for (const signal of signals) {
-    const key = `${signal.time}:${signal.type}`;
-    groups.set(key, [...(groups.get(key) ?? []), signal]);
-  }
-  return [...groups.values()]
-    .filter((group) => group.length >= minimum)
-    .map((group) => consensusMarkerFromGroup(group))
-    .sort((left, right) => Number(left.time) - Number(right.time));
-}
-
-function limitRecentSignals(signals: Marker[], limit: number): Marker[] {
-  const normalizedLimit = Math.max(0, Math.floor(Number(limit) || 0));
-  if (!normalizedLimit || signals.length <= normalizedLimit) {
-    return signals;
-  }
-  return signals.slice(-normalizedLimit);
-}
-
-function consensusMarkerFromGroup(group: Marker[]): Marker {
-  const first = group[0];
-  return {
-    time: first.time,
-    price: first.price,
-    type: first.type,
-    reason: formatConsensusReason(group),
-  };
-}
-
-function formatConsensusReason(group: Marker[]): string {
-  const strategyNames = distinctStrategyNames(group).join(", ");
-  return strategyNames ? `${group.length}: ${strategyNames}` : String(group.length);
-}
-
-function distinctStrategyNames(group: Marker[]): string[] {
-  return [
-    ...new Set(
-      group
-        .map((marker) => {
-          const separator = marker.reason.indexOf(":");
-          return separator > 0 ? marker.reason.slice(0, separator) : "";
-        })
-        .filter(Boolean),
-    ),
-  ];
 }
 
 function formatNumber(value: unknown): string {
@@ -1347,6 +1358,18 @@ function errorMessage(error: unknown): string {
           <b>{{ formatNumber(liveSignalCount) }}</b>
         </div>
       </div>
+      <div class="health-strip">
+        <div class="health-badge" :class="`is-${liveDataHealth.tone}`">
+          <span>{{ t("labels.dataHealth") }}</span>
+          <b>{{ liveDataHealth.label }}</b>
+          <small>{{ liveDataHealth.detail }}</small>
+        </div>
+        <div class="health-badge">
+          <span>{{ t("labels.updated") }}</span>
+          <b>{{ liveDataUpdatedLabel }}</b>
+          <small>{{ livePayload?.data_source ?? t("health.waiting") }}</small>
+        </div>
+      </div>
       <div class="live-controls">
         <div class="live-control-section market-controls">
           <label>
@@ -1524,6 +1547,45 @@ function errorMessage(error: unknown): string {
           <button class="primary" type="button" @click="refreshLiveChart">
             {{ t("actions.refreshChart") }}
           </button>
+        </div>
+      </div>
+      <div class="workspace-controls">
+        <label>
+          <span>{{ t("labels.workspace") }}</span>
+          <input
+            v-model.trim="liveWorkspaceName"
+            autocomplete="off"
+            :placeholder="`${liveSymbol} ${liveInterval}`"
+          >
+        </label>
+        <button class="secondary" type="button" @click="saveLiveWorkspace">
+          {{ t("actions.saveWorkspace") }}
+        </button>
+        <button class="secondary" type="button" @click="exportLiveSnapshot">
+          {{ t("actions.exportSnapshot") }}
+        </button>
+        <label class="alert-controls">
+          <input v-model="liveAlertsEnabled" type="checkbox" @change="toggleLiveAlerts">
+          <span>{{ t("labels.alerts") }}</span>
+        </label>
+        <div v-if="liveWorkspaces.length" class="workspace-list">
+          <div
+            v-for="workspace in liveWorkspaces"
+            :key="workspace.id"
+            class="workspace-chip"
+          >
+            <button class="secondary" type="button" @click="applyLiveWorkspace(workspace)">
+              {{ workspace.name }}
+            </button>
+            <button
+              class="secondary workspace-delete"
+              type="button"
+              :aria-label="`${t('actions.deleteWorkspace')} ${workspace.name}`"
+              @click="deleteLiveWorkspace(workspace.id)"
+            >
+              x
+            </button>
+          </div>
         </div>
       </div>
       <div class="indicator-picker">

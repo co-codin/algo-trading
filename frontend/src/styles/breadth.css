@@ -1,0 +1,37 @@
+.breadth-panel {
+  display: grid;
+  gap: 12px;
+  overflow: hidden;
+  padding: 0;
+}
+
+.breadth-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: #10141c;
+  border-bottom: 1px solid var(--line);
+}
+
+.breadth-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+}
+
+.breadth-put-call .tv-chart {
+  height: 440px;
+  min-height: 440px;
+}
+
+@media (max-width: 1060px) {
+  .breadth-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .breadth-summary {
+    grid-template-columns: 1fr;
+  }
+}

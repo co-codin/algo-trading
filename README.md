@@ -28,9 +28,11 @@ The frontend is a Vue 3 control panel with direct URLs:
 - `http://127.0.0.1:8765/profile`
 - `http://127.0.0.1:8765/admin`
 
-The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST, the S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`, and Russian stocks use MOEX APIM share candles when `MOEX_API_KEY` or `MOEXALGO_API_KEY` is configured, falling back to delayed public MOEX ISS candles without a token. Choose `All strategies` to show consensus or capped individual strategy markers instead of flooding the chart with every raw marker.
+The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST, the S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`, and Russian stocks use MOEX APIM share candles when `MOEX_API_KEY` or `MOEXALGO_API_KEY` is configured, falling back to delayed public MOEX ISS candles without a token. Choose `All strategies` to show consensus or capped individual strategy markers instead of flooding the chart with every raw marker. The page also supports saved local workspaces, data-health badges, browser alerts for new visible signals, and JSON snapshot export for the current chart state.
 
 The `Breadth` page shows cached market-breadth history, including put/call ratio at the top. `Profile` is available for signed-in users. `Admin` is visible only when the signed-in user's `is_admin` flag is true.
+
+Project playbooks for repeated work live in [`SKILLS.md`](SKILLS.md) and [`docs/skills/`](docs/skills/): live chart UX, market-data integrations, auth/admin operations, and safe refactoring.
 
 Build the Vue frontend manually when changing frontend source:
 

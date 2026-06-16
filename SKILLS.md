@@ -2,6 +2,13 @@
 
 This project benefits from a small set of repeatable engineering skills. Use these when changing the app.
 
+Detailed playbooks live in:
+
+- `docs/skills/live-chart-ux.md`
+- `docs/skills/market-data-integrations.md`
+- `docs/skills/auth-admin-ops.md`
+- `docs/skills/refactoring.md`
+
 ## Market Data Integration
 
 - Keep every market source behind `MarketDataClient`.

@@ -1,3 +1,7 @@
+@import "./styles/live.css";
+@import "./styles/breadth.css";
+@import "./styles/account.css";
+
 :root {
   color-scheme: dark;
   --bg: #0f1318;
