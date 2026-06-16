@@ -371,7 +371,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("refreshLiveChart();", source)
         self.assertIn("market: liveMarket.value", source)
 
-    def test_live_page_shows_chart_loader_while_fetching_data(self):
+    def test_live_page_shows_chart_loader_only_for_manual_chart_refresh(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -383,7 +383,14 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('const liveChartLoading = computed(() => liveStatusType.value === "busy")', app_source)
+        self.assertIn("const liveChartLoading = ref(false);", app_source)
+        self.assertIn("async function loadLiveChart(options: { showLoader?: boolean } = {})", app_source)
+        self.assertIn("const showLoader = options.showLoader === true;", app_source)
+        self.assertIn("if (showLoader) {\n    liveChartLoading.value = true;", app_source)
+        self.assertIn("if (showLoader) {\n      liveChartLoading.value = false;", app_source)
+        self.assertIn("void loadLiveChart({ showLoader: options.showLoader === true });", app_source)
+        self.assertIn("window.setInterval(() => void loadLiveChart(), seconds * 1000)", app_source)
+        self.assertIn("startLivePolling({ showLoader: true });", app_source)
         self.assertIn(':class="{ \'is-loading\': liveChartLoading }"', app_source)
         self.assertIn('v-if="liveChartLoading"', app_source)
         self.assertIn('class="chart-loader"', app_source)

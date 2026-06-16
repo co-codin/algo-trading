@@ -198,6 +198,7 @@ const liveAlertsEnabled = ref(false);
 const lastAlertSignature = ref("");
 const showSignals = ref(true);
 const liveDataUpdatedAt = ref<string | null>(null);
+const liveChartLoading = ref(false);
 let liveTimer = 0;
 let isApplyingLiveSettingsFromUrl = false;
 
@@ -387,7 +388,6 @@ const selectedLiveStrategyPreview = computed(() => {
 const liveSignalCount = computed(() => livePayload.value?.signals.length ?? 0);
 const liveCandleCount = computed(() => livePayload.value?.candles.length ?? 0);
 const liveDataUpdatedLabel = computed(() => formatDateTime(liveDataUpdatedAt.value));
-const liveChartLoading = computed(() => liveStatusType.value === "busy");
 const liveDataHealth = computed<LiveDataHealth>(() => {
   if (liveStatusType.value === "error") {
     return {
@@ -1018,12 +1018,16 @@ async function loadStrategies() {
   strategies.value = payload.strategies;
 }
 
-async function loadLiveChart() {
+async function loadLiveChart(options: { showLoader?: boolean } = {}) {
   if (!canUseFeatures.value) {
     setLiveStatus(t("auth.inactive"), "error");
     return;
   }
-  setLiveStatus(t("status.loadingChart"), "busy");
+  const showLoader = options.showLoader === true;
+  if (showLoader) {
+    liveChartLoading.value = true;
+    setLiveStatus(t("status.loadingChart"), "busy");
+  }
   try {
     const query = toQuery({
       ...settings,
@@ -1040,6 +1044,10 @@ async function loadLiveChart() {
     livePayload.value = null;
     liveDataUpdatedAt.value = null;
     setLiveStatus(errorMessage(error), "error");
+  } finally {
+    if (showLoader) {
+      liveChartLoading.value = false;
+    }
   }
 }
 
@@ -1096,10 +1104,10 @@ function toggleLiveIndicator(indicatorId: string) {
   liveVisibleIndicators.value = [...liveVisibleIndicators.value, indicatorId];
 }
 
-function startLivePolling() {
-  void loadLiveChart();
+function startLivePolling(options: { showLoader?: boolean } = {}) {
+  void loadLiveChart({ showLoader: options.showLoader === true });
   const seconds = Math.max(2, Number(liveRefresh.value || 10));
-  liveTimer = window.setInterval(loadLiveChart, seconds * 1000);
+  liveTimer = window.setInterval(() => void loadLiveChart(), seconds * 1000);
 }
 
 function stopLivePolling() {
@@ -1112,10 +1120,10 @@ function stopLivePolling() {
 function refreshLiveChart() {
   stopLivePolling();
   if (activeMode.value === "live") {
-    startLivePolling();
+    startLivePolling({ showLoader: true });
     return;
   }
-  void loadLiveChart();
+  void loadLiveChart({ showLoader: true });
 }
 
 async function loadMarketBreadth() {
