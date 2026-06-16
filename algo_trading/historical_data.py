@@ -9,6 +9,7 @@ from pathlib import Path
 from algo_trading.data import (
     BinanceMarketDataClient,
     HistoricalMarketDataClient,
+    MAG7_STOCK_SYMBOLS,
     MOEX_BLUECHIP_SYMBOLS,
     MoexSharesMarketDataClient,
     YahooFuturesMarketDataClient,
@@ -31,6 +32,7 @@ _MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
 _CRYPTO_SPOT_MARKET = "crypto_spot"
 _CME_FUTURES_MARKET = "cme_futures"
 _COMMODITIES_MARKET = "commodities"
+_MAG7_STOCKS_MARKET = "mag7_stocks"
 _RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 _SUPPORTED_INTERVALS = {
     "1m",
@@ -219,7 +221,7 @@ class HistoricalCsvRefreshService:
 def historical_client_for_market(market: str) -> HistoricalMarketDataClient:
     if market == _CRYPTO_SPOT_MARKET:
         return BinanceMarketDataClient()
-    if market in {_CME_FUTURES_MARKET, _COMMODITIES_MARKET}:
+    if market in {_CME_FUTURES_MARKET, _COMMODITIES_MARKET, _MAG7_STOCKS_MARKET}:
         return YahooFuturesMarketDataClient()
     if market == _RUSSIAN_BLUECHIPS_MARKET:
         return MoexSharesMarketDataClient()
@@ -237,6 +239,8 @@ def _parse_historical_csv_filename(path: Path) -> tuple[str, str] | None:
 
 def _infer_market(relative_path: Path, symbol: str) -> str:
     symbol_key = symbol.upper()
+    if relative_path.parent.name == _MAG7_STOCKS_MARKET or symbol_key in MAG7_STOCK_SYMBOLS:
+        return _MAG7_STOCKS_MARKET
     if relative_path.parent.name == _RUSSIAN_BLUECHIPS_MARKET or symbol_key in MOEX_BLUECHIP_SYMBOLS:
         return _RUSSIAN_BLUECHIPS_MARKET
     if symbol_key in _COMMODITY_SYMBOLS:

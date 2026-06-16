@@ -340,6 +340,8 @@ class UiTests(unittest.TestCase):
         self.assertIn("HistogramSeries", chart_source)
         self.assertIn("syncIndicatorSeries", chart_source)
         self.assertIn("paneIndexForIndicator", chart_source)
+        self.assertIn("color?: string;", types_source)
+        self.assertIn("color: point.color ?? indicatorSeriesItem.color", chart_source)
 
     def test_live_crypto_spot_symbols_are_limited_to_btc_and_eth(self):
         source = (
@@ -786,7 +788,28 @@ class UiTests(unittest.TestCase):
         self.assertIn('"options.commodities": "Commodities"', i18n_source)
         self.assertIn('"options.commodities": "Сырьевые товары"', i18n_source)
 
-    def test_live_page_filters_symbol_picker_by_search_text(self):
+    def test_live_page_exposes_mag7_stocks_market(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("export const mag7StockSymbolOptions = [", config_source)
+        self.assertIn('value: "mag7_stocks"', app_source)
+        self.assertIn('t("options.mag7Stocks")', app_source)
+        self.assertIn("mag7_stocks: mag7StockSymbolOptions", app_source)
+        for symbol in ("AAPL", "AMZN", "GOOGL", "META", "MSFT", "NVDA", "TSLA"):
+            self.assertIn(f'value: "{symbol}"', config_source)
+        self.assertIn('"options.mag7Stocks": "MAG 7 Stocks"', i18n_source)
+        self.assertIn('"options.mag7Stocks": "Акции MAG 7"', i18n_source)
+
+    def test_live_page_filters_symbol_picker_by_search_text_without_auto_select(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -808,14 +831,12 @@ class UiTests(unittest.TestCase):
         self.assertIn("export function optionMatchesSearch(option: SelectOption, query: string): boolean", helper_source)
         self.assertIn("optionMatchesSearch(option, query)", source)
         self.assertIn("const hasLiveSymbolSearch = computed", source)
-        self.assertIn("let liveSymbolSearchTimer = 0", source)
-        self.assertIn("function clearLiveSymbolSearchTimer()", source)
-        self.assertIn("watch(liveSymbolSearch, () => {", source)
-        self.assertIn("window.setTimeout(() => {", source)
-        self.assertIn("const matchedSymbol = filteredLiveSymbolOptions.value[0]", source)
-        self.assertIn("selectLiveSymbol(matchedSymbol.value)", source)
-        self.assertIn("}, 1000)", source)
-        self.assertIn("clearLiveSymbolSearchTimer();\n  window.removeEventListener", source)
+        self.assertNotIn("let liveSymbolSearchTimer = 0", source)
+        self.assertNotIn("function clearLiveSymbolSearchTimer()", source)
+        self.assertNotIn("watch(liveSymbolSearch, () => {", source)
+        self.assertNotIn("window.setTimeout(() => {", source)
+        self.assertNotIn("const matchedSymbol = filteredLiveSymbolOptions.value[0]", source)
+        self.assertNotIn("selectLiveSymbol(matchedSymbol.value)", source)
         self.assertIn("function selectLiveSymbol(value: string | number)", source)
         self.assertIn('v-model.trim="liveSymbolSearch"', source)
         self.assertIn('type="search"', source)
@@ -1085,6 +1106,9 @@ class UiTests(unittest.TestCase):
         indicator_by_id = {indicator["id"]: indicator for indicator in indicators}
         self.assertEqual(indicator_by_id["ema"]["pane"], "price")
         self.assertEqual(indicator_by_id["volume"]["pane"], "volume")
+        volume_points = indicator_by_id["volume"]["series"][0]["points"]
+        self.assertEqual(volume_points[0]["color"], "#22ab94")
+        self.assertEqual(volume_points[8]["color"], "#f23645")
         self.assertEqual(indicator_by_id["rsi"]["pane"], "oscillator")
         self.assertEqual(indicator_by_id["macd"]["series"][2]["type"], "histogram")
         for indicator in indicators:
@@ -1312,6 +1336,31 @@ class UiTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "Yahoo Finance delayed commodity futures")
         self.assertEqual(payload["symbol"], "GC=F")
 
+    def test_live_chart_payload_accepts_mag7_stock_market(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([200, 201, 202, 203, 204])]
+
+        payload = live_chart_payload(
+            {
+                "market": "mag7_stocks",
+                "symbol": "nvda",
+                "interval": "5m",
+                "limit": 5,
+                "strategy": "ema-rsi",
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(client.kline_symbols, ["NVDA"])
+        self.assertEqual(payload["market"], "mag7_stocks")
+        self.assertEqual(payload["data_source"], "Yahoo Finance delayed US equities")
+        self.assertEqual(payload["symbol"], "NVDA")
+
     def test_market_data_client_from_payload_selects_futures_provider(self):
         self.assertIsInstance(
             market_data_client_from_payload({"market": "cme_futures"}),
@@ -1319,6 +1368,10 @@ class UiTests(unittest.TestCase):
         )
         self.assertIsInstance(
             market_data_client_from_payload({"market": "commodities"}),
+            YahooFuturesMarketDataClient,
+        )
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "mag7_stocks"}),
             YahooFuturesMarketDataClient,
         )
         self.assertIsInstance(

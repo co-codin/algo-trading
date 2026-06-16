@@ -64,6 +64,7 @@ export type Marker = {
 export type IndicatorPoint = {
   time: number;
   value: number;
+  color?: string;
 };
 
 export type IndicatorSeries = {

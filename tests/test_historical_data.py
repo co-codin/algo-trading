@@ -92,6 +92,37 @@ class HistoricalDataTests(unittest.TestCase):
         self.assertNotIn(str(now - (1096 * day_ms)), "\n".join(rows))
         self.assertIn(str(now - (1095 * day_ms)), "\n".join(rows))
 
+    def test_refresh_service_infers_mag7_stock_market_from_symbol_and_directory(self):
+        now = int(datetime(2026, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
+        markets: list[str] = []
+
+        def client_factory(market: str) -> FakeHistoricalClient:
+            markets.append(market)
+            return FakeHistoricalClient([_candle(now, 12.0)])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "AAPL-1d.csv").write_text(
+                "open_time,open,high,low,close,volume\n",
+                encoding="utf-8",
+            )
+            mag7_dir = base / "mag7_stocks"
+            mag7_dir.mkdir()
+            (mag7_dir / "MSFT-1d.csv").write_text(
+                "open_time,open,high,low,close,volume\n",
+                encoding="utf-8",
+            )
+            service = HistoricalCsvRefreshService(
+                data_dir=base,
+                client_factory=client_factory,
+                now=lambda: datetime(2026, 6, 16, tzinfo=timezone.utc),
+            )
+
+            summary = service.refresh_all()
+
+        self.assertEqual(summary["refreshed"], 2)
+        self.assertEqual(markets, ["mag7_stocks", "mag7_stocks"])
+
 
 def _candle(open_time: int, close: float) -> Candle:
     return Candle(

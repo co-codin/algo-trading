@@ -335,7 +335,7 @@ function toHistogramData(indicatorSeriesItem: IndicatorSeriesDefinition): Histog
   return indicatorSeriesItem.points.map((point) => ({
     time: toChartTime(point.time),
     value: Number(point.value),
-    color: indicatorSeriesItem.color,
+    color: point.color ?? indicatorSeriesItem.color,
   }));
 }
 

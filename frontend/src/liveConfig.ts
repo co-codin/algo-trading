@@ -18,6 +18,16 @@ export const liveSymbolOptions = [
   { value: "ETHUSDT", label: "ETHUSDT" },
 ] satisfies SelectOption[];
 
+export const mag7StockSymbolOptions = [
+  { value: "AAPL", label: "AAPL · Apple" },
+  { value: "AMZN", label: "AMZN · Amazon" },
+  { value: "GOOGL", label: "GOOGL · Alphabet" },
+  { value: "META", label: "META · Meta" },
+  { value: "MSFT", label: "MSFT · Microsoft" },
+  { value: "NVDA", label: "NVDA · NVIDIA" },
+  { value: "TSLA", label: "TSLA · Tesla" },
+] satisfies SelectOption[];
+
 export const moexBluechipSymbolOptions = [
   { value: "AFKS", label: "AFKS" },
   { value: "AFLT", label: "AFLT" },

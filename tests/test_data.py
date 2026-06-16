@@ -110,6 +110,41 @@ class DataTests(unittest.TestCase):
         self.assertIn("interval=5m", requests[0].full_url)
         self.assertIn("range=5d", requests[0].full_url)
 
+    def test_yahoo_client_accepts_mag7_stock_tickers(self):
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                {
+                    "chart": {
+                        "result": [
+                            {
+                                "timestamp": [1_700_000_000, 1_700_000_300],
+                                "indicators": {
+                                    "quote": [
+                                        {
+                                            "open": [470.0, 471.0],
+                                            "high": [472.0, 473.0],
+                                            "low": [469.0, 470.0],
+                                            "close": [471.0, 472.0],
+                                            "volume": [1000, 1200],
+                                        }
+                                    ]
+                                },
+                            }
+                        ],
+                        "error": None,
+                    }
+                }
+            )
+
+        candles = YahooFuturesMarketDataClient(opener=opener).get_klines("nvda", "5m", 2)
+
+        self.assertEqual(len(candles), 2)
+        self.assertEqual(candles[-1].close, 472.0)
+        self.assertIn("/v8/finance/chart/NVDA?", requests[0].full_url)
+
     def test_yahoo_futures_client_maps_hourly_interval_to_yahoo_interval(self):
         requests = []
 

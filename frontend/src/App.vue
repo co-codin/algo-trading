@@ -8,6 +8,7 @@ import {
   liveCandleOptions,
   liveIntervalOptions,
   liveSymbolOptions,
+  mag7StockSymbolOptions,
   moexBluechipSymbolOptions,
   strategyGroupCatalog,
   type SelectOption,
@@ -198,7 +199,6 @@ const lastAlertSignature = ref("");
 const showSignals = ref(true);
 const liveDataUpdatedAt = ref<string | null>(null);
 let liveTimer = 0;
-let liveSymbolSearchTimer = 0;
 let isApplyingLiveSettingsFromUrl = false;
 
 const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
@@ -228,6 +228,7 @@ const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "crypto_spot", label: t("options.cryptoSpot") },
   { value: "cme_futures", label: t("options.usIndexFutures") },
   { value: "commodities", label: t("options.commodities") },
+  { value: "mag7_stocks", label: t("options.mag7Stocks") },
   { value: "russian_bluechips", label: t("options.moexBluechips") },
 ]);
 const liveFuturesSymbolOptions = computed<SelectOption[]>(() => [
@@ -246,6 +247,7 @@ const liveSymbolsByMarket = computed<Record<string, SelectOption[]>>(() => ({
   crypto_spot: liveSymbolOptions,
   cme_futures: liveFuturesSymbolOptions.value,
   commodities: commoditySymbolOptions.value,
+  mag7_stocks: mag7StockSymbolOptions,
   russian_bluechips: moexBluechipSymbolOptions,
 }));
 const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
@@ -459,23 +461,6 @@ watch(liveMarket, () => {
   liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
 });
 
-watch(liveSymbolSearch, () => {
-  clearLiveSymbolSearchTimer();
-  if (!hasLiveSymbolSearch.value) {
-    return;
-  }
-  const matchedSymbol = filteredLiveSymbolOptions.value[0];
-  if (!matchedSymbol) {
-    return;
-  }
-  liveSymbolSearchTimer = window.setTimeout(() => {
-    const matchedSymbol = filteredLiveSymbolOptions.value[0];
-    if (hasLiveSymbolSearch.value && matchedSymbol) {
-      selectLiveSymbol(matchedSymbol.value);
-    }
-  }, 1000);
-});
-
 watch(strategies, () => {
   liveSelectedStrategies.value = selectedLiveStrategyNames.value;
 });
@@ -534,7 +519,6 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  clearLiveSymbolSearchTimer();
   window.removeEventListener("popstate", handlePopState);
   stopLivePolling();
 });
@@ -1101,13 +1085,6 @@ function resetLiveStrategies() {
 function selectLiveSymbol(value: string | number) {
   liveSymbol.value = String(value);
   liveSymbolSearch.value = "";
-}
-
-function clearLiveSymbolSearchTimer() {
-  if (liveSymbolSearchTimer) {
-    window.clearTimeout(liveSymbolSearchTimer);
-    liveSymbolSearchTimer = 0;
-  }
 }
 
 function toggleLiveIndicator(indicatorId: string) {

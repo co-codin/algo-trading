@@ -126,6 +126,17 @@ MOEX_BLUECHIP_SYMBOLS = frozenset(
         "YDEX",
     }
 )
+MAG7_STOCK_SYMBOLS = frozenset(
+    {
+        "AAPL",
+        "AMZN",
+        "GOOGL",
+        "META",
+        "MSFT",
+        "NVDA",
+        "TSLA",
+    }
+)
 MOEX_INDEX_SYMBOLS = frozenset({"IMOEX"})
 
 
@@ -702,6 +713,8 @@ _YAHOO_HEADERS = {
 
 def _yahoo_futures_symbol(symbol: str) -> str:
     value = symbol.strip().upper()
+    if value in MAG7_STOCK_SYMBOLS:
+        return value
     aliases = {
         "ES": "ES=F",
         "/ES": "ES=F",

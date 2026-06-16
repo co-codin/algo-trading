@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from algo_trading.data import (
     BinanceMarketDataClient,
+    MAG7_STOCK_SYMBOLS,
     MarketDataClient,
     MoexSharesMarketDataClient,
     TransientMarketDataError,
@@ -35,6 +36,7 @@ ALL_STRATEGIES_VALUE = "all"
 CRYPTO_SPOT_MARKET = "crypto_spot"
 CME_FUTURES_MARKET = "cme_futures"
 COMMODITIES_MARKET = "commodities"
+MAG7_STOCKS_MARKET = "mag7_stocks"
 RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 FRONTEND_ROUTES = frozenset(
     {
@@ -124,7 +126,7 @@ def live_chart_payload(
 
 def market_data_client_from_payload(payload: dict[str, Any]) -> MarketDataClient:
     market = _market_from_payload(payload)
-    if market in (CME_FUTURES_MARKET, COMMODITIES_MARKET):
+    if market in (CME_FUTURES_MARKET, COMMODITIES_MARKET, MAG7_STOCKS_MARKET):
         return YahooFuturesMarketDataClient()
     if market == RUSSIAN_BLUECHIPS_MARKET:
         return MoexSharesMarketDataClient()
@@ -191,6 +193,11 @@ def _market_from_payload(payload: dict[str, Any]) -> str:
         "commodities": COMMODITIES_MARKET,
         "metals": COMMODITIES_MARKET,
         "energy": COMMODITIES_MARKET,
+        "mag7": MAG7_STOCKS_MARKET,
+        "mag7_stocks": MAG7_STOCKS_MARKET,
+        "magnificent7": MAG7_STOCKS_MARKET,
+        "magnificent_7": MAG7_STOCKS_MARKET,
+        "magnificent_seven": MAG7_STOCKS_MARKET,
         "moex": RUSSIAN_BLUECHIPS_MARKET,
         "russian": RUSSIAN_BLUECHIPS_MARKET,
         "russian_bluechips": RUSSIAN_BLUECHIPS_MARKET,
@@ -208,9 +215,14 @@ def _live_symbol_from_payload(payload: dict[str, Any], market: str) -> str:
         default_symbol = "ES=F"
     if market == COMMODITIES_MARKET:
         default_symbol = "GC=F"
+    if market == MAG7_STOCKS_MARKET:
+        default_symbol = "AAPL"
     if market == RUSSIAN_BLUECHIPS_MARKET:
         default_symbol = "SBER"
-    return str(payload.get("symbol") or default_symbol).upper()
+    symbol = str(payload.get("symbol") or default_symbol).upper()
+    if market == MAG7_STOCKS_MARKET and symbol not in MAG7_STOCK_SYMBOLS:
+        raise ValueError(f"unsupported MAG 7 stock symbol: {symbol}")
+    return symbol
 
 
 def _data_source_label(
@@ -222,6 +234,8 @@ def _data_source_label(
         return "Yahoo Finance delayed CME futures"
     if market == COMMODITIES_MARKET:
         return "Yahoo Finance delayed commodity futures"
+    if market == MAG7_STOCKS_MARKET:
+        return "Yahoo Finance delayed US equities"
     if market == RUSSIAN_BLUECHIPS_MARKET:
         if symbol.upper() == "IMOEX":
             return "MOEX APIM index"
@@ -480,7 +494,15 @@ def _popular_indicator_payload(
             pane="volume",
             default_visible=True,
             series=[
-                _indicator_series_payload("volume", "Volume", "histogram", "#64748b", candles, [candle.volume for candle in candles]),
+                _indicator_series_payload(
+                    "volume",
+                    "Volume",
+                    "histogram",
+                    "#64748b",
+                    candles,
+                    [candle.volume for candle in candles],
+                    point_colors=_volume_bar_colors(candles),
+                ),
                 _indicator_series_payload("volume_mean", f"Volume MA {config.volume_period}", "line", "#f97316", candles, context.volume_mean),
             ],
         ),
@@ -549,27 +571,42 @@ def _indicator_series_payload(
     color: str,
     candles: list[Candle],
     values: list[float],
+    point_colors: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": series_id,
         "label": label,
         "type": series_type,
         "color": color,
-        "points": _indicator_points(candles, values),
+        "points": _indicator_points(candles, values, point_colors),
     }
 
 
 def _indicator_points(
     candles: list[Candle],
     values: list[float],
-) -> list[dict[str, float | int]]:
-    return [
-        {
+    point_colors: list[str] | None = None,
+) -> list[dict[str, float | int | str]]:
+    points: list[dict[str, float | int | str]] = []
+    for index, (candle, value) in enumerate(zip(candles, values)):
+        point: dict[str, float | int | str] = {
             "time": candle.open_time,
             "value": float(value),
         }
-        for candle, value in zip(candles, values)
-    ]
+        if point_colors and index < len(point_colors):
+            point["color"] = point_colors[index]
+        points.append(point)
+    return points
+
+
+def _volume_bar_colors(candles: list[Candle]) -> list[str]:
+    colors: list[str] = []
+    previous_close: float | None = None
+    for candle in candles:
+        reference = previous_close if previous_close is not None else candle.open
+        colors.append("#22ab94" if candle.close >= reference else "#f23645")
+        previous_close = candle.close
+    return colors
 
 
 def _candle_payload(candle: Candle) -> dict[str, float | int]:
