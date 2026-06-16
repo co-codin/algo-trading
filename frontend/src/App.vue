@@ -569,7 +569,7 @@ watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], ()
   }
 });
 
-watch([liveMarket, liveSymbol, liveVisibleIndicators], () => {
+watch([liveMarket, liveSymbol, liveVisibleIndicators, liveStrategyRequest], () => {
   if (activeMode.value === "live" && !isApplyingLiveSettingsFromUrl) {
     syncLiveUrl();
   }
@@ -731,6 +731,9 @@ function applyLiveSettingsFromLocation() {
     if (params.has("indicators")) {
       liveVisibleIndicators.value = parseLiveIndicators(params.get("indicators"));
     }
+    if (params.has("strategy")) {
+      liveSelectedStrategies.value = parseLiveStrategyRequest(params.get("strategy"));
+    }
   } finally {
     queueMicrotask(() => {
       isApplyingLiveSettingsFromUrl = false;
@@ -751,6 +754,7 @@ function liveUrlPath() {
   params.set("market", liveMarket.value);
   params.set("symbol", liveSymbol.value);
   params.set("indicators", liveVisibleIndicators.value.join(","));
+  params.set("strategy", liveStrategyRequest.value);
   return `${modeRoutes.live}?${params.toString()}`;
 }
 
@@ -769,6 +773,32 @@ function parseLiveIndicators(value: string | null) {
         .filter((indicator) => availableIndicators.has(indicator)),
     ),
   ];
+}
+
+function parseLiveStrategyRequest(value: string | null): string[] {
+  const fallback = strategies.value[0]?.name ?? "ema-rsi";
+  if (!value) {
+    return [fallback];
+  }
+
+  const availableByName = new Map(
+    strategies.value.map((strategy) => [strategy.name.toLowerCase(), strategy.name]),
+  );
+  const normalizedValue = value.trim().toLowerCase();
+  if (normalizedValue === "all") {
+    const allStrategyNames = strategies.value.map((strategy) => strategy.name);
+    return allStrategyNames.length ? allStrategyNames : [fallback];
+  }
+
+  const requestedNames = [
+    ...new Set(
+      value
+        .split(",")
+        .map((strategyName) => availableByName.get(strategyName.trim().toLowerCase()))
+        .filter((strategyName): strategyName is string => Boolean(strategyName)),
+    ),
+  ];
+  return requestedNames.length ? requestedNames : [fallback];
 }
 
 async function loadProfile() {

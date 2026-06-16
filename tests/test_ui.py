@@ -689,7 +689,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('"labels.symbolSearch": "Search symbol"', i18n_source)
         self.assertIn('"empty.noMatchingSymbols": "No symbols match that search"', i18n_source)
 
-    def test_live_page_syncs_market_symbol_and_indicators_to_url(self):
+    def test_live_page_syncs_market_symbol_indicators_and_strategy_to_url(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
         ).read_text(encoding="utf-8")
@@ -700,8 +700,11 @@ class UiTests(unittest.TestCase):
         self.assertIn('params.set("market", liveMarket.value)', source)
         self.assertIn('params.set("symbol", liveSymbol.value)', source)
         self.assertIn('params.set("indicators", liveVisibleIndicators.value.join(","))', source)
+        self.assertIn('params.set("strategy", liveStrategyRequest.value)', source)
+        self.assertIn('parseLiveStrategyRequest(params.get("strategy"))', source)
+        self.assertIn("function parseLiveStrategyRequest(value: string | null): string[]", source)
         self.assertIn('window.history.replaceState({ mode: "live" }, "", nextUrl)', source)
-        self.assertIn("watch([liveMarket, liveSymbol, liveVisibleIndicators],", source)
+        self.assertIn("watch([liveMarket, liveSymbol, liveVisibleIndicators, liveStrategyRequest],", source)
         self.assertIn("applyLiveSettingsFromLocation();\n  setMode(modeFromLocation(), false);", source)
         popstate_body = source.split("function handlePopState()", 1)[1].split(
             "\nfunction ",
