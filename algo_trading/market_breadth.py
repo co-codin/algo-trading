@@ -3,10 +3,12 @@ from __future__ import annotations
 import csv
 import io
 import os
+import re
 from pathlib import Path
 import threading
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Protocol
@@ -17,9 +19,21 @@ BARCHART_HOME = "https://www.barchart.com/"
 BARCHART_QUERY_URL = (
     "https://www.barchart.com/proxies/timeseries/historical/queryeod.ashx"
 )
+CBOE_DAILY_MARKET_STATISTICS_URL = (
+    "https://www.cboe.com/markets/us/options/market-statistics/daily/"
+)
+CBOE_PUT_CALL_CSV_URLS = (
+    "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/pcratioarchive.csv",
+    "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/totalpcarchive.csv",
+    "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/totalpc.csv",
+)
+CBOE_DAILY_HISTORY_START = date(2019, 10, 7)
 BARCHART_COOKIE_TTL_SECONDS = 600
 MARKET_BREADTH_CACHE_TTL_SECONDS = int(
     os.environ.get("MARKET_BREADTH_CACHE_TTL_SECONDS", "3600")
+)
+CBOE_PUT_CALL_BACKFILL_WORKERS = int(
+    os.environ.get("CBOE_PUT_CALL_BACKFILL_WORKERS", "6")
 )
 MARKET_BREADTH_DATA_DIR = os.environ.get(
     "MARKET_BREADTH_DATA_DIR",
@@ -85,9 +99,10 @@ MARKET_BREADTH_SYMBOLS: dict[str, dict[str, str]] = {
     for item in group["items"]
 }
 MARKET_BREADTH_SYMBOLS[PUT_CALL_SYMBOL] = {
-    "label": "CBOE Put/Call Ratio",
-    "period": "weekly",
-    "data": "weekly",
+    "label": "Cboe Total Put/Call Ratio",
+    "period": "daily",
+    "data": "daily",
+    "source": "Cboe",
 }
 ALLOWED_MARKET_BREADTH_SYMBOLS = frozenset(MARKET_BREADTH_SYMBOLS)
 
@@ -103,12 +118,30 @@ class MarketBreadthBar:
     volume: float
 
 
+@dataclass(frozen=True)
+class CboeDailyPutCallSnapshot:
+    selected_date: date | None
+    prev_trading_day: date | None
+    bar: MarketBreadthBar | None
+
+
 class BarchartCsvClient(Protocol):
     def fetch_csv(
         self,
         symbol: str,
         overrides: dict[str, str] | None = None,
     ) -> bytes:
+        ...
+
+
+class CboePutCallDataClient(Protocol):
+    def fetch_historical_csvs(self) -> list[bytes]:
+        ...
+
+    def fetch_daily_page(self, trading_date: date | None = None) -> bytes:
+        ...
+
+    def fetch_daily_pages(self, trading_dates: list[date]) -> dict[date, bytes]:
         ...
 
 
@@ -197,16 +230,90 @@ class BarchartBreadthClient:
         )
 
 
+class CboePutCallClient:
+    def __init__(
+        self,
+        timeout: float = 12.0,
+        historical_urls: tuple[str, ...] = CBOE_PUT_CALL_CSV_URLS,
+        daily_url: str = CBOE_DAILY_MARKET_STATISTICS_URL,
+        backfill_workers: int = CBOE_PUT_CALL_BACKFILL_WORKERS,
+    ) -> None:
+        self._timeout = timeout
+        self._historical_urls = historical_urls
+        self._daily_url = daily_url
+        self._backfill_workers = max(1, int(backfill_workers))
+
+    def fetch_historical_csvs(self) -> list[bytes]:
+        with self._client() as client:
+            bodies: list[bytes] = []
+            for url in self._historical_urls:
+                response = client.get(url)
+                response.raise_for_status()
+                bodies.append(response.content)
+            return bodies
+
+    def fetch_daily_page(self, trading_date: date | None = None) -> bytes:
+        with self._client() as client:
+            return self._fetch_daily_page_with_client(client, trading_date)
+
+    def fetch_daily_pages(self, trading_dates: list[date]) -> dict[date, bytes]:
+        unique_dates = list(dict.fromkeys(trading_dates))
+        if not unique_dates:
+            return {}
+        if len(unique_dates) == 1:
+            trading_date = unique_dates[0]
+            return {trading_date: self.fetch_daily_page(trading_date)}
+
+        workers = min(self._backfill_workers, len(unique_dates))
+        results: dict[date, bytes] = {}
+        with self._client() as client:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(
+                        self._fetch_daily_page_with_client,
+                        client,
+                        trading_date,
+                    ): trading_date
+                    for trading_date in unique_dates
+                }
+                for future in as_completed(futures):
+                    trading_date = futures[future]
+                    results[trading_date] = future.result()
+        return results
+
+    def _client(self) -> httpx.Client:
+        return httpx.Client(
+            follow_redirects=True,
+            timeout=self._timeout,
+            headers={
+                "Accept": "text/html,text/csv,*/*;q=0.1",
+                "User-Agent": BARCHART_USER_AGENT,
+            },
+        )
+
+    def _fetch_daily_page_with_client(
+        self,
+        client: httpx.Client,
+        trading_date: date | None,
+    ) -> bytes:
+        params = {"dt": trading_date.isoformat()} if trading_date else None
+        response = client.get(self._daily_url, params=params)
+        response.raise_for_status()
+        return response.content
+
+
 class MarketBreadthService:
     def __init__(
         self,
         client: BarchartCsvClient | None = None,
+        put_call_client: CboePutCallDataClient | None = None,
         ttl_seconds: int = MARKET_BREADTH_CACHE_TTL_SECONDS,
         data_dir: str | Path | None = MARKET_BREADTH_DATA_DIR,
         refresh_seconds: int = MARKET_BREADTH_CACHE_TTL_SECONDS,
         retention_days: int = MARKET_BREADTH_RETENTION_DAYS,
     ) -> None:
         self._client = client or BarchartBreadthClient()
+        self._put_call_client = put_call_client or CboePutCallClient()
         self._ttl_seconds = max(0, int(ttl_seconds))
         self._data_dir = Path(data_dir) if data_dir else None
         self._refresh_seconds = max(0, int(refresh_seconds))
@@ -252,6 +359,9 @@ class MarketBreadthService:
         symbol: str,
         stored_bars: list[MarketBreadthBar],
     ) -> list[MarketBreadthBar]:
+        if symbol == PUT_CALL_SYMBOL:
+            return self._fetch_and_store_put_call_bars(stored_bars)
+
         settings = MARKET_BREADTH_SYMBOLS[symbol]
         try:
             body = self._client.fetch_csv(symbol, {"data": settings["data"]})
@@ -270,7 +380,86 @@ class MarketBreadthService:
 
         cache_path = self._csv_path(symbol)
         if cache_path and bars:
-            write_breadth_bars_to_csv(cache_path, bars)
+            write_breadth_bars_to_csv(
+                cache_path,
+                bars,
+                retention_days=self._retention_days,
+            )
+        return bars
+
+    def _fetch_and_store_put_call_bars(
+        self,
+        stored_bars: list[MarketBreadthBar],
+    ) -> list[MarketBreadthBar]:
+        official_bars: list[MarketBreadthBar] = []
+        daily_bars: list[MarketBreadthBar] = []
+        latest_snapshot: CboeDailyPutCallSnapshot | None = None
+
+        try:
+            historical_bodies = self._put_call_client.fetch_historical_csvs()
+            official_bars = parse_cboe_put_call_csvs(historical_bodies)
+        except Exception:
+            if not stored_bars:
+                raise
+
+        try:
+            latest_snapshot = parse_cboe_daily_put_call_page(
+                self._put_call_client.fetch_daily_page()
+            )
+        except Exception:
+            latest_snapshot = None
+
+        if latest_snapshot is None:
+            bars = merge_breadth_bars([*official_bars, *stored_bars])
+            if not bars and stored_bars:
+                return stored_bars
+            cache_path = self._csv_path(PUT_CALL_SYMBOL)
+            if cache_path and bars and not stored_bars:
+                write_breadth_bars_to_csv(cache_path, bars, retention_days=0)
+            return bars
+
+        usable_stored_bars = (
+            stored_bars
+            if put_call_cache_looks_official(
+                stored_bars,
+                latest_snapshot.prev_trading_day,
+            )
+            else []
+        )
+        latest_trading_day = (
+            latest_snapshot.prev_trading_day
+            if latest_snapshot.prev_trading_day
+            else None
+        )
+        if latest_trading_day:
+            backfill_dates = put_call_backfill_dates(
+                [*official_bars, *usable_stored_bars],
+                latest_trading_day,
+            )
+            selected_date = latest_snapshot.selected_date if latest_snapshot else None
+            if selected_date:
+                backfill_dates = [
+                    trading_date
+                    for trading_date in backfill_dates
+                    if trading_date != selected_date
+                ]
+            if backfill_dates:
+                pages = self._put_call_client.fetch_daily_pages(backfill_dates)
+                for trading_date, page in pages.items():
+                    snapshot = parse_cboe_daily_put_call_page(page)
+                    if snapshot.bar and snapshot.selected_date == trading_date:
+                        daily_bars.append(snapshot.bar)
+
+        if latest_snapshot and latest_snapshot.bar:
+            daily_bars.append(latest_snapshot.bar)
+
+        bars = merge_breadth_bars([*official_bars, *usable_stored_bars, *daily_bars])
+        if not bars and stored_bars:
+            return stored_bars
+
+        cache_path = self._csv_path(PUT_CALL_SYMBOL)
+        if cache_path and bars:
+            write_breadth_bars_to_csv(cache_path, bars, retention_days=0)
         return bars
 
     def _read_cached_bars(self, symbol: str) -> list[MarketBreadthBar]:
@@ -278,9 +467,15 @@ class MarketBreadthService:
         if not cache_path or not cache_path.is_file():
             return []
         bars = matching_symbol_bars(symbol, parse_barchart_csv(cache_path.read_bytes()))
+        if symbol == PUT_CALL_SYMBOL:
+            return merge_breadth_bars(bars)
         retained = trim_breadth_bars_to_retention(bars, self._retention_days)
         if len(retained) != len(bars):
-            write_breadth_bars_to_csv(cache_path, retained)
+            write_breadth_bars_to_csv(
+                cache_path,
+                retained,
+                retention_days=self._retention_days,
+            )
         return retained
 
     def _csv_is_fresh(self, path: Path) -> bool:
@@ -306,7 +501,7 @@ def market_breadth_payload(
     }
     return {
         "ok": True,
-        "source": "Barchart",
+        "source": "Barchart + Cboe",
         "groups": MARKET_BREADTH_GROUPS,
         "series": series,
         "put_call_symbol": PUT_CALL_SYMBOL,
@@ -342,12 +537,167 @@ def parse_barchart_csv(body: bytes) -> list[MarketBreadthBar]:
     return sorted(rows.values(), key=lambda bar: (bar.date, bar.symbol))
 
 
-def write_breadth_bars_to_csv(path: Path, bars: list[MarketBreadthBar]) -> Path:
+def parse_cboe_put_call_csvs(bodies: list[bytes]) -> list[MarketBreadthBar]:
+    bars: list[MarketBreadthBar] = []
+    for body in bodies:
+        bars.extend(parse_cboe_put_call_csv(body))
+    return merge_breadth_bars(bars)
+
+
+def parse_cboe_put_call_csv(body: bytes) -> list[MarketBreadthBar]:
+    rows: dict[tuple[str, date], MarketBreadthBar] = {}
+    reader = csv.reader(io.StringIO(body.decode("utf-8-sig", errors="replace")))
+    headers: list[str] | None = None
+    header_indexes: dict[str, int] = {}
+    for row in reader:
+        if not row:
+            continue
+        normalized_headers = [normalize_cboe_header(value) for value in row]
+        if headers is None:
+            if normalized_headers[0] not in {"date", "trade_date"}:
+                continue
+            headers = normalized_headers
+            header_indexes = cboe_put_call_header_indexes(headers)
+            continue
+        try:
+            parsed_date = parse_cboe_date(row[header_indexes["date"]])
+            ratio = parse_cboe_number(row[header_indexes["ratio"]])
+        except (IndexError, KeyError, ValueError):
+            continue
+
+        volume = 0.0
+        total_index = header_indexes.get("total")
+        call_index = header_indexes.get("call")
+        put_index = header_indexes.get("put")
+        try:
+            if total_index is not None:
+                volume = parse_cboe_number(row[total_index])
+            elif call_index is not None and put_index is not None:
+                volume = parse_cboe_number(row[call_index]) + parse_cboe_number(
+                    row[put_index]
+                )
+        except (IndexError, ValueError):
+            volume = 0.0
+
+        rows[(PUT_CALL_SYMBOL, parsed_date)] = MarketBreadthBar(
+            symbol=PUT_CALL_SYMBOL,
+            date=parsed_date,
+            open=ratio,
+            high=ratio,
+            low=ratio,
+            close=ratio,
+            volume=volume,
+        )
+    return sorted(rows.values(), key=lambda bar: bar.date)
+
+
+def parse_cboe_daily_put_call_page(body: bytes) -> CboeDailyPutCallSnapshot:
+    text = body.decode("utf-8", errors="replace").replace('\\"', '"')
+    selected_date = parse_optional_cboe_iso_date(find_cboe_json_value(text, "selectedDate"))
+    prev_trading_day = parse_optional_cboe_iso_date(
+        find_cboe_json_value(text, "prevTradingDay")
+    )
+    ratio_match = re.search(
+        r'"name":"TOTAL PUT/CALL RATIO","value":"(?P<ratio>[0-9.]+)"',
+        text,
+    )
+    if not selected_date or not ratio_match:
+        return CboeDailyPutCallSnapshot(
+            selected_date=selected_date,
+            prev_trading_day=prev_trading_day,
+            bar=None,
+        )
+
+    ratio = parse_cboe_number(ratio_match.group("ratio"))
+    volume = 0.0
+    volume_match = re.search(
+        r'"SUM OF ALL PRODUCTS":\[\{"name":"VOLUME","call":(?P<call>[0-9.]+),'
+        r'"put":(?P<put>[0-9.]+),"total":(?P<total>[0-9.]+)\}',
+        text,
+    )
+    if volume_match:
+        volume = parse_cboe_number(volume_match.group("total"))
+
+    return CboeDailyPutCallSnapshot(
+        selected_date=selected_date,
+        prev_trading_day=prev_trading_day,
+        bar=MarketBreadthBar(
+            symbol=PUT_CALL_SYMBOL,
+            date=selected_date,
+            open=ratio,
+            high=ratio,
+            low=ratio,
+            close=ratio,
+            volume=volume,
+        ),
+    )
+
+
+def cboe_put_call_header_indexes(headers: list[str]) -> dict[str, int]:
+    indexes: dict[str, int] = {}
+    for index, header in enumerate(headers):
+        if header in {"date", "trade_date"}:
+            indexes["date"] = index
+        elif header in {"call", "calls"}:
+            indexes["call"] = index
+        elif header in {"put", "puts"}:
+            indexes["put"] = index
+        elif header == "total":
+            indexes["total"] = index
+        elif header == "p/c ratio" or header == "total volume p/c ratio":
+            indexes["ratio"] = index
+    return indexes
+
+
+def normalize_cboe_header(value: str) -> str:
+    return " ".join(value.strip().strip('"').lower().split())
+
+
+def parse_cboe_date(value: str) -> date:
+    normalized = value.strip().strip('"')
+    for date_format in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(normalized, date_format).date()
+        except ValueError:
+            continue
+    raise ValueError(f"unsupported Cboe date: {value}")
+
+
+def parse_cboe_number(value: str) -> float:
+    normalized = value.strip().strip('"').replace(",", "")
+    if not normalized:
+        raise ValueError("missing Cboe number")
+    return float(normalized)
+
+
+def find_cboe_json_value(text: str, key: str) -> str | None:
+    match = re.search(rf'"{re.escape(key)}":"(?P<value>[^"]+)"', text)
+    return match.group("value") if match else None
+
+
+def parse_optional_cboe_iso_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def write_breadth_bars_to_csv(
+    path: Path,
+    bars: list[MarketBreadthBar],
+    retention_days: int = MARKET_BREADTH_RETENTION_DAYS,
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=MARKET_BREADTH_CSV_FIELDS)
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=MARKET_BREADTH_CSV_FIELDS,
+            lineterminator="\n",
+        )
         writer.writeheader()
-        for bar in trim_breadth_bars_to_retention(bars):
+        for bar in trim_breadth_bars_to_retention(bars, retention_days):
             writer.writerow(
                 {
                     "symbol": bar.symbol,
@@ -374,6 +724,54 @@ def trim_breadth_bars_to_retention(
     return [bar for bar in ordered if bar.date >= cutoff]
 
 
+def put_call_cache_looks_official(
+    bars: list[MarketBreadthBar],
+    latest_trading_day: date | None,
+) -> bool:
+    if not latest_trading_day:
+        return False
+    post_2019_dates = {
+        bar.date
+        for bar in bars
+        if bar.symbol == PUT_CALL_SYMBOL and bar.date >= CBOE_DAILY_HISTORY_START
+    }
+    if not post_2019_dates:
+        return False
+    first_date = min(post_2019_dates)
+    if first_date > CBOE_DAILY_HISTORY_START + timedelta(days=7):
+        return False
+    last_date = min(max(post_2019_dates), latest_trading_day)
+    expected_dates = business_dates(CBOE_DAILY_HISTORY_START, last_date)
+    if not expected_dates:
+        return False
+    actual_dates = {trading_date for trading_date in post_2019_dates if trading_date <= last_date}
+    return len(actual_dates) / len(expected_dates) >= 0.8
+
+
+def put_call_backfill_dates(
+    bars: list[MarketBreadthBar],
+    latest_trading_day: date,
+) -> list[date]:
+    latest_cached_date = max((bar.date for bar in bars), default=None)
+    if latest_cached_date:
+        start_date = max(latest_cached_date + timedelta(days=1), CBOE_DAILY_HISTORY_START)
+    else:
+        start_date = CBOE_DAILY_HISTORY_START
+    return business_dates(start_date, latest_trading_day)
+
+
+def business_dates(start_date: date, end_date: date) -> list[date]:
+    if start_date > end_date:
+        return []
+    days: list[date] = []
+    current_date = start_date
+    while current_date <= end_date:
+        if current_date.weekday() < 5:
+            days.append(current_date)
+        current_date += timedelta(days=1)
+    return days
+
+
 def matching_symbol_bars(
     symbol: str,
     bars: list[MarketBreadthBar],
@@ -398,6 +796,7 @@ def series_payload(symbol: str, bars: list[MarketBreadthBar]) -> dict[str, Any]:
         "label": settings["label"],
         "period": settings["period"],
         "data": settings["data"],
+        "source": settings.get("source", "Barchart"),
         "candles": [bar_payload(bar) for bar in bars],
     }
 

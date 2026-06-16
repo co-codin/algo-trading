@@ -30,7 +30,7 @@ The frontend is a Vue 3 control panel with direct URLs:
 
 The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST, the S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`, and Russian stocks use MOEX APIM share candles when `MOEX_API_KEY` or `MOEXALGO_API_KEY` is configured, falling back to delayed public MOEX ISS candles without a token. Choose `All strategies` to show consensus or capped individual strategy markers instead of flooding the chart with every raw marker. The page also supports saved local workspaces, data-health badges, browser alerts for new visible signals, and JSON snapshot export for the current chart state.
 
-The `Breadth` page shows cached market-breadth history, including put/call ratio at the top. `Profile` is available for signed-in users. `Admin` is visible only when the signed-in user's `is_admin` flag is true.
+The `Breadth` page shows cached market-breadth history, including the official Cboe total put/call ratio at the top. `Profile` is available for signed-in users. `Admin` is visible only when the signed-in user's `is_admin` flag is true.
 
 Project playbooks for repeated work live in [`SKILLS.md`](SKILLS.md) and [`docs/skills/`](docs/skills/): live chart UX, market-data integrations, auth/admin operations, and safe refactoring.
 
@@ -93,9 +93,9 @@ Both Docker paths mount local `runs/` for command-line simulation outputs. Docke
 
 Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template and set `MOEX_API_KEY` or `MOEXALGO_API_KEY` there when MOEX authenticated data is needed. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker.
 
-Historical CSVs are retained for the latest 365 days only. The web app refreshes existing candle CSVs in `historical_data/` every hour (`HISTORICAL_CSV_REFRESH_SECONDS=3600`) and runs a daily prune (`HISTORICAL_CSV_PRUNE_SECONDS=86400`) so rows older than one year are removed. Breadth CSVs use the same 365-day retention.
+Historical candle CSVs are retained for the latest 365 days only. The web app refreshes existing candle CSVs in `historical_data/` every hour (`HISTORICAL_CSV_REFRESH_SECONDS=3600`) and runs a daily prune (`HISTORICAL_CSV_PRUNE_SECONDS=86400`) so rows older than one year are removed. Barchart breadth CSVs use the same 365-day retention.
 
-The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file containing only the latest 365 days.
+The `Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file containing only the latest 365 days. The exception is `historical_data/breadth/CPC.csv`: it stores the full official Cboe total put/call ratio history from Cboe's ratio archives plus the post-2019 daily market-statistics page, and it is not pruned to one year.
 
 List the most-traded Binance USDT crypto pairs by current 24h quote volume:
 

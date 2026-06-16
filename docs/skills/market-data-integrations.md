@@ -9,7 +9,7 @@ Use this when adding or changing Binance, Yahoo Finance, MOEX, commodities, inde
 - Keep every provider behind the shared market-data client contract.
 - Normalize output to the shared candle shape before it reaches UI or simulator code.
 - Read credentials from `.env`; keep only placeholders in `.env.example`.
-- Persist only the latest one year of historical CSV rows.
+- Persist only the latest one year of historical CSV rows, except for the official Cboe total put/call ratio cache (`historical_data/breadth/CPC.csv`), which keeps all available Cboe history.
 - Prefer provider-specific tests with fake payloads before calling live APIs.
 - Surface data source and delay risk in the UI.
 
