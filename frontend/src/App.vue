@@ -320,9 +320,11 @@ const liveConsensusMinConfirmations = ref(2);
 const liveMaxSignals = ref(80);
 const liveSelectedStrategies = ref<string[]>(["ema-rsi"]);
 const liveStrategySearch = ref("");
+const liveStrategyMenu = ref<HTMLDetailsElement | null>(null);
 const liveVisibleIndicators = ref<string[]>([...defaultLiveIndicators]);
 const showSignals = ref(true);
 let liveTimer = 0;
+let liveSymbolSearchTimer = 0;
 let isApplyingLiveSettingsFromUrl = false;
 
 const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
@@ -459,6 +461,7 @@ const filteredLiveSymbolOptions = computed(() => {
   }
   return activeLiveSymbolOptions.value.filter((option) => optionMatchesSearch(option, query));
 });
+const hasLiveSymbolSearch = computed(() => normalizeSearchText(liveSymbolSearch.value).length > 0);
 const selectedLiveStrategyNames = computed(() => {
   const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
   const selectedNames = liveSelectedStrategies.value.filter((name) => availableNames.has(name));
@@ -555,6 +558,23 @@ watch(liveMarket, () => {
   liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
 });
 
+watch(liveSymbolSearch, () => {
+  clearLiveSymbolSearchTimer();
+  if (!hasLiveSymbolSearch.value) {
+    return;
+  }
+  const matchedSymbol = filteredLiveSymbolOptions.value[0];
+  if (!matchedSymbol) {
+    return;
+  }
+  liveSymbolSearchTimer = window.setTimeout(() => {
+    const matchedSymbol = filteredLiveSymbolOptions.value[0];
+    if (hasLiveSymbolSearch.value && matchedSymbol) {
+      selectLiveSymbol(matchedSymbol.value);
+    }
+  }, 1000);
+});
+
 watch(strategies, () => {
   liveSelectedStrategies.value = selectedLiveStrategyNames.value;
 });
@@ -608,6 +628,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  clearLiveSymbolSearchTimer();
   window.removeEventListener("popstate", handlePopState);
   stopLivePolling();
 });
@@ -992,14 +1013,31 @@ function selectLiveStrategyGroup(strategyNames: string[]) {
 
 function selectAllLiveStrategies() {
   setLiveStrategies(strategies.value.map((strategy) => strategy.name));
+  closeLiveStrategyMenu();
 }
 
 function clearLiveStrategies() {
   resetLiveStrategies();
 }
 
+function closeLiveStrategyMenu() {
+  liveStrategyMenu.value?.removeAttribute("open");
+}
+
 function resetLiveStrategies() {
   liveSelectedStrategies.value = [strategies.value[0]?.name ?? "ema-rsi"];
+}
+
+function selectLiveSymbol(value: string | number) {
+  liveSymbol.value = String(value);
+  liveSymbolSearch.value = "";
+}
+
+function clearLiveSymbolSearchTimer() {
+  if (liveSymbolSearchTimer) {
+    window.clearTimeout(liveSymbolSearchTimer);
+    liveSymbolSearchTimer = 0;
+  }
 }
 
 function toggleLiveIndicator(indicatorId: string) {
@@ -1331,6 +1369,29 @@ function errorMessage(error: unknown): string {
               type="search"
               :placeholder="t('labels.symbolSearch')"
             >
+            <div
+              v-if="hasLiveSymbolSearch"
+              class="symbol-results"
+              role="listbox"
+              :aria-label="t('labels.symbolSearch')"
+            >
+              <button
+                v-for="option in filteredLiveSymbolOptions"
+                :key="`symbol-search-${option.value}`"
+                class="symbol-result"
+                :class="{ 'is-active': String(option.value) === liveSymbol }"
+                type="button"
+                @click="selectLiveSymbol(option.value)"
+              >
+                <b>{{ option.value }}</b>
+                <small v-if="String(option.label) !== String(option.value)">
+                  {{ option.label }}
+                </small>
+              </button>
+              <div v-if="!filteredLiveSymbolOptions.length" class="symbol-result-empty">
+                {{ t("empty.noMatchingSymbols") }}
+              </div>
+            </div>
             <select v-model="liveSymbol">
               <option v-if="!filteredLiveSymbolOptions.length" disabled value="">
                 {{ t("empty.noMatchingSymbols") }}
@@ -1372,7 +1433,7 @@ function errorMessage(error: unknown): string {
         <div class="live-control-section signal-controls">
           <div class="strategy-picker live-strategy-field">
             <strong class="strategy-picker-label">{{ t("labels.strategy") }}</strong>
-            <details class="strategy-menu" :aria-label="t('labels.strategyPickerHint')">
+            <details ref="liveStrategyMenu" class="strategy-menu" :aria-label="t('labels.strategyPickerHint')">
               <summary class="strategy-summary">
                 <span>
                   <b>{{ activeLiveStrategyLabel }}</b>

@@ -119,12 +119,17 @@ class UiTests(unittest.TestCase):
         self.assertIn('<strong class="strategy-picker-label">{{ t("labels.strategy") }}</strong>', source)
         self.assertIn('<summary class="strategy-summary">', source)
         self.assertIn("selectedLiveStrategyPreview", source)
+        self.assertIn("const liveStrategyMenu = ref<HTMLDetailsElement | null>(null)", source)
         self.assertIn("const liveStrategyGroups = computed<StrategyGroup[]>(() =>", source)
         self.assertIn("const strategyGroupCatalog", source)
         self.assertIn("toggleLiveStrategy(strategy.name)", source)
         self.assertIn("selectLiveStrategyGroup(group.strategyNames)", source)
         self.assertIn("selectAllLiveStrategies", source)
+        self.assertIn("closeLiveStrategyMenu();", source)
+        self.assertIn("function closeLiveStrategyMenu()", source)
+        self.assertIn('liveStrategyMenu.value?.removeAttribute("open")', source)
         self.assertIn("clearLiveStrategies", source)
+        self.assertIn('<details ref="liveStrategyMenu" class="strategy-menu"', source)
         self.assertIn(":checked=\"liveSelectedStrategies.includes(strategy.name)\"", source)
         self.assertIn("strategy: liveStrategyRequest.value", source)
         self.assertIn("watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], () => {", source)
@@ -171,6 +176,9 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+        style_source = (root / "frontend" / "src" / "style.css").read_text(
             encoding="utf-8"
         )
 
@@ -674,6 +682,9 @@ class UiTests(unittest.TestCase):
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
             encoding="utf-8"
         )
+        style_source = (root / "frontend" / "src" / "style.css").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn('const liveSymbolSearch = ref("")', source)
         self.assertIn("const filteredLiveSymbolOptions = computed", source)
@@ -681,11 +692,28 @@ class UiTests(unittest.TestCase):
         self.assertIn("toLocaleLowerCase()", source)
         self.assertIn("function optionMatchesSearch(option: SelectOption, query: string): boolean", source)
         self.assertIn("optionMatchesSearch(option, query)", source)
+        self.assertIn("const hasLiveSymbolSearch = computed", source)
+        self.assertIn("let liveSymbolSearchTimer = 0", source)
+        self.assertIn("function clearLiveSymbolSearchTimer()", source)
+        self.assertIn("watch(liveSymbolSearch, () => {", source)
+        self.assertIn("window.setTimeout(() => {", source)
+        self.assertIn("const matchedSymbol = filteredLiveSymbolOptions.value[0]", source)
+        self.assertIn("selectLiveSymbol(matchedSymbol.value)", source)
+        self.assertIn("}, 1000)", source)
+        self.assertIn("clearLiveSymbolSearchTimer();\n  window.removeEventListener", source)
+        self.assertIn("function selectLiveSymbol(value: string | number)", source)
         self.assertIn('v-model.trim="liveSymbolSearch"', source)
         self.assertIn('type="search"', source)
         self.assertIn("t('labels.symbolSearch')", source)
         self.assertIn("filteredLiveSymbolOptions", source)
+        self.assertIn('class="symbol-results"', source)
+        self.assertIn('class="symbol-result"', source)
+        self.assertIn('v-if="hasLiveSymbolSearch"', source)
+        self.assertIn('@click="selectLiveSymbol(option.value)"', source)
+        self.assertIn(":class=\"{ 'is-active': String(option.value) === liveSymbol }\"", source)
         self.assertIn('t("empty.noMatchingSymbols")', source)
+        self.assertIn(".symbol-results", style_source)
+        self.assertIn(".symbol-result.is-active", style_source)
         self.assertIn('"labels.symbolSearch": "Search symbol"', i18n_source)
         self.assertIn('"empty.noMatchingSymbols": "No symbols match that search"', i18n_source)
 
