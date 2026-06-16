@@ -97,6 +97,17 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn('"$(HISTORICAL_DATA_DIR)"', makefile)
         self.assertIn('--user "$$(id -u):$$(id -g)"', makefile)
 
+    def test_compose_persists_error_logs_outside_git(self):
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+        self.assertIn("./logs:/app/logs", compose)
+        self.assertIn("APP_LOG_DIR: /app/logs", compose)
+        self.assertIn("LOGS_DIR ?= $(CURDIR)/logs", makefile)
+        self.assertIn('"$(LOGS_DIR):/app/logs"', makefile)
+        self.assertIn("logs/", gitignore.splitlines())
+
     def test_docker_smoke_authenticates_before_protected_api_checks(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 

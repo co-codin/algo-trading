@@ -1,3 +1,4 @@
+import logging
 import tempfile
 import time
 import unittest
@@ -14,6 +15,13 @@ from algo_trading.web_app import create_app
 
 
 class WebAppTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        root_logger = logging.getLogger()
+        for handler in list(root_logger.handlers):
+            if getattr(handler, "_algo_trading_log_path", None):
+                root_logger.removeHandler(handler)
+                handler.close()
+
     def make_client(self, **overrides: Any) -> TestClient:
         tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
@@ -25,6 +33,42 @@ class WebAppTests(unittest.TestCase):
             **overrides,
         )
         return TestClient(app)
+
+    def test_unexpected_api_errors_are_written_to_app_log(self):
+        def failing_client_factory() -> Any:
+            raise RuntimeError("simulated route failure")
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            log_dir = Path(tempdir) / "logs"
+            auth_store = InMemoryAuthStore()
+            app = create_app(
+                output_root=Path(tempdir) / "runs",
+                auth_store=auth_store,
+                client_factory=failing_client_factory,
+                seed_admin=False,
+                log_dir=log_dir,
+            )
+            client = TestClient(app, raise_server_exceptions=False)
+            client.post(
+                "/api/auth/register",
+                json={"username": "alice", "password": "password123"},
+            )
+            auth_store.set_user_access(
+                auth_store.list_users()[0].id,
+                is_active=True,
+                activated_at=utcnow(),
+            )
+            response = client.get("/api/live-chart?symbol=BTCUSDT&interval=5m&limit=10")
+
+            self.assertEqual(response.status_code, 500)
+            self.assertEqual(
+                response.json(),
+                {"ok": False, "error": "simulated route failure"},
+            )
+            content = (log_dir / "app.log").read_text(encoding="utf-8")
+
+        self.assertIn("Unhandled API error GET /api/live-chart", content)
+        self.assertIn("RuntimeError: simulated route failure", content)
 
     def test_app_runs_historical_csv_maintenance_on_interval(self):
         class FakeHistoricalCsvService:

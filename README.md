@@ -108,7 +108,9 @@ Run with Docker Compose:
 make compose-up
 ```
 
-Both Docker paths mount local `runs/` for command-line simulation outputs. Docker Compose also mounts `historical_data/` so market-breadth and candle CSV history persists across rebuilds.
+Both Docker paths mount local `runs/` for command-line simulation outputs and `logs/` for persistent runtime error logs. Docker Compose also mounts `historical_data/` so market-breadth and candle CSV history persists across rebuilds.
+
+FastAPI unhandled exceptions are appended to `logs/app.log`, and RQ worker errors are appended to `logs/worker.log`. Docker stdout/stderr remains available through `docker compose logs`; generated `logs/` files are ignored by git.
 
 Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template and set `MOEX_API_KEY` or `MOEXALGO_API_KEY` there when MOEX authenticated data is needed. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker. Leave `REDIS_URL` unset for local in-process background maintenance unless you are also running Redis and `python -m algo_trading.worker`.
 

@@ -38,8 +38,10 @@ services:
     volumes:
       - ./runs:/app/runs
       - ./historical_data:/app/historical_data
+      - ./logs:/app/logs
     environment:
       PYTHONUNBUFFERED: "1"
+      APP_LOG_DIR: /app/logs
       DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading
       REDIS_URL: redis://redis:6379/0
       RQ_QUEUE: maintenance
@@ -67,8 +69,10 @@ services:
         condition: service_healthy
     volumes:
       - ./historical_data:/app/historical_data
+      - ./logs:/app/logs
     environment:
       PYTHONUNBUFFERED: "1"
+      APP_LOG_DIR: /app/logs
       DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading
       REDIS_URL: redis://redis:6379/0
       RQ_QUEUE: maintenance

@@ -29,6 +29,7 @@ from algo_trading.historical_store import HistoricalDataStore, historical_store_
 from algo_trading.historical_data import HistoricalCsvRefreshService
 from algo_trading import jobs as background_jobs
 from algo_trading.job_queue import JobQueue, job_queue_from_env
+from algo_trading.logging_config import configure_error_logging
 from algo_trading.market_breadth import MarketBreadthService
 from algo_trading.ui import (
     WEB_DIST_ROOT,
@@ -74,8 +75,10 @@ def create_app(
     job_queue: JobQueue | None = None,
     seed_admin: bool = True,
     admin_seed_password: str | None = None,
+    log_dir: str | Path | None = None,
 ) -> FastAPI:
     load_env_file()
+    error_logger = configure_error_logging("app", log_dir=log_dir)
     store = auth_store or auth_store_from_env()
     store.ensure_schema()
     if seed_admin:
@@ -254,9 +257,15 @@ def create_app(
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(
-        _request: Request,
+        request: Request,
         exc: Exception,
     ) -> JSONResponse:
+        error_logger.error(
+            "Unhandled API error %s %s",
+            request.method,
+            request.url.path,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
         return JSONResponse(
             {"ok": False, "error": str(exc)},
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
