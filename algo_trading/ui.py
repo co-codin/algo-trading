@@ -45,6 +45,7 @@ HONG_KONG_STOCKS_MARKET = "hong_kong_stocks"
 RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 RUSSIAN_INDICES_MARKET = "russian_indices"
 RUSSIAN_FUTURES_MARKET = "russian_futures"
+RUSSIAN_INDICES_FUTURES_MARKET = "russian_indices_futures"
 _DEFAULT_LIVE_CACHE_STALENESS_MS = 60_000
 _LIVE_CACHE_STALENESS_MULTIPLIER = 2
 FRONTEND_ROUTES = frozenset(
@@ -55,6 +56,7 @@ FRONTEND_ROUTES = frozenset(
         "/live",
         "/chart",
         "/breadth",
+        "/feedback",
         "/profile",
         "/admin",
     }
@@ -293,8 +295,7 @@ def market_data_client_from_payload(payload: dict[str, Any]) -> MarketDataClient
         return YahooFuturesMarketDataClient()
     if market in (
         RUSSIAN_BLUECHIPS_MARKET,
-        RUSSIAN_INDICES_MARKET,
-        RUSSIAN_FUTURES_MARKET,
+        RUSSIAN_INDICES_FUTURES_MARKET,
     ):
         return MoexSharesMarketDataClient()
     if market == CRYPTO_SPOT_MARKET:
@@ -356,6 +357,7 @@ def _market_from_payload(payload: dict[str, Any]) -> str:
         "cme": CME_FUTURES_MARKET,
         "cme_futures": CME_FUTURES_MARKET,
         "us_index_futures": CME_FUTURES_MARKET,
+        "us_market": CME_FUTURES_MARKET,
         "commodity": COMMODITIES_MARKET,
         "commodities": COMMODITIES_MARKET,
         "metals": COMMODITIES_MARKET,
@@ -375,13 +377,16 @@ def _market_from_payload(payload: dict[str, Any]) -> str:
         "russian": RUSSIAN_BLUECHIPS_MARKET,
         "russian_bluechips": RUSSIAN_BLUECHIPS_MARKET,
         "ru_bluechips": RUSSIAN_BLUECHIPS_MARKET,
-        "russian_indices": RUSSIAN_INDICES_MARKET,
-        "russian_index": RUSSIAN_INDICES_MARKET,
-        "moex_indices": RUSSIAN_INDICES_MARKET,
-        "moex_index": RUSSIAN_INDICES_MARKET,
-        "russian_futures": RUSSIAN_FUTURES_MARKET,
-        "moex_futures": RUSSIAN_FUTURES_MARKET,
-        "rtsi_futures": RUSSIAN_FUTURES_MARKET,
+        "russian_indices": RUSSIAN_INDICES_FUTURES_MARKET,
+        "russian_index": RUSSIAN_INDICES_FUTURES_MARKET,
+        "moex_indices": RUSSIAN_INDICES_FUTURES_MARKET,
+        "moex_index": RUSSIAN_INDICES_FUTURES_MARKET,
+        "russian_futures": RUSSIAN_INDICES_FUTURES_MARKET,
+        "moex_futures": RUSSIAN_INDICES_FUTURES_MARKET,
+        "rtsi_futures": RUSSIAN_INDICES_FUTURES_MARKET,
+        "russian_indices_futures": RUSSIAN_INDICES_FUTURES_MARKET,
+        "russian_index_futures": RUSSIAN_INDICES_FUTURES_MARKET,
+        "moex_indices_futures": RUSSIAN_INDICES_FUTURES_MARKET,
     }
     try:
         return aliases[market]
@@ -401,10 +406,8 @@ def _live_symbol_from_payload(payload: dict[str, Any], market: str) -> str:
         default_symbol = "9988.HK"
     if market == RUSSIAN_BLUECHIPS_MARKET:
         default_symbol = "SBER"
-    if market == RUSSIAN_INDICES_MARKET:
+    if market == RUSSIAN_INDICES_FUTURES_MARKET:
         default_symbol = "IMOEX"
-    if market == RUSSIAN_FUTURES_MARKET:
-        default_symbol = "IMOEXF"
     symbol = str(payload.get("symbol") or default_symbol).upper()
     if market == MAG7_STOCKS_MARKET and symbol not in MAG7_STOCK_SYMBOLS:
         raise ValueError(f"unsupported MAG 7 stock symbol: {symbol}")
@@ -431,10 +434,8 @@ def _data_source_label(
         return "Yahoo Finance delayed US equities"
     if market == HONG_KONG_STOCKS_MARKET:
         return "Yahoo Finance delayed Hong Kong stocks"
-    if market == RUSSIAN_INDICES_MARKET:
-        return "MOEX APIM index"
-    if market == RUSSIAN_FUTURES_MARKET:
-        return "MOEX APIM futures"
+    if market == RUSSIAN_INDICES_FUTURES_MARKET:
+        return "MOEX APIM indices and futures"
     if market == RUSSIAN_BLUECHIPS_MARKET:
         source_name = getattr(client, "source_name", None)
         if isinstance(source_name, str):

@@ -1,4 +1,4 @@
-export type Mode = "live" | "breadth" | "profile" | "admin";
+export type Mode = "live" | "breadth" | "feedback" | "profile" | "admin";
 
 export type AuthUser = {
   id: number;
@@ -7,6 +7,7 @@ export type AuthUser = {
   is_admin: boolean;
   activated_at: string | null;
   expired_at: string | null;
+  free_trial_end_at: string | null;
   first_name: string | null;
   last_name: string | null;
   middle_name: string | null;
@@ -25,6 +26,15 @@ export type AuthPayload = {
 export type AdminUsersPayload = {
   ok: true;
   users: AuthUser[];
+};
+
+export type PlatformSettings = {
+  is_free_trial_enabled: boolean;
+};
+
+export type PlatformSettingsPayload = {
+  ok: true;
+  settings: PlatformSettings;
 };
 
 export type FeedbackStatus = "open" | "in_progress" | "resolved";
@@ -130,6 +140,11 @@ export type LiveChartPayload = {
   signals: Marker[];
   rsi_alert_signal: Marker | null;
   indicators: IndicatorDefinition[];
+};
+
+export type LiveSymbolsPayload = {
+  ok: true;
+  symbols: Record<string, Array<{ value: string; label: string }>>;
 };
 
 export type MarketBreadthItem = {

@@ -13,6 +13,7 @@ from algo_trading.auth import InMemoryAuthStore, utcnow
 from algo_trading.feedback import InMemoryFeedbackStore
 from algo_trading.futoi import FutoiRecord
 from algo_trading.historical_store import InMemoryHistoricalDataStore
+from algo_trading.live_symbols import InMemoryLiveSymbolStore, LiveSymbol
 from algo_trading.models import Candle
 from algo_trading.web_app import create_app
 
@@ -103,6 +104,42 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(sender.messages[0][0], "123456:abcdef-secret-token")
         self.assertEqual(sender.messages[0][1], "987654321")
         self.assertIn("Test alert", sender.messages[0][2])
+
+    def test_active_user_can_load_database_backed_live_symbols(self):
+        auth_store = InMemoryAuthStore()
+        symbol_store = InMemoryLiveSymbolStore()
+        symbol_store.upsert_symbols(
+            [
+                LiveSymbol(
+                    market="crypto_spot",
+                    symbol="DOGEUSDT",
+                    label="DOGEUSDT",
+                    sort_order=99,
+                )
+            ]
+        )
+        client = self.make_client(auth_store=auth_store, live_symbol_store=symbol_store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+
+        inactive = client.get("/api/live-symbols")
+        self.assertEqual(inactive.status_code, 403)
+
+        alice = auth_store.list_users()[0]
+        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
+        response = client.get("/api/live-symbols")
+
+        self.assertEqual(response.status_code, 200)
+        symbols = response.json()["symbols"]
+        self.assertIn({"value": "BTCUSDT", "label": "BTCUSDT"}, symbols["crypto_spot"])
+        self.assertIn({"value": "DOGEUSDT", "label": "DOGEUSDT"}, symbols["crypto_spot"])
+        self.assertIn({"value": "SPY", "label": "SPY · S&P 500 ETF"}, symbols["cme_futures"])
+        self.assertIn(
+            {"value": "IMOEX", "label": "IMOEX · MOEX Russia Index"},
+            symbols["russian_indices_futures"],
+        )
 
     def test_live_chart_sends_rsi_telegram_alert_once_per_signal(self):
         class FakeTelegramSender:
@@ -399,6 +436,58 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(profile.status_code, 200)
         self.assertEqual(profile.json()["user"]["username"], "alice")
         self.assertIsNone(profile.json()["user"]["first_name"])
+
+    def test_platform_admin_can_toggle_free_trial_for_new_registrations(self):
+        store = InMemoryAuthStore()
+        client = self.make_client(auth_store=store, seed_admin=True)
+        store.seed_admin_user("other-admin@example.com", "password123")
+
+        client.post(
+            "/api/auth/login",
+            json={"username": "other-admin@example.com", "password": "password123"},
+        )
+        forbidden = client.put(
+            "/api/admin/settings/free-trial",
+            json={"is_free_trial_enabled": True},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(
+            forbidden.json(),
+            {"ok": False, "error": "platform admin required"},
+        )
+
+        client.post("/api/auth/logout")
+        client.post(
+            "/api/auth/login",
+            json={
+                "username": "cuiyeqing960904@gmail.com",
+                "password": "Vladimir960904",
+            },
+        )
+
+        current = client.get("/api/admin/settings/free-trial")
+        self.assertEqual(current.status_code, 200)
+        self.assertFalse(current.json()["settings"]["is_free_trial_enabled"])
+
+        updated = client.put(
+            "/api/admin/settings/free-trial",
+            json={"is_free_trial_enabled": True},
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertTrue(updated.json()["settings"]["is_free_trial_enabled"])
+
+        client.post("/api/auth/logout")
+        registered = client.post(
+            "/api/auth/register",
+            json={"username": "trial@example.com", "password": "password123"},
+        )
+
+        self.assertEqual(registered.status_code, 200)
+        user = registered.json()["user"]
+        self.assertTrue(user["is_active"])
+        self.assertIsNotNone(user["activated_at"])
+        self.assertIsNotNone(user["free_trial_end_at"])
+        self.assertEqual(client.get("/api/strategies").status_code, 200)
 
     def test_profile_can_update_name_fields_for_inactive_user(self):
         client = self.make_client()

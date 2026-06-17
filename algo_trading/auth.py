@@ -11,6 +11,7 @@ from typing import Protocol, cast
 
 SESSION_COOKIE_NAME = "algo_session"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
+FREE_TRIAL_SETTING_KEY = "is_free_trial_enabled"
 
 _SCRYPT_N = 16_384
 _SCRYPT_R = 8
@@ -26,6 +27,7 @@ class AuthUser:
     is_admin: bool = False
     activated_at: datetime | None = None
     expired_at: datetime | None = None
+    free_trial_end_at: datetime | None = None
     first_name: str | None = None
     last_name: str | None = None
     middle_name: str | None = None
@@ -40,6 +42,8 @@ class AuthStore(Protocol):
     def user_for_session(self, token: str | None) -> AuthUser | None: ...
     def delete_session(self, token: str | None) -> None: ...
     def list_users(self) -> list[AuthUser]: ...
+    def is_free_trial_enabled(self) -> bool: ...
+    def set_free_trial_enabled(self, enabled: bool) -> bool: ...
     def set_user_access(
         self,
         user_id: int,
@@ -79,6 +83,7 @@ class InMemoryAuthStore:
         self._users_by_name: dict[str, _MemoryUser] = {}
         self._users_by_id: dict[int, _MemoryUser] = {}
         self._sessions: dict[str, _MemorySession] = {}
+        self._is_free_trial_enabled = False
 
     def ensure_schema(self) -> None:
         return None
@@ -88,7 +93,17 @@ class InMemoryAuthStore:
         validate_password(password)
         if normalized in self._users_by_name:
             raise ValueError("username already exists")
-        user = AuthUser(id=self._next_user_id, username=normalized)
+        now = utcnow()
+        free_trial_end_at = (
+            now + timedelta(days=7) if self._is_free_trial_enabled else None
+        )
+        user = AuthUser(
+            id=self._next_user_id,
+            username=normalized,
+            is_active=self._is_free_trial_enabled,
+            activated_at=now if self._is_free_trial_enabled else None,
+            free_trial_end_at=free_trial_end_at,
+        )
         self._next_user_id += 1
         record = _MemoryUser(user=user, password_hash=hash_password(password))
         self._users_by_name[normalized] = record
@@ -118,6 +133,7 @@ class InMemoryAuthStore:
             is_active=True,
             is_admin=True,
             activated_at=existing.user.activated_at or utcnow(),
+            free_trial_end_at=None,
         )
         existing.password_hash = hash_password(password)
         return existing.user
@@ -164,6 +180,13 @@ class InMemoryAuthStore:
             for _user_id, record in sorted(self._users_by_id.items())
         ]
 
+    def is_free_trial_enabled(self) -> bool:
+        return self._is_free_trial_enabled
+
+    def set_free_trial_enabled(self, enabled: bool) -> bool:
+        self._is_free_trial_enabled = enabled
+        return self._is_free_trial_enabled
+
     def set_user_access(
         self,
         user_id: int,
@@ -175,14 +198,16 @@ class InMemoryAuthStore:
         record = self._users_by_id.get(user_id)
         if record is None:
             raise ValueError("unknown user")
+        now = utcnow()
         next_activated_at = activated_at if is_active else None
         if is_active and next_activated_at is None:
-            next_activated_at = record.user.activated_at or utcnow()
+            next_activated_at = record.user.activated_at or now
         record.user = replace(
             record.user,
             is_active=is_active,
             activated_at=next_activated_at,
             expired_at=expired_at,
+            free_trial_end_at=None if is_active else record.user.free_trial_end_at,
         )
         return record.user
 
@@ -211,8 +236,16 @@ class InMemoryAuthStore:
         for record in self._users_by_id.values():
             if (
                 record.user.is_active
-                and record.user.expired_at is not None
-                and record.user.expired_at <= current_time
+                and (
+                    (
+                        record.user.expired_at is not None
+                        and record.user.expired_at <= current_time
+                    )
+                    or (
+                        record.user.free_trial_end_at is not None
+                        and record.user.free_trial_end_at <= current_time
+                    )
+                )
             ):
                 record.user = replace(record.user, is_active=False, activated_at=None)
                 deactivated += 1
@@ -268,6 +301,12 @@ class PostgresAuthStore:
                 cursor.execute(
                     """
                     ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS free_trial_end_at TIMESTAMPTZ
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE users
                     ADD COLUMN IF NOT EXISTS first_name TEXT
                     """
                 )
@@ -312,16 +351,49 @@ class PostgresAuthStore:
                     WHERE expired_at IS NOT NULL
                     """
                 )
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS users_free_trial_end_at_idx
+                    ON users(free_trial_end_at)
+                    WHERE free_trial_end_at IS NOT NULL
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS platform_settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO platform_settings (key, value)
+                    VALUES (%s, 'false')
+                    ON CONFLICT (key) DO NOTHING
+                    """,
+                    (FREE_TRIAL_SETTING_KEY,),
+                )
 
     def register_user(self, username: str, password: str) -> AuthUser:
         normalized = normalize_username(username)
         validate_password(password)
+        free_trial_enabled = self.is_free_trial_enabled()
+        now = utcnow()
+        free_trial_end_at = now + timedelta(days=7) if free_trial_enabled else None
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO users (username, password_hash)
-                    VALUES (%s, %s)
+                    INSERT INTO users (
+                        username,
+                        password_hash,
+                        is_active,
+                        activated_at,
+                        free_trial_end_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (username) DO NOTHING
                     RETURNING id,
                               username,
@@ -329,11 +401,18 @@ class PostgresAuthStore:
                               is_admin,
                               activated_at,
                               expired_at,
+                              free_trial_end_at,
                               first_name,
                               last_name,
                               middle_name
                     """,
-                    (normalized, hash_password(password)),
+                    (
+                        normalized,
+                        hash_password(password),
+                        free_trial_enabled,
+                        now if free_trial_enabled else None,
+                        free_trial_end_at,
+                    ),
                 )
                 row = cursor.fetchone()
         if row is None:
@@ -360,13 +439,15 @@ class PostgresAuthStore:
                     SET password_hash = EXCLUDED.password_hash,
                         is_active = true,
                         is_admin = true,
-                        activated_at = COALESCE(users.activated_at, now())
+                        activated_at = COALESCE(users.activated_at, now()),
+                        free_trial_end_at = NULL
                     RETURNING id,
                               username,
                               is_active,
                               is_admin,
                               activated_at,
                               expired_at,
+                              free_trial_end_at,
                               first_name,
                               last_name,
                               middle_name
@@ -390,6 +471,7 @@ class PostgresAuthStore:
                            is_admin,
                            activated_at,
                            expired_at,
+                           free_trial_end_at,
                            first_name,
                            last_name,
                            middle_name,
@@ -400,7 +482,7 @@ class PostgresAuthStore:
                     (normalized,),
                 )
                 row = cursor.fetchone()
-        if row is None or not verify_password(password, str(row[9])):
+        if row is None or not verify_password(password, str(row[10])):
             raise ValueError("invalid username or password")
         return user_from_row(row)
 
@@ -434,6 +516,7 @@ class PostgresAuthStore:
                            users.is_admin,
                            users.activated_at,
                            users.expired_at,
+                           users.free_trial_end_at,
                            users.first_name,
                            users.last_name,
                            users.middle_name
@@ -469,6 +552,7 @@ class PostgresAuthStore:
                            is_admin,
                            activated_at,
                            expired_at,
+                           free_trial_end_at,
                            first_name,
                            last_name,
                            middle_name
@@ -478,6 +562,39 @@ class PostgresAuthStore:
                 )
                 rows = cursor.fetchall()
         return [user_from_row(row) for row in rows]
+
+    def is_free_trial_enabled(self) -> bool:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT value
+                    FROM platform_settings
+                    WHERE key = %s
+                    """,
+                    (FREE_TRIAL_SETTING_KEY,),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            return False
+        return str(row[0]).strip().lower() in {"1", "true", "yes", "on"}
+
+    def set_free_trial_enabled(self, enabled: bool) -> bool:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO platform_settings (key, value, updated_at)
+                    VALUES (%s, %s, now())
+                    ON CONFLICT (key) DO UPDATE
+                    SET value = EXCLUDED.value,
+                        updated_at = now()
+                    RETURNING value
+                    """,
+                    (FREE_TRIAL_SETTING_KEY, "true" if enabled else "false"),
+                )
+                row = cursor.fetchone()
+        return bool(row and str(row[0]).strip().lower() == "true")
 
     def set_user_access(
         self,
@@ -498,7 +615,11 @@ class PostgresAuthStore:
                             WHEN %s THEN COALESCE(%s, activated_at, now())
                             ELSE NULL
                         END,
-                        expired_at = %s
+                        expired_at = %s,
+                        free_trial_end_at = CASE
+                            WHEN %s THEN NULL
+                            ELSE free_trial_end_at
+                        END
                     WHERE id = %s
                     RETURNING id,
                               username,
@@ -506,11 +627,19 @@ class PostgresAuthStore:
                               is_admin,
                               activated_at,
                               expired_at,
+                              free_trial_end_at,
                               first_name,
                               last_name,
                               middle_name
                     """,
-                    (is_active, is_active, next_activated_at, expired_at, user_id),
+                    (
+                        is_active,
+                        is_active,
+                        next_activated_at,
+                        expired_at,
+                        is_active,
+                        user_id,
+                    ),
                 )
                 row = cursor.fetchone()
         if row is None:
@@ -540,6 +669,7 @@ class PostgresAuthStore:
                               is_admin,
                               activated_at,
                               expired_at,
+                              free_trial_end_at,
                               first_name,
                               last_name,
                               middle_name
@@ -566,11 +696,13 @@ class PostgresAuthStore:
                     SET is_active = false,
                         activated_at = NULL
                     WHERE is_active = true
-                      AND expired_at IS NOT NULL
-                      AND expired_at <= %s
+                      AND (
+                          (expired_at IS NOT NULL AND expired_at <= %s)
+                          OR (free_trial_end_at IS NOT NULL AND free_trial_end_at <= %s)
+                      )
                     RETURNING id
                     """,
-                    (current_time,),
+                    (current_time, current_time),
                 )
                 rows = cursor.fetchall()
         return len(rows)
@@ -589,9 +721,10 @@ def user_from_row(row: Sequence[object]) -> AuthUser:
         is_admin=bool(row[3]),
         activated_at=cast(datetime | None, row[4]),
         expired_at=cast(datetime | None, row[5]),
-        first_name=cast(str | None, row[6]),
-        last_name=cast(str | None, row[7]),
-        middle_name=cast(str | None, row[8]),
+        free_trial_end_at=cast(datetime | None, row[6]),
+        first_name=cast(str | None, row[7]),
+        last_name=cast(str | None, row[8]),
+        middle_name=cast(str | None, row[9]),
     )
 
 
@@ -671,6 +804,7 @@ def public_user(user: AuthUser) -> dict[str, object]:
         "is_admin": user.is_admin,
         "activated_at": isoformat_or_none(user.activated_at),
         "expired_at": isoformat_or_none(user.expired_at),
+        "free_trial_end_at": isoformat_or_none(user.free_trial_end_at),
         "first_name": user.first_name,
         "last_name": user.last_name,
         "middle_name": user.middle_name,

@@ -5,14 +5,8 @@ import TradingViewChart from "./components/TradingViewChart.vue";
 import {
   LIVE_WORKSPACE_STORAGE_KEY,
   defaultLiveIndicators,
-  hongKongStockSymbolOptions,
   liveCandleOptions,
   liveIntervalOptions,
-  liveSymbolOptions,
-  mag7StockSymbolOptions,
-  moexBluechipSymbolOptions,
-  moexFuturesSymbolOptions,
-  moexIndexSymbolOptions,
   strategyGroupCatalog,
   type SelectOption,
 } from "./liveConfig";
@@ -43,14 +37,14 @@ import type {
   FeedbackStatus,
   IndicatorDefinition,
   LiveChartPayload,
+  LiveSymbolsPayload,
   MarketBreadthBar,
   MarketBreadthGroup,
   MarketBreadthPayload,
   Mode,
+  PlatformSettingsPayload,
   StrategyInfo,
   StrategyPayload,
-  TelegramAlertSettings,
-  TelegramAlertSettingsPayload,
 } from "./types";
 
 type StatusType = "" | "busy" | "error";
@@ -99,11 +93,14 @@ type LiveWorkspace = {
   savedAt: string;
 };
 
+const FREE_TRIAL_ADMIN_EMAIL = "cuiyeqing960904@gmail.com";
+
 const routeModes: Record<string, Mode> = {
   "/": "live",
   "/live": "live",
   "/chart": "live",
   "/breadth": "breadth",
+  "/feedback": "feedback",
   "/profile": "profile",
   "/admin": "admin",
 };
@@ -111,6 +108,7 @@ const routeModes: Record<string, Mode> = {
 const modeRoutes: Record<Mode, string> = {
   live: "/live",
   breadth: "/breadth",
+  feedback: "/feedback",
   profile: "/profile",
   admin: "/admin",
 };
@@ -178,12 +176,8 @@ const feedbackForm = reactive({
   title: "",
   description: "",
 });
-const telegramAlertForm = reactive({
-  enabled: false,
-  bot_token: "",
-  chat_id: "",
-  bot_token_configured: false,
-  bot_token_preview: "",
+const freeTrialSettings = reactive({
+  is_free_trial_enabled: false,
 });
 const authStatus = ref("");
 const authStatusType = ref<StatusType>("");
@@ -191,8 +185,6 @@ const profileStatus = ref(t("status.ready"));
 const profileStatusType = ref<StatusType>("");
 const feedbackStatus = ref(t("status.ready"));
 const feedbackStatusType = ref<StatusType>("");
-const telegramAlertStatus = ref(t("status.ready"));
-const telegramAlertStatusType = ref<StatusType>("");
 const adminUsers = ref<AuthUser[]>([]);
 const adminFeedback = ref<FeedbackItem[]>([]);
 const adminExpiryEdits = reactive<Record<number, string>>({});
@@ -212,6 +204,7 @@ function setLocale(nextLocale: Locale) {
 const activeMode = ref<Mode>(modeFromLocation());
 const strategies = ref<StrategyInfo[]>([]);
 const livePayload = ref<LiveChartPayload | null>(null);
+const liveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});
 const breadthPayload = ref<MarketBreadthPayload | null>(null);
 const liveStatus = ref(t("status.ready"));
 const liveStatusType = ref<StatusType>("");
@@ -244,17 +237,20 @@ const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
 const isAdminUser = computed(() =>
   authUser.value?.is_admin === true,
 );
+const canManageFreeTrial = computed(
+  () => isAdminUser.value && authUser.value?.username === FREE_TRIAL_ADMIN_EMAIL,
+);
 const featureTabs = computed(() => [
   { mode: "live" as const, label: t("tabs.live") },
   { mode: "breadth" as const, label: t("tabs.breadth") },
 ]);
-const accountTabs = computed(() => [
+const accountMenuItems = computed(() => [
   { mode: "profile" as const, label: t("tabs.profile") },
-  ...(isAdminUser.value ? [{ mode: "admin" as const, label: t("tabs.admin") }] : []),
+  { mode: "feedback" as const, label: t("tabs.feedback") },
 ]);
 const tabs = computed(() => [
   ...(canUseFeatures.value ? featureTabs.value : []),
-  ...accountTabs.value,
+  ...(isAdminUser.value ? [{ mode: "admin" as const, label: t("tabs.admin") }] : []),
 ]);
 const filteredAdminUsers = computed(() => {
   const query = adminSearch.value.trim().toLowerCase();
@@ -270,38 +266,13 @@ const feedbackStatusOptions = computed<SelectOption[]>(() => [
 ]);
 const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "crypto_spot", label: t("options.cryptoSpot") },
-  { value: "cme_futures", label: t("options.usIndexFutures") },
+  { value: "cme_futures", label: t("options.usMarket") },
   { value: "commodities", label: t("options.commodities") },
   { value: "mag7_stocks", label: t("options.mag7Stocks") },
   { value: "hong_kong_stocks", label: t("options.hongKongStocks") },
   { value: "russian_bluechips", label: t("options.moexBluechips") },
-  { value: "russian_indices", label: t("options.moexIndices") },
-  { value: "russian_futures", label: t("options.moexFutures") },
+  { value: "russian_indices_futures", label: t("options.moexIndicesFutures") },
 ]);
-const liveFuturesSymbolOptions = computed<SelectOption[]>(() => [
-  { value: "ES=F", label: t("options.sp500Future") },
-  { value: "NQ=F", label: t("options.nasdaq100Future") },
-  { value: "YM=F", label: t("options.dowJonesFuture") },
-]);
-const commoditySymbolOptions = computed<SelectOption[]>(() => [
-  { value: "GC=F", label: t("options.commodityGold") },
-  { value: "SI=F", label: t("options.commoditySilver") },
-  { value: "NG=F", label: t("options.commodityNaturalGas") },
-  { value: "BZ=F", label: t("options.commodityBrentOil") },
-  { value: "PL=F", label: t("options.commodityPlatinum") },
-  { value: "PA=F", label: t("options.commodityPalladium") },
-  { value: "HG=F", label: t("options.commodityCopper") },
-]);
-const liveSymbolsByMarket = computed<Record<string, SelectOption[]>>(() => ({
-  crypto_spot: liveSymbolOptions,
-  cme_futures: liveFuturesSymbolOptions.value,
-  commodities: commoditySymbolOptions.value,
-  mag7_stocks: mag7StockSymbolOptions,
-  hong_kong_stocks: hongKongStockSymbolOptions,
-  russian_bluechips: moexBluechipSymbolOptions,
-  russian_indices: moexIndexSymbolOptions,
-  russian_futures: moexFuturesSymbolOptions,
-}));
 const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
   { value: "consensus", label: t("options.consensusSignals") },
   { value: "individual", label: t("options.individualSignals") },
@@ -378,7 +349,7 @@ const filteredLiveStrategyGroups = computed<StrategyGroup[]>(() => {
     .filter((group) => group.strategies.length > 0);
 });
 const activeLiveSymbolOptions = computed(
-  () => liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions,
+  () => liveSymbolsByMarket.value[liveMarket.value] ?? [],
 );
 const filteredLiveSymbolOptions = computed(() => {
   const query = liveSymbolSearch.value;
@@ -456,8 +427,7 @@ const liveDataHealth = computed<LiveDataHealth>(() => {
   }
   if (
     liveMarket.value === "russian_bluechips" ||
-    liveMarket.value === "russian_indices" ||
-    liveMarket.value === "russian_futures"
+    liveMarket.value === "russian_indices_futures"
   ) {
     return {
       label: t("health.exchange"),
@@ -467,7 +437,7 @@ const liveDataHealth = computed<LiveDataHealth>(() => {
   }
   return {
     label: t("health.live"),
-    detail: livePayload.value.data_source,
+    detail: t("health.liveDetail"),
     tone: "good",
   };
 });
@@ -523,7 +493,7 @@ watch(liveMarket, () => {
   if (isApplyingLiveSettingsFromUrl) {
     return;
   }
-  liveSymbol.value = String(activeLiveSymbolOptions.value[0]?.value ?? "BTCUSDT");
+  ensureLiveSymbolForMarket(liveMarket.value);
 });
 
 watch(strategies, () => {
@@ -566,9 +536,6 @@ watch(locale, () => {
   if (!feedbackStatusType.value) {
     feedbackStatus.value = t("status.ready");
   }
-  if (!telegramAlertStatusType.value) {
-    telegramAlertStatus.value = t("status.ready");
-  }
   if (!authStatusType.value && authStatus.value) {
     authStatus.value = t("auth.ready");
   }
@@ -607,7 +574,7 @@ function modeFromLocation(): Mode {
 }
 
 function isFeatureMode(mode: Mode): boolean {
-  return mode === "live" || mode === "breadth";
+  return mode === "live" || mode === "breadth" || mode === "feedback";
 }
 
 function permittedMode(mode: Mode): Mode {
@@ -671,11 +638,6 @@ function setFeedbackStatus(message: string, type: StatusType = "") {
   feedbackStatusType.value = type;
 }
 
-function setTelegramAlertStatus(message: string, type: StatusType = "") {
-  telegramAlertStatus.value = message;
-  telegramAlertStatusType.value = type;
-}
-
 async function loadCurrentUser() {
   authChecked.value = false;
   try {
@@ -691,8 +653,10 @@ async function loadCurrentUser() {
 async function bootstrapAuthenticatedApp() {
   await loadProfile();
   if (canUseFeatures.value) {
+    await loadLiveSymbols();
     await loadStrategies();
   } else {
+    liveSymbolsByMarket.value = {};
     strategies.value = [];
   }
   applyLiveSettingsFromLocation();
@@ -710,15 +674,15 @@ function applyLiveSettingsFromLocation() {
     if (market && liveSymbolsByMarket.value[market]) {
       liveMarket.value = market;
     }
-    const symbolOptions = liveSymbolsByMarket.value[liveMarket.value] ?? liveSymbolOptions;
+    const symbolOptions = activeLiveSymbolOptions.value;
     const symbol = (params.get("symbol") ?? "").trim().toUpperCase();
     const matchedSymbol = symbolOptions.find(
       (option) => String(option.value).toUpperCase() === symbol,
     );
     if (matchedSymbol) {
       liveSymbol.value = String(matchedSymbol.value);
-    } else if (!symbolOptions.some((option) => String(option.value) === liveSymbol.value)) {
-      liveSymbol.value = String(symbolOptions[0]?.value ?? "BTCUSDT");
+    } else {
+      ensureLiveSymbolForMarket(liveMarket.value);
     }
     if (params.has("indicators")) {
       liveVisibleIndicators.value = parseLiveIndicators(params.get("indicators"));
@@ -836,13 +800,13 @@ function saveLiveWorkspace() {
 
 function applyLiveWorkspace(workspace: LiveWorkspace) {
   liveMarket.value = workspace.market;
-  const symbolOptions = liveSymbolsByMarket.value[workspace.market] ?? liveSymbolOptions;
+  const symbolOptions = liveSymbolsByMarket.value[workspace.market] ?? [];
   const symbolExists = symbolOptions.some(
     (option) => String(option.value) === workspace.symbol,
   );
   liveSymbol.value = symbolExists
     ? workspace.symbol
-    : String(symbolOptions[0]?.value ?? "BTCUSDT");
+    : String(symbolOptions[0]?.value ?? liveSymbol.value);
   liveInterval.value = workspace.interval;
   liveLimit.value = workspace.limit;
   liveVisibleIndicators.value = [...workspace.indicators];
@@ -853,6 +817,16 @@ function applyLiveWorkspace(workspace: LiveWorkspace) {
   setLiveStrategies(workspace.strategies);
   syncLiveUrl();
   setLiveStatus(`${t("status.workspaceLoaded")} ${workspace.name}`);
+}
+
+function ensureLiveSymbolForMarket(market: string) {
+  const symbolOptions = liveSymbolsByMarket.value[market] ?? [];
+  if (!symbolOptions.length) {
+    return;
+  }
+  if (!symbolOptions.some((option) => String(option.value) === liveSymbol.value)) {
+    liveSymbol.value = String(symbolOptions[0].value);
+  }
 }
 
 function deleteLiveWorkspace(workspaceId: string) {
@@ -956,11 +930,16 @@ async function loadProfile() {
   const payload = await requestJson<AuthMePayload>("/api/profile");
   authUser.value = payload.user;
   setProfileForm(payload.user);
-  if (payload.user?.is_active) {
-    await loadTelegramAlertSettings();
-  } else {
-    clearTelegramAlertForm();
+}
+
+async function loadLiveSymbols() {
+  if (!canUseFeatures.value) {
+    liveSymbolsByMarket.value = {};
+    return;
   }
+  const payload = await requestJson<LiveSymbolsPayload>("/api/live-symbols");
+  liveSymbolsByMarket.value = payload.symbols;
+  ensureLiveSymbolForMarket(liveMarket.value);
 }
 
 async function loadAdminUsers() {
@@ -991,20 +970,22 @@ async function loadAdminPanel() {
   if (!adminStatusType.value) {
     await loadAdminFeedback();
   }
+  if (!adminStatusType.value && canManageFreeTrial.value) {
+    await loadFreeTrialSettings();
+  }
 }
 
-async function loadTelegramAlertSettings() {
-  if (!authUser.value?.is_active) {
-    clearTelegramAlertForm();
+async function loadFreeTrialSettings() {
+  if (!canManageFreeTrial.value) {
     return;
   }
+  setAdminStatus(t("status.loadingSettings"), "busy");
   try {
-    const payload = await requestJson<TelegramAlertSettingsPayload>("/api/alerts/telegram");
-    applyTelegramAlertSettings(payload.settings);
-    setTelegramAlertStatus(t("status.telegramSettingsLoaded"));
+    const payload = await requestJson<PlatformSettingsPayload>("/api/admin/settings/free-trial");
+    freeTrialSettings.is_free_trial_enabled = payload.settings.is_free_trial_enabled;
+    setAdminStatus(t("status.ready"));
   } catch (error) {
-    clearTelegramAlertForm();
-    setTelegramAlertStatus(errorMessage(error), "error");
+    setAdminStatus(errorMessage(error), "error");
   }
 }
 
@@ -1023,39 +1004,23 @@ async function saveProfile() {
   }
 }
 
-async function saveTelegramAlertSettings() {
-  if (!authUser.value?.is_active) {
-    setTelegramAlertStatus(t("auth.inactive"), "error");
+async function saveFreeTrialSettings() {
+  if (!canManageFreeTrial.value) {
+    setAdminStatus(t("auth.inactive"), "error");
     return;
   }
-  setTelegramAlertStatus(t("status.savingTelegramSettings"), "busy");
+  setAdminStatus(t("status.loadingSettings"), "busy");
   try {
-    const payload = await requestJson<TelegramAlertSettingsPayload>("/api/alerts/telegram", {
+    const payload = await requestJson<PlatformSettingsPayload>("/api/admin/settings/free-trial", {
       method: "PUT",
       body: JSON.stringify({
-        enabled: telegramAlertForm.enabled,
-        bot_token: telegramAlertForm.bot_token,
-        chat_id: telegramAlertForm.chat_id,
+        is_free_trial_enabled: freeTrialSettings.is_free_trial_enabled,
       }),
     });
-    applyTelegramAlertSettings(payload.settings);
-    setTelegramAlertStatus(t("status.telegramSettingsSaved"));
+    freeTrialSettings.is_free_trial_enabled = payload.settings.is_free_trial_enabled;
+    setAdminStatus(t("status.settingsSaved"));
   } catch (error) {
-    setTelegramAlertStatus(errorMessage(error), "error");
-  }
-}
-
-async function testTelegramAlert() {
-  if (!authUser.value?.is_active) {
-    setTelegramAlertStatus(t("auth.inactive"), "error");
-    return;
-  }
-  setTelegramAlertStatus(t("status.sendingTelegramTest"), "busy");
-  try {
-    await requestJson<{ ok: true }>("/api/alerts/telegram/test", { method: "POST" });
-    setTelegramAlertStatus(t("status.telegramTestSent"));
-  } catch (error) {
-    setTelegramAlertStatus(errorMessage(error), "error");
+    setAdminStatus(errorMessage(error), "error");
   }
 }
 
@@ -1174,22 +1139,6 @@ function setProfileForm(user: AuthUser | null) {
   profileForm.middle_name = user?.middle_name ?? "";
 }
 
-function applyTelegramAlertSettings(settings: TelegramAlertSettings) {
-  telegramAlertForm.enabled = settings.enabled;
-  telegramAlertForm.bot_token = "";
-  telegramAlertForm.chat_id = settings.chat_id;
-  telegramAlertForm.bot_token_configured = settings.bot_token_configured;
-  telegramAlertForm.bot_token_preview = settings.bot_token_preview;
-}
-
-function clearTelegramAlertForm() {
-  telegramAlertForm.enabled = false;
-  telegramAlertForm.bot_token = "";
-  telegramAlertForm.chat_id = "";
-  telegramAlertForm.bot_token_configured = false;
-  telegramAlertForm.bot_token_preview = "";
-}
-
 function syncAdminExpiryEdits(users: AuthUser[]) {
   for (const user of users) {
     adminExpiryEdits[user.id] = dateInputValue(user.expired_at);
@@ -1214,7 +1163,6 @@ async function logout() {
   adminFeedback.value = [];
   feedbackForm.title = "";
   feedbackForm.description = "";
-  clearTelegramAlertForm();
 }
 
 async function loadStrategies() {
@@ -1548,9 +1496,21 @@ function errorMessage(error: unknown): string {
       <button class="secondary logout-button" type="button" @click="logout">
         {{ t("auth.logout") }}
       </button>
-      <button class="secondary profile-button" type="button" @click="setMode('profile')">
-        {{ t("tabs.profile") }}
-      </button>
+      <details class="profile-menu">
+        <summary class="secondary profile-button">
+          {{ t("tabs.profile") }}
+        </summary>
+        <div class="profile-menu-panel">
+          <button
+            v-for="item in accountMenuItems"
+            :key="item.mode"
+            type="button"
+            @click="setMode(item.mode)"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+      </details>
     </div>
   </header>
 
@@ -1578,10 +1538,6 @@ function errorMessage(error: unknown): string {
       </div>
       <div class="live-market-strip">
         <div class="ticker-pill">
-          <span>{{ t("labels.source") }}</span>
-          <b>{{ livePayload?.data_source ?? "Binance Spot public REST" }}</b>
-        </div>
-        <div class="ticker-pill">
           <span>{{ t("labels.market") }}</span>
           <b>{{ livePayload?.symbol ?? liveSymbol }}</b>
         </div>
@@ -1607,7 +1563,7 @@ function errorMessage(error: unknown): string {
         <div class="health-badge">
           <span>{{ t("labels.updated") }}</span>
           <b>{{ liveDataUpdatedLabel }}</b>
-          <small>{{ livePayload?.data_source ?? t("health.waiting") }}</small>
+          <small>{{ livePayload ? t("status.updated") : t("health.waiting") }}</small>
         </div>
       </div>
       <div class="live-controls">
@@ -2051,76 +2007,6 @@ function errorMessage(error: unknown): string {
           </div>
         </div>
       </form>
-      <form v-if="authUser.is_active" class="feedback-form" @submit.prevent="submitFeedback">
-        <div>
-          <h3>{{ t("pages.feedback") }}</h3>
-          <p>{{ t("pages.feedbackSubtitle") }}</p>
-        </div>
-        <div class="field-grid feedback-field-grid">
-          <label>
-            <span>{{ t("labels.feedbackTitle") }}</span>
-            <input
-              v-model.trim="feedbackForm.title"
-              autocomplete="off"
-              required
-              maxlength="160"
-            >
-          </label>
-          <label>
-            <span>{{ t("labels.feedbackDescription") }}</span>
-            <textarea
-              v-model.trim="feedbackForm.description"
-              maxlength="4000"
-              rows="3"
-            ></textarea>
-          </label>
-          <div class="profile-form-actions">
-            <button class="primary" type="submit">{{ t("actions.sendFeedback") }}</button>
-            <div class="status" :class="feedbackStatusType ? `is-${feedbackStatusType}` : ''">
-              {{ feedbackStatus }}
-            </div>
-          </div>
-        </div>
-      </form>
-      <form v-if="authUser.is_active" class="telegram-alert-form" @submit.prevent="saveTelegramAlertSettings">
-        <div>
-          <h3>{{ t("pages.telegramAlerts") }}</h3>
-          <p>{{ t("pages.telegramAlertsSubtitle") }}</p>
-        </div>
-        <div class="field-grid telegram-alert-grid">
-          <label class="toggle-row">
-            <input v-model="telegramAlertForm.enabled" type="checkbox">
-            <span>{{ t("labels.telegramAlertsEnabled") }}</span>
-          </label>
-          <label>
-            <span>{{ t("labels.telegramBotToken") }}</span>
-            <input
-              v-model.trim="telegramAlertForm.bot_token"
-              autocomplete="off"
-              type="password"
-              :placeholder="telegramAlertForm.bot_token_configured ? telegramAlertForm.bot_token_preview : ''"
-              maxlength="256"
-            >
-          </label>
-          <label>
-            <span>{{ t("labels.telegramChatId") }}</span>
-            <input
-              v-model.trim="telegramAlertForm.chat_id"
-              autocomplete="off"
-              maxlength="128"
-            >
-          </label>
-          <div class="profile-form-actions">
-            <button class="primary" type="submit">{{ t("actions.saveTelegramAlerts") }}</button>
-            <button class="secondary" type="button" @click="testTelegramAlert">
-              {{ t("actions.testTelegramAlert") }}
-            </button>
-            <div class="status" :class="telegramAlertStatusType ? `is-${telegramAlertStatusType}` : ''">
-              {{ telegramAlertStatus }}
-            </div>
-          </div>
-        </div>
-      </form>
       <div class="profile-grid">
         <div class="profile-field">
           <span>{{ t("labels.username") }}</span>
@@ -2150,7 +2036,47 @@ function errorMessage(error: unknown): string {
           <span>{{ t("labels.expiredAt") }}</span>
           <b>{{ formatDateTime(authUser.expired_at) }}</b>
         </div>
+        <div class="profile-field">
+          <span>{{ t("labels.freeTrialEndAt") }}</span>
+          <b>{{ formatDateTime(authUser.free_trial_end_at) }}</b>
+        </div>
       </div>
+    </section>
+
+    <section v-else-if='activeMode === "feedback"' class="panel feedback-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("pages.feedback") }}</h2>
+          <p>{{ t("pages.feedbackSubtitle") }}</p>
+        </div>
+      </div>
+      <form class="feedback-form" @submit.prevent="submitFeedback">
+        <div class="field-grid feedback-field-grid">
+          <label>
+            <span>{{ t("labels.feedbackTitle") }}</span>
+            <input
+              v-model.trim="feedbackForm.title"
+              autocomplete="off"
+              required
+              maxlength="160"
+            >
+          </label>
+          <label>
+            <span>{{ t("labels.feedbackDescription") }}</span>
+            <textarea
+              v-model.trim="feedbackForm.description"
+              maxlength="4000"
+              rows="3"
+            ></textarea>
+          </label>
+          <div class="profile-form-actions">
+            <button class="primary" type="submit">{{ t("actions.sendFeedback") }}</button>
+            <div class="status" :class="feedbackStatusType ? `is-${feedbackStatusType}` : ''">
+              {{ feedbackStatus }}
+            </div>
+          </div>
+        </div>
+      </form>
     </section>
 
     <section v-else-if='activeMode === "admin"' class="panel admin-panel">
@@ -2174,6 +2100,23 @@ function errorMessage(error: unknown): string {
           <input v-model.trim="adminSearch" autocomplete="off" type="search">
         </label>
       </div>
+      <section v-if="canManageFreeTrial" class="admin-settings-section">
+        <div class="panel-heading compact-heading">
+          <div>
+            <h3>{{ t("pages.freeTrialSettings") }}</h3>
+            <p>{{ t("pages.freeTrialSettingsSubtitle") }}</p>
+          </div>
+        </div>
+        <div class="admin-settings-controls">
+          <label class="toggle-row">
+            <input v-model="freeTrialSettings.is_free_trial_enabled" type="checkbox">
+            <span>{{ t("labels.freeTrialEnabled") }}</span>
+          </label>
+          <button class="secondary" type="button" @click="saveFreeTrialSettings">
+            {{ t("actions.saveFreeTrialSettings") }}
+          </button>
+        </div>
+      </section>
       <div v-if="!adminUsers.length" class="empty">{{ t("empty.noUsers") }}</div>
       <div v-else-if="!filteredAdminUsers.length" class="empty">{{ t("empty.noMatchingUsers") }}</div>
       <table v-else>
@@ -2186,6 +2129,7 @@ function errorMessage(error: unknown): string {
             <th>{{ t("table.active") }}</th>
             <th>{{ t("table.activated") }}</th>
             <th>{{ t("table.expires") }}</th>
+            <th>{{ t("labels.freeTrialEndAt") }}</th>
             <th>{{ t("table.actions") }}</th>
           </tr>
         </thead>
@@ -2205,6 +2149,7 @@ function errorMessage(error: unknown): string {
                 </button>
               </div>
             </td>
+            <td>{{ formatDateTime(user.free_trial_end_at) }}</td>
             <td>
               <button
                 class="secondary"

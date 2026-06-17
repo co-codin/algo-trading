@@ -86,10 +86,10 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("liveSymbolOptions", source)
-        self.assertIn("export const liveSymbolOptions = [", config_source)
         self.assertIn("const liveMarketOptions = computed<SelectOption[]>(() => [", source)
-        self.assertIn("const liveSymbolsByMarket", source)
+        self.assertIn("const liveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});", source)
+        self.assertIn("async function loadLiveSymbols()", source)
+        self.assertIn('requestJson<LiveSymbolsPayload>("/api/live-symbols")', source)
         self.assertIn("liveIntervalOptions", source)
         self.assertIn('value: "1w"', config_source)
         self.assertIn('value: "1M"', config_source)
@@ -100,19 +100,10 @@ class UiTests(unittest.TestCase):
         self.assertIn('value: "crypto_spot"', source)
         self.assertIn('t("options.cryptoSpot")', source)
         self.assertIn('value: "cme_futures"', source)
-        self.assertIn('t("options.usIndexFutures")', source)
-        self.assertIn('value: "ES=F"', source)
-        self.assertIn('t("options.sp500Future")', source)
-        self.assertIn('value: "NQ=F"', source)
-        self.assertIn('t("options.nasdaq100Future")', source)
-        self.assertIn('value: "YM=F"', source)
-        self.assertIn('t("options.dowJonesFuture")', source)
-        self.assertIn('"options.nasdaq100Future": "Nasdaq 100 Future"', i18n_source)
-        self.assertIn('"options.dowJonesFuture": "Dow Jones Future"', i18n_source)
-        self.assertIn('"options.nasdaq100Future": "Фьючерс Nasdaq 100"', i18n_source)
-        self.assertIn('"options.dowJonesFuture": "Фьючерс Dow Jones"', i18n_source)
-        self.assertIn('"options.nasdaq100Future": "纳斯达克100期货"', i18n_source)
-        self.assertIn('"options.dowJonesFuture": "道琼斯期货"', i18n_source)
+        self.assertIn('t("options.usMarket")', source)
+        self.assertIn('"options.usMarket": "US Market"', i18n_source)
+        self.assertIn('"options.usMarket": "Рынок США"', i18n_source)
+        self.assertIn('"options.usMarket": "美国市场"', i18n_source)
         self.assertIn('<select v-model="liveMarket"', source)
         self.assertIn('<select v-model="liveSymbol"', source)
         self.assertIn('<select v-model="liveInterval"', source)
@@ -121,8 +112,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('class="strategy-picker live-strategy-field"', source)
         self.assertIn("toggleLiveStrategy(strategy.name)", source)
         self.assertIn('v-for="group in filteredLiveStrategyGroups"', source)
-        self.assertIn('value: "BTCUSDT"', config_source)
-        self.assertIn('value: "ETHUSDT"', config_source)
         self.assertIn('value: "1m"', config_source)
         self.assertIn('value: "1h"', config_source)
         self.assertIn("value: 180", config_source)
@@ -201,7 +190,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("const liveDataHealth = computed", app_source)
         self.assertIn("class=\"health-badge\"", app_source)
         self.assertIn("class=\"health-strip\"", app_source)
-        self.assertIn("livePayload?.data_source", app_source)
+        self.assertIn('t("health.liveDetail")', app_source)
 
         self.assertIn("exportLiveSnapshot", app_source)
         self.assertIn("URL.createObjectURL", app_source)
@@ -219,6 +208,31 @@ class UiTests(unittest.TestCase):
         self.assertIn(".health-badge", style_source)
         self.assertIn(".alert-controls", style_source)
 
+    def test_admin_panel_exposes_free_trial_toggle(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(encoding="utf-8")
+        style_source = (root / "frontend" / "src" / "styles" / "account.css").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("FREE_TRIAL_ADMIN_EMAIL", app_source)
+        self.assertIn("const freeTrialSettings", app_source)
+        self.assertIn("canManageFreeTrial", app_source)
+        self.assertIn("/api/admin/settings/free-trial", app_source)
+        self.assertIn('class="admin-settings-section"', app_source)
+        self.assertIn('v-model="freeTrialSettings.is_free_trial_enabled"', app_source)
+        self.assertIn('t("pages.freeTrialSettings")', app_source)
+        self.assertIn('t("labels.freeTrialEndAt")', app_source)
+        self.assertIn("free_trial_end_at: string | null;", types_source)
+        self.assertIn("PlatformSettingsPayload", types_source)
+        self.assertIn('"pages.freeTrialSettings": "Free trial"', i18n_source)
+        self.assertIn('"labels.freeTrialEndAt": "Free trial ends"', i18n_source)
+        self.assertIn('"pages.freeTrialSettings": "Пробный период"', i18n_source)
+        self.assertIn('"pages.freeTrialSettings": "免费试用"', i18n_source)
+        self.assertIn(".admin-settings-section", style_source)
+
     def test_frontend_splits_live_configuration_and_styles(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
@@ -229,8 +243,8 @@ class UiTests(unittest.TestCase):
 
         self.assertIn("from \"./liveConfig\"", app_source)
         self.assertIn("from \"./liveUtils\"", app_source)
-        self.assertIn("export const liveSymbolOptions", config_source)
-        self.assertIn("export const moexBluechipSymbolOptions", config_source)
+        self.assertNotIn("export const liveSymbolOptions", config_source)
+        self.assertNotIn("export const moexBluechipSymbolOptions", config_source)
         self.assertIn("export const strategyGroupCatalog", config_source)
         self.assertIn("export function groupSignalsByConsensus", helpers_source)
         self.assertIn("export function limitRecentSignals", helpers_source)
@@ -355,23 +369,23 @@ class UiTests(unittest.TestCase):
         self.assertIn("color?: string;", types_source)
         self.assertIn("color: point.color ?? indicatorSeriesItem.color", chart_source)
 
-    def test_live_crypto_spot_symbols_are_limited_to_btc_and_eth(self):
+    def test_live_symbols_are_loaded_from_api_catalog(self):
         source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+        config_source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "liveConfig.ts"
         ).read_text(encoding="utf-8")
-        options_source = source.split("const liveSymbolOptions = [", 1)[1].split(
-            "] satisfies SelectOption[];",
-            1,
-        )[0]
 
-        self.assertIn('value: "BTCUSDT"', options_source)
-        self.assertIn('value: "ETHUSDT"', options_source)
-        self.assertNotIn('value: "SOLUSDT"', options_source)
-        self.assertNotIn('value: "BNBUSDT"', options_source)
-        self.assertNotIn('value: "XRPUSDT"', options_source)
-        self.assertNotIn('value: "DOGEUSDT"', options_source)
-        self.assertNotIn('value: "ADAUSDT"', options_source)
-        self.assertNotIn('value: "AVAXUSDT"', options_source)
+        self.assertIn("const liveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});", source)
+        self.assertIn("async function loadLiveSymbols()", source)
+        self.assertIn('requestJson<LiveSymbolsPayload>("/api/live-symbols")', source)
+        self.assertIn("ensureLiveSymbolForMarket", source)
+        self.assertNotIn("export const liveSymbolOptions = [", config_source)
+        self.assertNotIn('value: "BTCUSDT"', config_source)
+        self.assertNotIn('value: "ETHUSDT"', config_source)
+        self.assertNotIn('value: "ADAUSDT"', config_source)
+        self.assertNotIn('value: "AVAXUSDT"', config_source)
 
     def test_live_market_selector_changes_auto_refresh_chart(self):
         source = (
@@ -508,20 +522,25 @@ class UiTests(unittest.TestCase):
         )
 
         self.assertIn(
-            'export type Mode = "live" | "breadth" | "profile" | "admin";',
+            'export type Mode = "live" | "breadth" | "feedback" | "profile" | "admin";',
             types_source,
         )
         self.assertIn('"/": "live"', source)
         self.assertNotIn('"/lab": "lab"', source)
+        self.assertIn('"/feedback": "feedback"', source)
         self.assertIn('"/profile": "profile"', source)
         self.assertIn('"/admin": "admin"', source)
         self.assertIn('return routeModes[window.location.pathname] ?? "live";', source)
         self.assertNotIn('{ mode: "lab" as const, label: t("tabs.lab") }', source)
         self.assertIn('{ mode: "live" as const, label: t("tabs.live") }', source)
         self.assertIn('{ mode: "breadth" as const, label: t("tabs.breadth") }', source)
+        self.assertIn('const accountMenuItems = computed', source)
         self.assertIn('{ mode: "profile" as const, label: t("tabs.profile") }', source)
+        self.assertIn('{ mode: "feedback" as const, label: t("tabs.feedback") }', source)
+        self.assertNotIn("const accountTabs = computed", source)
         self.assertIn('{ mode: "admin" as const, label: t("tabs.admin") }', source)
         self.assertNotIn('"tabs.lab"', i18n_source)
+        self.assertIn('"tabs.feedback"', i18n_source)
         self.assertNotIn('{ mode: "backtest" as const', source)
         self.assertNotIn('{ mode: "paper" as const', source)
         self.assertNotIn('{ mode: "combos" as const', source)
@@ -673,7 +692,7 @@ class UiTests(unittest.TestCase):
         self.assertIn("const authForm = reactive", app_source)
         self.assertIn('const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));', app_source)
         self.assertIn('authUser.value?.is_admin === true', app_source)
-        self.assertNotIn('authUser.value?.username === "cuiyeqing960904@gmail.com"', app_source)
+        self.assertIn("FREE_TRIAL_ADMIN_EMAIL", app_source)
         self.assertIn("async function loadCurrentUser()", app_source)
         self.assertIn('requestJson<AuthMePayload>("/api/auth/me")', app_source)
         self.assertIn('requestJson<AuthMePayload>("/api/profile")', app_source)
@@ -694,7 +713,9 @@ class UiTests(unittest.TestCase):
         self.assertIn("profile-panel", app_source)
         self.assertIn("admin-panel", app_source)
         self.assertIn('t("auth.inactive")', app_source)
+        self.assertIn('class="profile-menu"', app_source)
         self.assertIn('class="secondary profile-button"', app_source)
+        self.assertIn('v-for="item in accountMenuItems"', app_source)
         self.assertNotIn('class="safety"', app_source)
         self.assertNotIn('t("app.safety")', app_source)
         self.assertNotIn('"app.safety"', i18n_source)
@@ -753,7 +774,10 @@ class UiTests(unittest.TestCase):
         self.assertIn('requestJson<AdminFeedbackPayload>("/api/admin/feedback")', app_source)
         self.assertIn("async function updateFeedbackStatus(feedback: FeedbackItem, status: FeedbackStatus)", app_source)
         self.assertIn('`/api/admin/feedback/${feedback.id}/status`', app_source)
-        self.assertIn('v-if="authUser.is_active"', app_source)
+        self.assertIn('activeMode === "feedback"', app_source)
+        self.assertIn('class="panel feedback-panel"', app_source)
+        self.assertIn('class="feedback-form"', app_source)
+        self.assertNotIn('<form v-if="authUser.is_active" class="feedback-form"', app_source)
         self.assertIn('@submit.prevent="submitFeedback"', app_source)
         self.assertIn('v-model.trim="feedbackForm.title"', app_source)
         self.assertIn('v-model.trim="feedbackForm.description"', app_source)
@@ -766,7 +790,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('"feedback.status.in_progress": "In progress"', i18n_source)
         self.assertIn('"feedback.status.resolved": "Resolved"', i18n_source)
 
-    def test_frontend_exposes_telegram_rsi_alert_settings(self):
+    def test_frontend_hides_telegram_rsi_alert_settings(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -774,26 +798,16 @@ class UiTests(unittest.TestCase):
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
             encoding="utf-8"
         )
-        types_source = (root / "frontend" / "src" / "types.ts").read_text(
-            encoding="utf-8"
-        )
 
-        self.assertIn("export type TelegramAlertSettings", types_source)
-        self.assertIn("export type TelegramAlertSettingsPayload", types_source)
-        self.assertIn("const telegramAlertForm = reactive({", app_source)
-        self.assertIn("async function loadTelegramAlertSettings()", app_source)
-        self.assertIn('requestJson<TelegramAlertSettingsPayload>("/api/alerts/telegram")', app_source)
-        self.assertIn("async function saveTelegramAlertSettings()", app_source)
-        self.assertIn('requestJson<TelegramAlertSettingsPayload>("/api/alerts/telegram",', app_source)
-        self.assertIn("async function testTelegramAlert()", app_source)
-        self.assertIn('requestJson<{ ok: true }>("/api/alerts/telegram/test"', app_source)
-        self.assertIn('v-model="telegramAlertForm.enabled"', app_source)
-        self.assertIn('v-model.trim="telegramAlertForm.bot_token"', app_source)
-        self.assertIn('v-model.trim="telegramAlertForm.chat_id"', app_source)
-        self.assertIn('"pages.telegramAlerts": "Telegram RSI alerts"', i18n_source)
-        self.assertIn('"labels.telegramBotToken": "Bot token"', i18n_source)
-        self.assertIn('"labels.telegramChatId": "Chat ID"', i18n_source)
-        self.assertIn('"actions.testTelegramAlert": "Send test alert"', i18n_source)
+        self.assertNotIn("const telegramAlertForm = reactive({", app_source)
+        self.assertNotIn("async function loadTelegramAlertSettings()", app_source)
+        self.assertNotIn("/api/alerts/telegram", app_source)
+        self.assertNotIn("telegram-alert-form", app_source)
+        self.assertNotIn("telegramAlertForm", app_source)
+        self.assertNotIn('"pages.telegramAlerts"', i18n_source)
+        self.assertNotIn('"labels.telegramBotToken"', i18n_source)
+        self.assertNotIn('"labels.telegramChatId"', i18n_source)
+        self.assertNotIn('"actions.testTelegramAlert"', i18n_source)
 
     def test_chart_accepts_translated_labels_from_parent(self):
         root = Path(__file__).resolve().parents[1]
@@ -873,7 +887,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('"labels.maxMarkers": "Max markers"', i18n_source)
         self.assertIn('"labels.maxMarkers": "Макс. меток"', i18n_source)
 
-    def test_live_page_exposes_separate_moex_stock_index_and_futures_markets(self):
+    def test_live_page_exposes_moex_stock_and_combined_index_futures_markets(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -885,65 +899,23 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("export const moexBluechipSymbolOptions = [", config_source)
-        stock_options_block = config_source.split(
-            "export const moexBluechipSymbolOptions = [", 1
-        )[1].split("] satisfies SelectOption[];", 1)[0]
-        self.assertNotIn('value: "IMOEX"', stock_options_block)
-        self.assertIn('value: "SBER"', config_source)
-        self.assertIn('value: "GAZP"', config_source)
-        self.assertIn('value: "LKOH"', config_source)
-        self.assertIn('value: "YDEX"', config_source)
-        self.assertIn('value: "TATN"', config_source)
-        self.assertIn('value: "GMKN"', config_source)
-        self.assertIn('value: "PLZL"', config_source)
-        self.assertIn('value: "MOEX"', config_source)
-        self.assertIn('value: "SNGS"', config_source)
-        self.assertIn('value: "VTBR"', config_source)
-        self.assertIn('value: "ALRS"', config_source)
-        self.assertIn('value: "OZON"', config_source)
-        self.assertIn('value: "NLMK"', config_source)
-        self.assertIn('value: "CHMF"', config_source)
-        self.assertIn('value: "IRAO"', config_source)
-        self.assertIn('value: "SIBN"', config_source)
-        self.assertIn('value: "MTSS"', config_source)
-        self.assertIn('value: "POSI"', config_source)
-        self.assertIn('value: "PHOR"', config_source)
-        self.assertIn('value: "FLOT"', config_source)
-        self.assertIn("export const moexIndexSymbolOptions = [", config_source)
-        self.assertIn('{ value: "IMOEX", label: "IMOEX · MOEX Russia Index" }', config_source)
-        self.assertIn('{ value: "RTSI", label: "RTSI · RTS Index" }', config_source)
-        self.assertIn("export const moexFuturesSymbolOptions = [", config_source)
-        self.assertIn('{ value: "IMOEXF", label: "IMOEXF · IMOEX Futures" }', config_source)
-        self.assertIn('{ value: "RIM6", label: "RIM6 · RTS Index Futures" }', config_source)
+        self.assertNotIn("export const moexBluechipSymbolOptions = [", config_source)
+        self.assertNotIn("export const moexIndexSymbolOptions = [", config_source)
+        self.assertNotIn("export const moexFuturesSymbolOptions = [", config_source)
+        self.assertNotIn("export const moexIndexFuturesSymbolOptions = [", config_source)
         self.assertIn('value: "russian_bluechips"', source)
-        self.assertIn('value: "russian_indices"', source)
-        self.assertIn('value: "russian_futures"', source)
+        self.assertIn('value: "russian_indices_futures"', source)
+        self.assertNotIn('value: "russian_indices"', source)
+        self.assertNotIn('value: "russian_futures"', source)
         self.assertIn('t("options.moexBluechips")', source)
-        self.assertIn('t("options.moexIndices")', source)
-        self.assertIn('t("options.moexFutures")', source)
-        self.assertIn("russian_bluechips: moexBluechipSymbolOptions", source)
-        self.assertIn("russian_indices: moexIndexSymbolOptions", source)
-        self.assertIn("russian_futures: moexFuturesSymbolOptions", source)
+        self.assertIn('t("options.moexIndicesFutures")', source)
+        self.assertNotIn("russian_bluechips: moexBluechipSymbolOptions", source)
+        self.assertNotIn("russian_indices_futures: moexIndexFuturesSymbolOptions", source)
         self.assertIn('"options.moexBluechips": "Russian Stocks"', i18n_source)
-        self.assertIn('"options.moexIndices": "Russian Indices"', i18n_source)
-        self.assertIn('"options.moexFutures": "Russian Futures"', i18n_source)
+        self.assertIn('"options.moexIndicesFutures": "Russian Indices & Futures"', i18n_source)
         self.assertIn('"options.moexBluechips": "Акции РФ"', i18n_source)
-        self.assertIn('"options.moexIndices": "Индексы РФ"', i18n_source)
-        self.assertIn('"options.moexFutures": "Фьючерсы РФ"', i18n_source)
-
-    def test_live_moex_symbol_options_are_sorted_alphabetically(self):
-        root = Path(__file__).resolve().parents[1]
-        source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
-            encoding="utf-8"
-        )
-        options_block = source.split("const moexBluechipSymbolOptions = [", 1)[
-            1
-        ].split("] satisfies SelectOption[];", 1)[0]
-        symbols = re.findall(r'value: "([^"]+)"', options_block)
-
-        self.assertGreater(len(symbols), 50)
-        self.assertEqual(symbols, sorted(symbols))
+        self.assertIn('"options.moexIndicesFutures": "Индексы и фьючерсы РФ"', i18n_source)
+        self.assertIn('"options.moexIndicesFutures": "俄罗斯指数和期货"', i18n_source)
 
     def test_live_page_exposes_commodities_market(self):
         root = Path(__file__).resolve().parents[1]
@@ -954,22 +926,12 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("const commoditySymbolOptions = computed<SelectOption[]>(() => [", source)
         self.assertIn('value: "commodities"', source)
         self.assertIn('t("options.commodities")', source)
-        self.assertIn("commodities: commoditySymbolOptions.value", source)
-        for option_key in (
-            "commodityGold",
-            "commoditySilver",
-            "commodityNaturalGas",
-            "commodityBrentOil",
-            "commodityPlatinum",
-            "commodityPalladium",
-            "commodityCopper",
-        ):
-            self.assertIn(f't("options.{option_key}")', source)
+        self.assertNotIn("const commoditySymbolOptions = computed<SelectOption[]>(() => [", source)
+        self.assertNotIn("commodities: commoditySymbolOptions.value", source)
         for symbol in ("GC=F", "SI=F", "NG=F", "BZ=F", "PL=F", "PA=F", "HG=F"):
-            self.assertIn(f'value: "{symbol}"', source)
+            self.assertNotIn(f'value: "{symbol}"', source)
         self.assertIn('"options.commodities": "Commodities"', i18n_source)
         self.assertIn('"options.commodities": "Сырьевые товары"', i18n_source)
 
@@ -978,19 +940,13 @@ class UiTests(unittest.TestCase):
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
         )
-        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
-            encoding="utf-8"
-        )
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("export const mag7StockSymbolOptions = [", config_source)
         self.assertIn('value: "mag7_stocks"', app_source)
         self.assertIn('t("options.mag7Stocks")', app_source)
-        self.assertIn("mag7_stocks: mag7StockSymbolOptions", app_source)
-        for symbol in ("AAPL", "AMZN", "GOOGL", "META", "MSFT", "NVDA", "TSLA"):
-            self.assertIn(f'value: "{symbol}"', config_source)
+        self.assertNotIn("mag7_stocks: mag7StockSymbolOptions", app_source)
         self.assertIn('"options.mag7Stocks": "MAG 7 Stocks"', i18n_source)
         self.assertIn('"options.mag7Stocks": "Акции MAG 7"', i18n_source)
 
@@ -999,19 +955,13 @@ class UiTests(unittest.TestCase):
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
         )
-        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
-            encoding="utf-8"
-        )
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("export const hongKongStockSymbolOptions = [", config_source)
         self.assertIn('value: "hong_kong_stocks"', app_source)
         self.assertIn('t("options.hongKongStocks")', app_source)
-        self.assertIn("hong_kong_stocks: hongKongStockSymbolOptions", app_source)
-        for symbol in ("0700.HK", "9988.HK", "9888.HK", "3690.HK", "9618.HK"):
-            self.assertIn(f'value: "{symbol}"', config_source)
+        self.assertNotIn("hong_kong_stocks: hongKongStockSymbolOptions", app_source)
         self.assertIn('"options.hongKongStocks": "Hong Kong Stocks"', i18n_source)
         self.assertIn('"options.hongKongStocks": "Акции Гонконга"', i18n_source)
         self.assertIn('"options.hongKongStocks": "港股"', i18n_source)
@@ -1122,9 +1072,18 @@ class UiTests(unittest.TestCase):
         chart_source = (
             root / "frontend" / "src" / "components" / "TradingViewChart.vue"
         ).read_text(encoding="utf-8")
+        live_section = app_source.split(
+            '<section v-if="activeMode === \'live\'" class="panel live-panel">',
+            1,
+        )[1].split(
+            "<section v-else-if='activeMode === \"breadth\"' class=\"panel breadth-panel\">",
+            1,
+        )[0]
 
         self.assertIn('class="live-market-strip"', app_source)
         self.assertIn('class="ticker-pill"', app_source)
+        self.assertNotIn('t("labels.source")', live_section)
+        self.assertNotIn("livePayload?.data_source", app_source)
         self.assertIn("--bg: #0f1318;", style_source)
         self.assertIn("--chart-bg: #131722;", style_source)
         self.assertIn(".live-market-strip", style_source)
@@ -1137,6 +1096,7 @@ class UiTests(unittest.TestCase):
         self.assertTrue(is_frontend_route("/chart"))
         self.assertTrue(is_frontend_route("/breadth"))
         self.assertFalse(is_frontend_route("/lab"))
+        self.assertTrue(is_frontend_route("/feedback"))
         self.assertTrue(is_frontend_route("/profile"))
         self.assertTrue(is_frontend_route("/admin"))
         self.assertFalse(is_frontend_route("/backtest"))
@@ -1529,13 +1489,13 @@ class UiTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "MOEX shares")
         self.assertEqual(payload["symbol"], "SBER")
 
-    def test_live_chart_payload_labels_moex_index_source(self):
+    def test_live_chart_payload_labels_combined_moex_indices_futures_source(self):
         client = FakeClient()
         client.candles = [candle(index, price) for index, price in enumerate([300, 301, 302, 303, 304])]
 
         payload = live_chart_payload(
             {
-                "market": "russian_indices",
+                "market": "russian_indices_futures",
                 "symbol": "IMOEX",
                 "interval": "5m",
                 "limit": 5,
@@ -1550,11 +1510,11 @@ class UiTests(unittest.TestCase):
         )
 
         self.assertEqual(client.kline_symbols, ["IMOEX"])
-        self.assertEqual(payload["market"], "russian_indices")
-        self.assertEqual(payload["data_source"], "MOEX APIM index")
+        self.assertEqual(payload["market"], "russian_indices_futures")
+        self.assertEqual(payload["data_source"], "MOEX APIM indices and futures")
         self.assertEqual(payload["symbol"], "IMOEX")
 
-    def test_live_chart_payload_accepts_moex_futures_market(self):
+    def test_live_chart_payload_keeps_old_moex_futures_alias_working(self):
         client = FakeClient()
         client.candles = [candle(index, price) for index, price in enumerate([300, 301, 302, 303, 304])]
 
@@ -1575,8 +1535,8 @@ class UiTests(unittest.TestCase):
         )
 
         self.assertEqual(client.kline_symbols, ["RIM6"])
-        self.assertEqual(payload["market"], "russian_futures")
-        self.assertEqual(payload["data_source"], "MOEX APIM futures")
+        self.assertEqual(payload["market"], "russian_indices_futures")
+        self.assertEqual(payload["data_source"], "MOEX APIM indices and futures")
         self.assertEqual(payload["symbol"], "RIM6")
 
     def test_live_chart_payload_accepts_commodities_market(self):
@@ -1677,6 +1637,10 @@ class UiTests(unittest.TestCase):
         )
         self.assertIsInstance(
             market_data_client_from_payload({"market": "russian_indices"}),
+            MoexSharesMarketDataClient,
+        )
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "russian_indices_futures"}),
             MoexSharesMarketDataClient,
         )
         self.assertIsInstance(

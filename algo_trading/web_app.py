@@ -52,6 +52,11 @@ from algo_trading.historical_store import HistoricalDataStore, historical_store_
 from algo_trading.historical_data import HistoricalCsvRefreshService
 from algo_trading import jobs as background_jobs
 from algo_trading.job_queue import JobQueue, job_queue_from_env
+from algo_trading.live_symbols import (
+    LiveSymbolStore,
+    live_symbol_store_from_env,
+    live_symbols_payload,
+)
 from algo_trading.logging_config import configure_error_logging
 from algo_trading.market_breadth import MarketBreadthService
 from algo_trading.ui import (
@@ -102,6 +107,7 @@ def create_app(
     historical_store: HistoricalDataStore | None = None,
     feedback_store: FeedbackStore | None = None,
     alert_store: AlertStore | None = None,
+    live_symbol_store: LiveSymbolStore | None = None,
     telegram_sender: TelegramSender | None = None,
     job_queue: JobQueue | None = None,
     seed_admin: bool = True,
@@ -118,6 +124,9 @@ def create_app(
     feedback.ensure_schema()
     alerts = alert_store or alert_store_from_env()
     alerts.ensure_schema()
+    symbol_store = live_symbol_store or live_symbol_store_from_env()
+    symbol_store.ensure_schema()
+    symbol_store.seed_default_symbols()
     telegram = telegram_sender or TelegramBotClient()
     history_store = historical_store or historical_store_from_env()
     history_store.ensure_schema()
@@ -199,13 +208,23 @@ def create_app(
             )
         return user
 
+    def require_platform_admin_user(
+        user: AuthUser = Depends(require_admin_user),
+    ) -> AuthUser:
+        if user.username != admin_email():
+            raise HTTPException(
+                status_code=HTTPStatus.FORBIDDEN,
+                detail="platform admin required",
+            )
+        return user
+
     async def deactivate_expired_users_loop() -> None:
         while True:
             await enqueue_or_run_background_job(
                 background_jobs.deactivate_expired_users,
                 store.deactivate_expired_users,
                 job_id_prefix="deactivate-expired-users",
-                description="Deactivate users whose access has expired",
+                description="Deactivate users whose access or free trial has expired",
             )
             await asyncio.sleep(max(1.0, expiry_interval))
 
@@ -426,6 +445,33 @@ def create_app(
         store.deactivate_expired_users()
         return {"ok": True, "users": [public_user(user) for user in store.list_users()]}
 
+    @app.get("/api/admin/settings/free-trial")
+    def get_admin_free_trial_settings(
+        _admin: AuthUser = Depends(require_platform_admin_user),
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "settings": {
+                "is_free_trial_enabled": store.is_free_trial_enabled(),
+            },
+        }
+
+    @app.put("/api/admin/settings/free-trial")
+    def update_admin_free_trial_settings(
+        payload: dict[str, Any] | None = Body(default=None),
+        _admin: AuthUser = Depends(require_platform_admin_user),
+    ) -> dict[str, Any]:
+        settings = payload or {}
+        enabled = settings.get("is_free_trial_enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError("is_free_trial_enabled must be a boolean")
+        return {
+            "ok": True,
+            "settings": {
+                "is_free_trial_enabled": store.set_free_trial_enabled(enabled),
+            },
+        }
+
     @app.patch("/api/admin/users/{user_id}/access")
     def update_admin_user_access(
         user_id: int,
@@ -460,6 +506,12 @@ def create_app(
         _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         return top_symbols_payload(client_factory(), top=top)
+
+    @app.get("/api/live-symbols")
+    def get_live_symbols(
+        _user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        return live_symbols_payload(symbol_store)
 
     @app.get("/api/strategies")
     def get_strategies(_user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:

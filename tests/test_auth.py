@@ -21,6 +21,7 @@ class AuthTests(unittest.TestCase):
         self.assertFalse(user.is_active)
         self.assertIsNone(user.activated_at)
         self.assertIsNone(user.expired_at)
+        self.assertIsNone(user.free_trial_end_at)
         self.assertFalse(user.is_admin)
         self.assertIsNone(user.first_name)
         self.assertIsNone(user.last_name)
@@ -37,10 +38,68 @@ class AuthTests(unittest.TestCase):
                 "first_name": None,
                 "last_name": None,
                 "middle_name": None,
+                "free_trial_end_at": None,
             },
         )
         with self.assertRaisesRegex(ValueError, "username already exists"):
             store.register_user("alice", "password123")
+
+    def test_memory_store_free_trial_flag_grants_active_trial_registration(self):
+        store = InMemoryAuthStore()
+
+        self.assertFalse(store.is_free_trial_enabled())
+        self.assertTrue(store.set_free_trial_enabled(True))
+        before = utcnow()
+        user = store.register_user("trial@example.com", "password123")
+        after = utcnow()
+
+        self.assertTrue(user.is_active)
+        self.assertIsNotNone(user.activated_at)
+        self.assertIsNone(user.expired_at)
+        self.assertIsNotNone(user.free_trial_end_at)
+        self.assertGreaterEqual(user.free_trial_end_at, before + timedelta(days=7))
+        self.assertLessEqual(user.free_trial_end_at, after + timedelta(days=7))
+        payload = public_user(user)
+        self.assertTrue(payload["is_active"])
+        self.assertIsNotNone(payload["free_trial_end_at"])
+
+    def test_memory_store_deactivates_users_after_free_trial_end(self):
+        store = InMemoryAuthStore()
+        store.set_free_trial_enabled(True)
+        user = store.register_user("trial@example.com", "password123")
+        assert user.free_trial_end_at is not None
+
+        deactivated = store.deactivate_expired_users(
+            now=user.free_trial_end_at + timedelta(seconds=1)
+        )
+
+        users = store.list_users()
+        self.assertEqual(deactivated, 1)
+        self.assertFalse(users[0].is_active)
+        self.assertIsNone(users[0].activated_at)
+        self.assertEqual(users[0].free_trial_end_at, user.free_trial_end_at)
+
+    def test_memory_store_manual_activation_clears_finished_free_trial(self):
+        store = InMemoryAuthStore()
+        store.set_free_trial_enabled(True)
+        user = store.register_user("trial@example.com", "password123")
+        assert user.free_trial_end_at is not None
+        after_trial = user.free_trial_end_at + timedelta(seconds=1)
+        store.deactivate_expired_users(now=after_trial)
+
+        reactivated = store.set_user_access(
+            user.id,
+            is_active=True,
+            activated_at=after_trial,
+        )
+        deactivated_again = store.deactivate_expired_users(
+            now=after_trial + timedelta(days=1)
+        )
+
+        self.assertTrue(reactivated.is_active)
+        self.assertIsNone(reactivated.free_trial_end_at)
+        self.assertEqual(deactivated_again, 0)
+        self.assertTrue(store.list_users()[0].is_active)
 
     def test_memory_store_updates_profile_names(self):
         store = InMemoryAuthStore()
