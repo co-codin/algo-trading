@@ -78,6 +78,13 @@ class HistoricalDataStore(Protocol):
         source: str = "",
     ) -> int: ...
 
+    def upsert_futoi_instruments(
+        self,
+        instruments: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int: ...
+
     def load_futoi_records(
         self,
         *,
@@ -85,6 +92,8 @@ class HistoricalDataStore(Protocol):
         ticker: str | None = None,
         limit: int | None = None,
     ) -> list[Any]: ...
+
+    def list_futoi_instruments(self) -> list[Any]: ...
 
     def prune_futoi_records(self, cutoff_date: date) -> int: ...
 
@@ -101,6 +110,7 @@ class InMemoryHistoricalDataStore:
         self._breadth_bars: dict[str, dict[date, Any]] = {}
         self._breadth_updated_at: dict[str, datetime] = {}
         self._futoi_records: dict[tuple[date, str, str, str], Any] = {}
+        self._futoi_instruments: dict[str, Any] = {}
 
     def ensure_schema(self) -> None:
         return None
@@ -232,6 +242,18 @@ class InMemoryHistoricalDataStore:
             self._futoi_records[futoi_record_key(record)] = record
         return len(set(self._futoi_records) - before)
 
+    def upsert_futoi_instruments(
+        self,
+        instruments: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int:
+        before = set(self._futoi_instruments)
+        for instrument in instruments:
+            normalized = normalize_futoi_instrument(instrument, updated_at=self._utcnow())
+            self._futoi_instruments[normalized.ticker] = normalized
+        return len(set(self._futoi_instruments) - before)
+
     def load_futoi_records(
         self,
         *,
@@ -250,6 +272,12 @@ class InMemoryHistoricalDataStore:
         if limit is not None and limit > 0:
             records = records[-limit:]
         return records
+
+    def list_futoi_instruments(self) -> list[Any]:
+        return [
+            self._futoi_instruments[ticker]
+            for ticker in sorted(self._futoi_instruments)
+        ]
 
     def prune_futoi_records(self, cutoff_date: date) -> int:
         old_keys = [
@@ -311,6 +339,12 @@ class PostgresHistoricalDataStore:
                 )
                 cursor.execute(
                     """
+                    CREATE INDEX IF NOT EXISTS market_candles_open_time_idx
+                    ON market_candles (open_time)
+                    """
+                )
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS market_breadth_bars (
                         symbol TEXT NOT NULL,
                         bar_date DATE NOT NULL,
@@ -357,6 +391,39 @@ class PostgresHistoricalDataStore:
                     """
                     CREATE INDEX IF NOT EXISTS moex_futoi_records_ticker_date_idx
                     ON moex_futoi_records (ticker, trade_date DESC, trade_time DESC)
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS moex_futoi_records_recent_idx
+                    ON moex_futoi_records (trade_date DESC, trade_time DESC, ticker, client_group)
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS moex_futoi_instruments (
+                        ticker TEXT PRIMARY KEY,
+                        last_trade_date DATE,
+                        last_trade_time TEXT,
+                        system_time TIMESTAMPTZ,
+                        trade_session_date DATE,
+                        client_groups TEXT NOT NULL DEFAULT '',
+                        net_position DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        gross_position DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        long_position DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        short_position DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        long_count BIGINT NOT NULL DEFAULT 0,
+                        short_count BIGINT NOT NULL DEFAULT 0,
+                        row_count INTEGER NOT NULL DEFAULT 0,
+                        source TEXT NOT NULL DEFAULT '',
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS moex_futoi_instruments_gross_idx
+                    ON moex_futoi_instruments (gross_position DESC, ticker)
                     """
                 )
 
@@ -706,6 +773,75 @@ class PostgresHistoricalDataStore:
                 )
         return len(deduped)
 
+    def upsert_futoi_instruments(
+        self,
+        instruments: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int:
+        normalized_instruments = [
+            normalize_futoi_instrument(instrument)
+            for instrument in instruments
+        ]
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    INSERT INTO moex_futoi_instruments (
+                        ticker,
+                        last_trade_date,
+                        last_trade_time,
+                        system_time,
+                        trade_session_date,
+                        client_groups,
+                        net_position,
+                        gross_position,
+                        long_position,
+                        short_position,
+                        long_count,
+                        short_count,
+                        row_count,
+                        source
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (ticker) DO UPDATE
+                    SET last_trade_date = EXCLUDED.last_trade_date,
+                        last_trade_time = EXCLUDED.last_trade_time,
+                        system_time = EXCLUDED.system_time,
+                        trade_session_date = EXCLUDED.trade_session_date,
+                        client_groups = EXCLUDED.client_groups,
+                        net_position = EXCLUDED.net_position,
+                        gross_position = EXCLUDED.gross_position,
+                        long_position = EXCLUDED.long_position,
+                        short_position = EXCLUDED.short_position,
+                        long_count = EXCLUDED.long_count,
+                        short_count = EXCLUDED.short_count,
+                        row_count = EXCLUDED.row_count,
+                        source = EXCLUDED.source,
+                        updated_at = now()
+                    """,
+                    [
+                        (
+                            instrument.ticker,
+                            instrument.last_trade_date,
+                            instrument.last_trade_time,
+                            instrument.system_time,
+                            instrument.trade_session_date,
+                            ",".join(instrument.client_groups),
+                            instrument.net_position,
+                            instrument.gross_position,
+                            instrument.long_position,
+                            instrument.short_position,
+                            instrument.long_count,
+                            instrument.short_count,
+                            instrument.row_count,
+                            source,
+                        )
+                        for instrument in normalized_instruments
+                    ],
+                )
+        return len(normalized_instruments)
+
     def load_futoi_records(
         self,
         *,
@@ -769,6 +905,55 @@ class PostgresHistoricalDataStore:
             for row in reversed(rows)
         ]
 
+    def list_futoi_instruments(self) -> list[Any]:
+        from algo_trading.futoi import FutoiInstrument
+
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        ticker,
+                        last_trade_date,
+                        last_trade_time,
+                        system_time,
+                        trade_session_date,
+                        client_groups,
+                        net_position,
+                        gross_position,
+                        long_position,
+                        short_position,
+                        long_count,
+                        short_count,
+                        row_count,
+                        updated_at
+                    FROM moex_futoi_instruments
+                    ORDER BY ticker
+                    """
+                )
+                rows = cursor.fetchall()
+        return [
+            FutoiInstrument(
+                ticker=str(row[0]),
+                last_trade_date=row[1],
+                last_trade_time=str(row[2]) if row[2] is not None else None,
+                system_time=row[3],
+                trade_session_date=row[4],
+                client_groups=tuple(
+                    group for group in str(row[5] or "").split(",") if group
+                ),
+                net_position=float(row[6]),
+                gross_position=float(row[7]),
+                long_position=float(row[8]),
+                short_position=float(row[9]),
+                long_count=int(row[10]),
+                short_count=int(row[11]),
+                row_count=int(row[12]),
+                updated_at=row[13],
+            )
+            for row in rows
+        ]
+
     def prune_futoi_records(self, cutoff_date: date) -> int:
         with self._connect() as conn:
             with conn.cursor() as cursor:
@@ -814,4 +999,33 @@ def futoi_record_key(record: Any) -> tuple[date, str, str, str]:
         str(record.trade_time),
         normalize_symbol(record.ticker),
         str(record.client_group).strip().upper(),
+    )
+
+
+def normalize_futoi_instrument(
+    instrument: Any,
+    *,
+    updated_at: datetime | None = None,
+) -> Any:
+    from algo_trading.futoi import FutoiInstrument
+
+    return FutoiInstrument(
+        ticker=normalize_symbol(instrument.ticker),
+        last_trade_date=instrument.last_trade_date,
+        last_trade_time=(
+            str(instrument.last_trade_time)
+            if instrument.last_trade_time is not None
+            else None
+        ),
+        system_time=instrument.system_time,
+        trade_session_date=instrument.trade_session_date,
+        client_groups=tuple(sorted({str(group).strip().upper() for group in instrument.client_groups if str(group).strip()})),
+        net_position=float(instrument.net_position),
+        gross_position=float(instrument.gross_position),
+        long_position=float(instrument.long_position),
+        short_position=float(instrument.short_position),
+        long_count=int(instrument.long_count),
+        short_count=int(instrument.short_count),
+        row_count=int(instrument.row_count),
+        updated_at=updated_at or instrument.updated_at,
     )

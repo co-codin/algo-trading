@@ -151,78 +151,100 @@ button {
   white-space: normal;
 }
 
-.logout-button {
-  white-space: nowrap;
-}
-
-.profile-button {
-  white-space: nowrap;
-}
-
-.profile-menu {
+.account-menu {
   position: relative;
 }
 
-.profile-menu summary {
-  display: inline-flex;
-  align-items: center;
+.account-menu summary {
   list-style: none;
 }
 
-.profile-menu summary::-webkit-details-marker {
+.account-menu summary::-webkit-details-marker {
   display: none;
 }
 
-.profile-menu-panel {
+.account-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 118px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-raised);
+  color: var(--ink);
+  padding: 0 10px;
+  cursor: pointer;
+  font-weight: 700;
+  user-select: none;
+}
+
+.account-menu-trigger::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  opacity: 0.75;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.account-menu[open] .account-menu-trigger {
+  border-color: rgba(41, 98, 255, 0.6);
+  background: var(--field);
+}
+
+.account-menu[open] .account-menu-trigger::after {
+  transform: rotate(225deg) translate(-1px, -1px);
+}
+
+.account-menu-panel {
   position: absolute;
+  top: calc(100% + 6px);
   right: 0;
   z-index: 20;
   display: grid;
-  min-width: 170px;
-  margin-top: 6px;
+  gap: 6px;
+  min-width: 184px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel-raised);
   padding: 6px;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.28);
 }
 
-.profile-menu-panel button {
+.account-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
   width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 4px;
   background: transparent;
   color: var(--ink);
+  padding: 0 10px;
   text-align: left;
 }
 
-.profile-menu-panel button:hover {
+.account-menu-item:hover,
+.account-menu-item:focus-visible {
   background: var(--field);
 }
 
-.user-pill {
-  display: grid;
-  min-width: 150px;
-  min-height: 34px;
-  border-color: var(--line);
-  background: var(--field);
-  color: var(--ink);
-  line-height: 1.15;
-  text-align: left;
+.account-menu-item.is-active {
+  background: rgba(41, 98, 255, 0.18);
+  color: #fff;
 }
 
-.user-pill span,
-.user-pill b {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.account-menu-footer {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
 }
 
-.user-pill span {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.user-pill b {
-  color: var(--ink);
-  font-size: 13px;
+.account-menu-logout {
+  color: var(--short);
 }
 
 .language-switcher {
@@ -466,29 +488,6 @@ button:focus {
   display: grid;
   grid-template-columns: minmax(240px, 420px);
   gap: 10px;
-}
-
-.feedback-form {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel-raised);
-  padding: 12px;
-}
-
-.feedback-form h3 {
-  margin: 0 0 4px;
-  font-size: 16px;
-}
-
-.feedback-form p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.feedback-field-grid {
-  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr) minmax(220px, 0.7fr);
 }
 
 .admin-feedback-section {
@@ -1266,6 +1265,127 @@ button:focus {
   border-radius: 0;
 }
 
+.futoi-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.futoi-dashboard {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.futoi-instruments-panel,
+.futoi-detail-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.futoi-section-heading,
+.futoi-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.futoi-section-heading span,
+.futoi-detail-header span,
+.futoi-metric span {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.futoi-detail-header h3 {
+  margin: 2px 0 0;
+  font-size: 22px;
+}
+
+.futoi-search,
+.futoi-detail-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.futoi-detail-controls {
+  grid-template-columns: minmax(160px, 220px) minmax(120px, 160px);
+  gap: 10px;
+  align-items: end;
+}
+
+.futoi-instrument-list {
+  display: grid;
+  gap: 6px;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.futoi-instrument-button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.futoi-instrument-button:hover,
+.futoi-instrument-button.is-active {
+  border-color: var(--primary);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.futoi-instrument-button span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.futoi-instrument-button small {
+  color: var(--muted);
+}
+
+.futoi-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.futoi-metric {
+  display: grid;
+  gap: 4px;
+  min-height: 66px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-raised);
+}
+
+.futoi-metric b {
+  overflow-wrap: anywhere;
+}
+
+.futoi-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.futoi-table {
+  min-width: 980px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -1310,12 +1430,16 @@ th {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .profile-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .futoi-dashboard {
+    grid-template-columns: 1fr;
   }
 
-  .feedback-field-grid {
-    grid-template-columns: 1fr;
+  .futoi-instrument-list {
+    max-height: 320px;
+  }
+
+  .profile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .topbar {
@@ -1341,6 +1465,11 @@ th {
   }
 
   .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .futoi-detail-controls,
+  .futoi-metrics {
     grid-template-columns: 1fr;
   }
 
@@ -1397,5 +1526,19 @@ th {
   .language-option {
     flex: 1 1 0;
     justify-content: center;
+  }
+
+  .account-menu {
+    width: 100%;
+  }
+
+  .account-menu-trigger {
+    width: 100%;
+  }
+
+  .account-menu-panel {
+    position: static;
+    width: 100%;
+    margin-top: 6px;
   }
 }

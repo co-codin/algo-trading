@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from algo_trading.alerts import InMemoryAlertStore
 from algo_trading.auth import InMemoryAuthStore, utcnow
 from algo_trading.feedback import InMemoryFeedbackStore
-from algo_trading.futoi import FutoiRecord
+from algo_trading.futoi import FutoiInstrument, FutoiRecord
 from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.live_symbols import InMemoryLiveSymbolStore, LiveSymbol
 from algo_trading.models import Candle
@@ -37,6 +37,157 @@ class WebAppTests(unittest.TestCase):
             **overrides,
         )
         return TestClient(app)
+
+    def test_market_breadth_api_uses_response_cache_after_first_success(self):
+        class FakeResponseCache:
+            def __init__(self) -> None:
+                self.values: dict[str, dict[str, Any]] = {}
+                self.set_calls: list[tuple[str, int]] = []
+
+            def get_json(self, key: str) -> dict[str, Any] | None:
+                return self.values.get(key)
+
+            def set_json(
+                self,
+                key: str,
+                payload: dict[str, Any],
+                *,
+                ttl_seconds: int,
+            ) -> None:
+                self.values[key] = payload
+                self.set_calls.append((key, ttl_seconds))
+
+        class FakeMarketBreadthService:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def payload(self, symbols: list[str] | None = None) -> dict[str, Any]:
+                self.calls += 1
+                return {
+                    "ok": True,
+                    "source": "Barchart",
+                    "groups": [],
+                    "series": {},
+                    "put_call_symbol": "$CPC",
+                    "requested_symbols": symbols,
+                    "calls": self.calls,
+                }
+
+        auth_store = InMemoryAuthStore()
+        cache = FakeResponseCache()
+        service = FakeMarketBreadthService()
+        client = self.make_client(
+            auth_store=auth_store,
+            market_breadth_service=service,
+            response_cache=cache,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        auth_store.set_user_access(
+            auth_store.list_users()[0].id,
+            is_active=True,
+            activated_at=utcnow(),
+        )
+
+        first = client.get("/api/market-breadth?symbols=$S5FD,$CPC")
+        second = client.get("/api/market-breadth?symbols=$S5FD,$CPC")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()["calls"], 1)
+        self.assertEqual(second.json()["calls"], 1)
+        self.assertEqual(service.calls, 1)
+        self.assertEqual(len(cache.set_calls), 1)
+        self.assertEqual(cache.set_calls[0][1], 300)
+
+    def test_live_chart_api_uses_short_response_cache_without_skipping_alert_dedupe(self):
+        class FakeResponseCache:
+            def __init__(self) -> None:
+                self.values: dict[str, dict[str, Any]] = {}
+                self.set_ttls: list[int] = []
+
+            def get_json(self, key: str) -> dict[str, Any] | None:
+                return self.values.get(key)
+
+            def set_json(
+                self,
+                key: str,
+                payload: dict[str, Any],
+                *,
+                ttl_seconds: int,
+            ) -> None:
+                self.values[key] = payload
+                self.set_ttls.append(ttl_seconds)
+
+        class FakeTelegramSender:
+            def __init__(self) -> None:
+                self.messages: list[tuple[str, str, str]] = []
+
+            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
+                self.messages.append((bot_token, chat_id, text))
+
+        class FakeMarketClient:
+            calls = 0
+
+            def get_24h_tickers(self) -> list[dict[str, object]]:
+                return []
+
+            def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+                self.__class__.calls += 1
+                prices = [10, 9, 8, 7, 8]
+                return [
+                    Candle(
+                        open_time=index,
+                        open=price,
+                        high=price + 1.0,
+                        low=price - 1.0,
+                        close=price,
+                        volume=1.0,
+                    )
+                    for index, price in enumerate(prices)
+                ][:limit]
+
+        auth_store = InMemoryAuthStore()
+        alert_store = InMemoryAlertStore()
+        sender = FakeTelegramSender()
+        cache = FakeResponseCache()
+        client = self.make_client(
+            auth_store=auth_store,
+            alert_store=alert_store,
+            telegram_sender=sender,
+            client_factory=FakeMarketClient,
+            historical_store=InMemoryHistoricalDataStore(),
+            response_cache=cache,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        user = auth_store.list_users()[0]
+        auth_store.set_user_access(user.id, is_active=True, activated_at=utcnow())
+        client.put(
+            "/api/alerts/telegram",
+            json={
+                "enabled": True,
+                "bot_token": "123456:abcdef-secret-token",
+                "chat_id": "987654321",
+            },
+        )
+
+        query = (
+            "/api/live-chart?symbol=BTCUSDT&interval=5m&limit=5"
+            "&strategy=ema-rsi&rsi_period=2&rsi_overbought=100&rsi_oversold=0"
+        )
+        first = client.get(query)
+        second = client.get(query)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(FakeMarketClient.calls, 1)
+        self.assertEqual(cache.set_ttls, [10])
+        self.assertEqual(len(sender.messages), 1)
 
     def test_active_user_can_save_and_test_telegram_alert_settings(self):
         class FakeTelegramSender:
@@ -264,7 +415,7 @@ class WebAppTests(unittest.TestCase):
                 self.calls = 0
                 self.prune_calls = 0
 
-            def refresh_daily(self) -> None:
+            def refresh_all(self) -> None:
                 self.calls += 1
 
             def prune_history(self) -> None:
@@ -314,7 +465,7 @@ class WebAppTests(unittest.TestCase):
                 self.calls = 0
                 self.prune_calls = 0
 
-            def refresh_daily(self) -> None:
+            def refresh_all(self) -> None:
                 self.calls += 1
 
             def prune_history(self) -> None:
@@ -376,6 +527,64 @@ class WebAppTests(unittest.TestCase):
             {"ok": False, "error": "authentication required"},
         )
 
+    def test_active_user_can_load_quant_strategy_ideas(self):
+        class FakeMarketClient:
+            def get_24h_tickers(self) -> list[dict[str, object]]:
+                return []
+
+            def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+                return [
+                    Candle(
+                        open_time=index,
+                        open=float(100 + index),
+                        high=float(101 + index),
+                        low=float(99 + index),
+                        close=float(100 + index),
+                        volume=100.0,
+                    )
+                    for index in range(limit)
+                ]
+
+        auth_store = InMemoryAuthStore()
+        history_store = InMemoryHistoricalDataStore()
+        client = self.make_client(
+            auth_store=auth_store,
+            historical_store=history_store,
+            client_factory=FakeMarketClient,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        user = auth_store.list_users()[0]
+
+        inactive = client.get("/api/quant-strategies?symbol=BTCUSDT&interval=1h&limit=80")
+        self.assertEqual(inactive.status_code, 403)
+
+        auth_store.set_user_access(user.id, is_active=True, activated_at=utcnow())
+        active = client.get("/api/quant-strategies?symbol=BTCUSDT&interval=1h&limit=80")
+
+        self.assertEqual(active.status_code, 200)
+        payload = active.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["symbol"], "BTCUSDT")
+        self.assertEqual(payload["market"], "crypto_spot")
+        self.assertEqual(payload["interval"], "1h")
+        self.assertEqual(len(payload["candles"]), 80)
+        self.assertIn("signals", payload)
+        self.assertIn("indicators", payload)
+        idea_ids = {idea["id"] for idea in payload["ideas"]}
+        self.assertIn("time-series-momentum", idea_ids)
+        self.assertIn("rsi-mean-reversion", idea_ids)
+        self.assertEqual(
+            next(
+                idea
+                for idea in payload["ideas"]
+                if idea["id"] == "time-series-momentum"
+            )["action"],
+            "bullish",
+        )
+
     def test_active_user_can_read_stored_futoi_records(self):
         auth_store = InMemoryAuthStore()
         history_store = InMemoryHistoricalDataStore()
@@ -412,6 +621,46 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(active.json()["records"][0]["ticker"], "IMOEXF")
         self.assertEqual(active.json()["records"][0]["client_group"], "YUR")
         self.assertEqual(active.json()["records"][0]["trade_date"], "2024-04-08")
+
+    def test_active_user_can_read_futoi_instruments(self):
+        auth_store = InMemoryAuthStore()
+        history_store = InMemoryHistoricalDataStore()
+        history_store.upsert_futoi_instruments(
+            [
+                FutoiInstrument(
+                    ticker="IMOEXF",
+                    last_trade_date=date(2024, 4, 8),
+                    last_trade_time="18:45:00",
+                    client_groups=("FIZ", "YUR"),
+                    net_position=0.0,
+                    gross_position=38.0,
+                    long_position=445.0,
+                    short_position=445.0,
+                    long_count=42,
+                    short_count=42,
+                    row_count=2,
+                )
+            ],
+            source="unit-test",
+        )
+        client = self.make_client(auth_store=auth_store, historical_store=history_store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        user = auth_store.list_users()[0]
+
+        inactive = client.get("/api/futoi/instruments")
+        self.assertEqual(inactive.status_code, 403)
+
+        auth_store.set_user_access(user.id, is_active=True, activated_at=utcnow())
+        active = client.get("/api/futoi/instruments")
+
+        self.assertEqual(active.status_code, 200)
+        instruments = active.json()["instruments"]
+        self.assertEqual(instruments[0]["ticker"], "IMOEXF")
+        self.assertEqual(instruments[0]["client_groups"], ["FIZ", "YUR"])
+        self.assertEqual(instruments[0]["gross_position"], 38.0)
 
     def test_register_sets_inactive_session_and_blocks_trading_api(self):
         client = self.make_client()
@@ -776,10 +1025,12 @@ class WebAppTests(unittest.TestCase):
     def test_spa_routes_are_public_before_login(self):
         client = self.make_client()
 
-        response = client.get("/live")
+        for route in ("/live", "/futoi"):
+            with self.subTest(route=route):
+                response = client.get(route)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("<div id=\"app\"></div>", response.text)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("<div id=\"app\"></div>", response.text)
 
     def test_market_breadth_api_requires_authentication(self):
         client = self.make_client()

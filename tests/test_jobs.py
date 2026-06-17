@@ -49,8 +49,15 @@ class BackgroundJobTests(unittest.TestCase):
 
     def test_refresh_futoi_returns_service_summary(self):
         class FakeFutoiRefreshService:
-            def refresh_daily(self):
-                return {"requested": 1, "refreshed": 1, "records": 10, "failed": 0, "skipped": 0}
+            def refresh_all(self):
+                return {
+                    "requested": 1,
+                    "refreshed": 1,
+                    "records": 10,
+                    "instruments": 4,
+                    "failed": 0,
+                    "skipped": 0,
+                }
 
         with patch(
             "algo_trading.jobs.FutoiRefreshService",
@@ -59,6 +66,7 @@ class BackgroundJobTests(unittest.TestCase):
             result = jobs.refresh_futoi()
 
         self.assertEqual(result["records"], 10)
+        self.assertEqual(result["instruments"], 4)
         self.assertEqual(result["skipped"], 0)
 
     def test_prune_futoi_returns_service_summary(self):

@@ -19,7 +19,7 @@ def refresh_market_breadth() -> dict[str, int]:
 
 
 def refresh_futoi() -> dict[str, int]:
-    return FutoiRefreshService(store=historical_store_from_env()).refresh_daily()
+    return FutoiRefreshService(store=historical_store_from_env()).refresh_all()
 
 
 def prune_futoi() -> dict[str, int]:

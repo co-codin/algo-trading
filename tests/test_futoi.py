@@ -69,7 +69,7 @@ class FutoiTests(unittest.TestCase):
             opener=fake_opener,
         )
 
-        records = client.fetch_daily(date(2024, 4, 8), page_limit=1000)
+        records = client.fetch_daily(date(2024, 4, 8), page_limit=1)
 
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].trade_date, date(2024, 4, 8))
@@ -87,8 +87,113 @@ class FutoiTests(unittest.TestCase):
         self.assertEqual(parsed.path, "/iss/analyticalproducts/futoi/securities.json")
         self.assertEqual(
             parse_qs(parsed.query),
-            {"date": ["2024-04-08"], "start": ["0"], "limit": ["1000"]},
+            {"date": ["2024-04-08"], "start": ["0"], "limit": ["1"]},
         )
+
+    def test_client_fetches_ticker_detail_from_detail_endpoint(self):
+        requests = []
+        payloads = [
+            {
+                "futoi": {
+                    "columns": [
+                        "tradedate",
+                        "tradetime",
+                        "ticker",
+                        "clgroup",
+                        "pos",
+                        "pos_long",
+                        "pos_short",
+                        "pos_long_num",
+                        "pos_short_num",
+                    ],
+                    "data": [
+                        [
+                            "2024-04-08",
+                            "18:45:00",
+                            "IMOEXF",
+                            "FIZ",
+                            19,
+                            232,
+                            -213,
+                            24,
+                            18,
+                        ]
+                    ],
+                }
+            },
+            {"futoi": {"columns": ["ticker"], "data": []}},
+        ]
+
+        def fake_opener(request, timeout):
+            requests.append((request, timeout))
+            return _FakeResponse(payloads[len(requests) - 1])
+
+        client = FutoiClient(
+            api_key="futoi-token",
+            base_url="https://example.moex/iss",
+            opener=fake_opener,
+        )
+
+        records = client.fetch_ticker(
+            "imoexf",
+            start_date=date(2024, 4, 1),
+            end_date=date(2024, 4, 8),
+            page_limit=1000,
+        )
+
+        self.assertEqual([record.ticker for record in records], ["IMOEXF"])
+        parsed = urlparse(requests[0][0].full_url)
+        self.assertEqual(parsed.path, "/iss/analyticalproducts/futoi/securities/IMOEXF.json")
+        self.assertEqual(
+            parse_qs(parsed.query),
+            {
+                "from": ["2024-04-01"],
+                "till": ["2024-04-08"],
+                "start": ["0"],
+                "limit": ["1000"],
+            },
+        )
+
+    def test_client_fetches_latest_from_one_current_feed_page(self):
+        requests = []
+        payload = _futoi_payload("2024-04-08", "IMOEXF", "YUR", -19)
+
+        def fake_opener(request, timeout):
+            requests.append(request)
+            return _FakeResponse(payload)
+
+        client = FutoiClient(
+            api_key="futoi-token",
+            base_url="https://example.moex/iss",
+            opener=fake_opener,
+        )
+
+        records = client.fetch_latest(page_limit=1000)
+
+        self.assertEqual([record.ticker for record in records], ["IMOEXF"])
+        self.assertEqual(len(requests), 1)
+        parsed = urlparse(requests[0].full_url)
+        self.assertEqual(parsed.path, "/iss/analyticalproducts/futoi/securities.json")
+        self.assertEqual(parse_qs(parsed.query), {"start": ["0"], "limit": ["1000"]})
+
+    def test_client_stops_when_detail_page_repeats(self):
+        requests = []
+        payload = _futoi_payload("2024-04-08", "IMOEXF", "YUR", -19)
+
+        def fake_opener(request, timeout):
+            requests.append(request)
+            return _FakeResponse(payload)
+
+        client = FutoiClient(
+            api_key="futoi-token",
+            base_url="https://example.moex/iss",
+            opener=fake_opener,
+        )
+
+        records = client.fetch_ticker("IMOEXF", page_limit=1)
+
+        self.assertEqual([record.ticker for record in records], ["IMOEXF"])
+        self.assertEqual(len(requests), 2)
 
     def test_refresh_service_upserts_daily_records(self):
         class FakeFutoiClient:
@@ -119,6 +224,63 @@ class FutoiTests(unittest.TestCase):
         self.assertEqual(
             [record.ticker for record in store.load_futoi_records(trading_date=date(2024, 4, 8))],
             ["IMOEXF"],
+        )
+
+    def test_refresh_service_renews_futoi_instruments_from_latest_feed(self):
+        class FakeFutoiClient:
+            def fetch_latest(self):
+                return [
+                    FutoiRecord(
+                        trade_date=date(2024, 4, 8),
+                        trade_time="18:45:00",
+                        ticker="IMOEXF",
+                        client_group="YUR",
+                        position=-19.0,
+                        position_long=213.0,
+                        position_short=-232.0,
+                        position_long_count=18,
+                        position_short_count=24,
+                    ),
+                    FutoiRecord(
+                        trade_date=date(2024, 4, 8),
+                        trade_time="18:45:00",
+                        ticker="IMOEXF",
+                        client_group="FIZ",
+                        position=19.0,
+                        position_long=232.0,
+                        position_short=-213.0,
+                        position_long_count=24,
+                        position_short_count=18,
+                    ),
+                    FutoiRecord(
+                        trade_date=date(2024, 4, 8),
+                        trade_time="18:45:00",
+                        ticker="SBERF",
+                        client_group="FIZ",
+                        position=7.0,
+                        position_long=10.0,
+                        position_short=-3.0,
+                        position_long_count=2,
+                        position_short_count=1,
+                    ),
+                ]
+
+        store = InMemoryHistoricalDataStore()
+        service = FutoiRefreshService(store=store, client=FakeFutoiClient(), csv_history=None)
+
+        summary = service.refresh_instruments()
+
+        self.assertEqual(summary["records"], 3)
+        self.assertEqual(summary["instruments"], 2)
+        instruments = store.list_futoi_instruments()
+        self.assertEqual([instrument.ticker for instrument in instruments], ["IMOEXF", "SBERF"])
+        self.assertEqual(instruments[0].client_groups, ("FIZ", "YUR"))
+        self.assertEqual(instruments[0].gross_position, 38.0)
+        self.assertEqual(instruments[0].long_position, 445.0)
+        self.assertEqual(instruments[0].short_position, 445.0)
+        self.assertEqual(
+            [record.ticker for record in store.load_futoi_records(trading_date=date(2024, 4, 8))],
+            ["IMOEXF", "IMOEXF", "SBERF"],
         )
 
     def test_refresh_service_writes_deduped_csv_history(self):
@@ -157,6 +319,17 @@ class FutoiTests(unittest.TestCase):
 
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0].position, 11.0)
+
+    def test_csv_history_writes_lf_line_endings_for_repo_artifacts(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            csv_history = FutoiCsvHistory(Path(tempdir) / "futoi.csv")
+
+            csv_history.upsert_records([_record_for_date(date(2024, 4, 8), position=10.0)])
+
+            contents = csv_history.path.read_bytes()
+
+        self.assertIn(b"\n", contents)
+        self.assertNotIn(b"\r\n", contents)
 
     def test_prune_history_removes_futoi_records_older_than_retention(self):
         current_time = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
@@ -248,6 +421,42 @@ def _record_for_date(trade_date: date, position: float) -> FutoiRecord:
         position_long_count=1,
         position_short_count=0,
     )
+
+
+def _futoi_payload(
+    trade_date: str,
+    ticker: str,
+    client_group: str,
+    position: float,
+):
+    return {
+        "futoi": {
+            "columns": [
+                "tradedate",
+                "tradetime",
+                "ticker",
+                "clgroup",
+                "pos",
+                "pos_long",
+                "pos_short",
+                "pos_long_num",
+                "pos_short_num",
+            ],
+            "data": [
+                [
+                    trade_date,
+                    "18:45:00",
+                    ticker,
+                    client_group,
+                    position,
+                    abs(position) + 1,
+                    -abs(position),
+                    2,
+                    1,
+                ]
+            ],
+        }
+    }
 
 
 if __name__ == "__main__":

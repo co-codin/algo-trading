@@ -1,4 +1,4 @@
-export type Mode = "live" | "breadth" | "feedback" | "profile" | "admin";
+export type Mode = "live" | "breadth" | "quant" | "futoi" | "feedback" | "profile" | "admin";
 
 export type AuthUser = {
   id: number;
@@ -82,6 +82,28 @@ export type StrategyPayload = {
   ok: true;
   strategies: StrategyInfo[];
   presets: string[];
+};
+
+export type QuantStrategyIdea = {
+  id: string;
+  title: string;
+  group: string;
+  action: "bullish" | "bearish" | "neutral";
+  score: number;
+  confidence: "low" | "medium" | "high";
+  metrics: Record<string, string | number>;
+  reasons: string[];
+};
+
+export type QuantStrategiesPayload = {
+  ok: true;
+  market: string;
+  symbol: string;
+  interval: string;
+  candles: Candle[];
+  signals: Marker[];
+  indicators: IndicatorDefinition[];
+  ideas: QuantStrategyIdea[];
 };
 
 export type SymbolInfo = {
@@ -178,4 +200,55 @@ export type MarketBreadthPayload = {
   series: Record<string, MarketBreadthSeries>;
   put_call_symbol: string;
   updated_at: string;
+};
+
+export type FutoiRecord = {
+  trade_date: string;
+  trade_time: string;
+  ticker: string;
+  client_group: string;
+  position: number;
+  position_long: number;
+  position_short: number;
+  position_long_count: number;
+  position_short_count: number;
+  session_id: number | null;
+  sequence_number: number | null;
+  system_time: string | null;
+  trade_session_date: string | null;
+};
+
+export type FutoiChartPoint = {
+  time: number;
+  net_position: number;
+  long_position: number;
+  short_position: number;
+  open_interest: number;
+};
+
+export type FutoiInstrument = {
+  ticker: string;
+  last_trade_date: string | null;
+  last_trade_time: string | null;
+  system_time: string | null;
+  trade_session_date: string | null;
+  client_groups: string[];
+  net_position: number;
+  gross_position: number;
+  long_position: number;
+  short_position: number;
+  long_count: number;
+  short_count: number;
+  row_count: number;
+  updated_at: string | null;
+};
+
+export type FutoiPayload = {
+  ok: true;
+  records: FutoiRecord[];
+};
+
+export type FutoiInstrumentsPayload = {
+  ok: true;
+  instruments: FutoiInstrument[];
 };

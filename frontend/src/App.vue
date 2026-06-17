@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { requestJson, toQuery } from "./api";
+import FutoiPositionChart from "./components/FutoiPositionChart.vue";
 import TradingViewChart from "./components/TradingViewChart.vue";
 import {
   LIVE_WORKSPACE_STORAGE_KEY,
@@ -35,6 +36,11 @@ import type {
   FeedbackItem,
   FeedbackPayload,
   FeedbackStatus,
+  FutoiChartPoint,
+  FutoiInstrument,
+  FutoiInstrumentsPayload,
+  FutoiPayload,
+  FutoiRecord,
   IndicatorDefinition,
   LiveChartPayload,
   LiveSymbolsPayload,
@@ -43,6 +49,8 @@ import type {
   MarketBreadthPayload,
   Mode,
   PlatformSettingsPayload,
+  QuantStrategiesPayload,
+  QuantStrategyIdea,
   StrategyInfo,
   StrategyPayload,
 } from "./types";
@@ -77,6 +85,18 @@ type BreadthGroupView = {
   group: MarketBreadthGroup;
   summary: BreadthGroupSummary;
 };
+type FutoiMetric = {
+  label: string;
+  value: string;
+};
+type FutoiChartLabels = {
+  aria: string;
+  empty: string;
+  net: string;
+  long: string;
+  short: string;
+  openInterest: string;
+};
 type LiveWorkspace = {
   id: string;
   name: string;
@@ -95,11 +115,59 @@ type LiveWorkspace = {
 
 const FREE_TRIAL_ADMIN_EMAIL = "cuiyeqing960904@gmail.com";
 
+const russianLiveSymbolLabels: Record<string, string> = {
+  AFKS: "AFKS · АФК Система",
+  AFLT: "AFLT · Аэрофлот",
+  ALRS: "ALRS · Алроса",
+  CHMF: "CHMF · Северсталь",
+  FLOT: "FLOT · Совкомфлот",
+  GAZP: "GAZP · Газпром",
+  GMKN: "GMKN · Норникель",
+  IRAO: "IRAO · Интер РАО",
+  LKOH: "LKOH · Лукойл",
+  MAGN: "MAGN · ММК",
+  MGNT: "MGNT · Магнит",
+  MOEX: "MOEX · Московская биржа",
+  MTSS: "MTSS · МТС",
+  NLMK: "NLMK · НЛМК",
+  NVTK: "NVTK · Новатэк",
+  OZON: "OZON · Ozon",
+  PHOR: "PHOR · ФосАгро",
+  PIKK: "PIKK · ПИК",
+  PLZL: "PLZL · Полюс",
+  RASP: "RASP · Распадская",
+  ROSN: "ROSN · Роснефть",
+  RTKM: "RTKM · Ростелеком",
+  RUAL: "RUAL · Русал",
+  SBER: "SBER · Сбербанк",
+  SBERP: "SBERP · Сбербанк-п",
+  SNGS: "SNGS · Сургутнефтегаз",
+  SNGSP: "SNGSP · Сургутнефтегаз-п",
+  TATN: "TATN · Татнефть",
+  TATNP: "TATNP · Татнефть-п",
+  TRNFP: "TRNFP · Транснефть-п",
+  VKCO: "VKCO · VK",
+  VTBR: "VTBR · ВТБ",
+  X5: "X5 · X5 Group",
+  YDEX: "YDEX · Яндекс",
+  IMOEX: "IMOEX · Индекс МосБиржи",
+  RTSI: "RTSI · Индекс РТС",
+  IMOEXF: "IMOEXF · Фьючерс IMOEX",
+  MXM6: "MXM6 · Фьючерс на индекс МосБиржи",
+  MXU6: "MXU6 · Фьючерс на индекс МосБиржи",
+  MXZ6: "MXZ6 · Фьючерс на индекс МосБиржи",
+  RIM6: "RIM6 · Фьючерс на индекс РТС",
+  RIU6: "RIU6 · Фьючерс на индекс РТС",
+  RIZ6: "RIZ6 · Фьючерс на индекс РТС",
+};
+
 const routeModes: Record<string, Mode> = {
   "/": "live",
   "/live": "live",
   "/chart": "live",
   "/breadth": "breadth",
+  "/quant": "quant",
+  "/futoi": "futoi",
   "/feedback": "feedback",
   "/profile": "profile",
   "/admin": "admin",
@@ -108,6 +176,8 @@ const routeModes: Record<string, Mode> = {
 const modeRoutes: Record<Mode, string> = {
   live: "/live",
   breadth: "/breadth",
+  quant: "/quant",
+  futoi: "/futoi",
   feedback: "/feedback",
   profile: "/profile",
   admin: "/admin",
@@ -204,12 +274,22 @@ function setLocale(nextLocale: Locale) {
 const activeMode = ref<Mode>(modeFromLocation());
 const strategies = ref<StrategyInfo[]>([]);
 const livePayload = ref<LiveChartPayload | null>(null);
+const quantPayload = ref<QuantStrategiesPayload | null>(null);
+const quantStrategyIdeas = ref<QuantStrategyIdea[]>([]);
 const liveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});
 const breadthPayload = ref<MarketBreadthPayload | null>(null);
+const futoiRecords = ref<FutoiRecord[]>([]);
+const futoiInstruments = ref<FutoiInstrument[]>([]);
+const futoiInstrumentSearch = ref("");
+const selectedFutoiTicker = ref("");
 const liveStatus = ref(t("status.ready"));
 const liveStatusType = ref<StatusType>("");
+const quantStatus = ref(t("status.ready"));
+const quantStatusType = ref<StatusType>("");
 const breadthStatus = ref(t("status.ready"));
 const breadthStatusType = ref<StatusType>("");
+const futoiStatus = ref(t("status.ready"));
+const futoiStatusType = ref<StatusType>("");
 const liveMarket = ref("crypto_spot");
 const liveSymbol = ref("BTCUSDT");
 const liveSymbolSearch = ref("");
@@ -222,6 +302,7 @@ const liveMaxSignals = ref(80);
 const liveSelectedStrategies = ref<string[]>(["ema-rsi"]);
 const liveStrategySearch = ref("");
 const liveStrategyMenu = ref<HTMLDetailsElement | null>(null);
+const accountMenu = ref<HTMLDetailsElement | null>(null);
 const liveVisibleIndicators = ref<string[]>([...defaultLiveIndicators]);
 const liveWorkspaces = ref<LiveWorkspace[]>([]);
 const liveWorkspaceName = ref("");
@@ -229,6 +310,11 @@ const liveAlertsEnabled = ref(false);
 const lastAlertSignature = ref("");
 const showSignals = ref(true);
 const liveDataUpdatedAt = ref<string | null>(null);
+const futoiForm = reactive({
+  date: "",
+  ticker: "",
+  limit: "500",
+});
 let liveTimer = 0;
 let liveChartRequestId = 0;
 let isApplyingLiveSettingsFromUrl = false;
@@ -243,6 +329,8 @@ const canManageFreeTrial = computed(
 const featureTabs = computed(() => [
   { mode: "live" as const, label: t("tabs.live") },
   { mode: "breadth" as const, label: t("tabs.breadth") },
+  { mode: "quant" as const, label: t("tabs.quant") },
+  { mode: "futoi" as const, label: t("tabs.futoi") },
 ]);
 const accountMenuItems = computed(() => [
   { mode: "profile" as const, label: t("tabs.profile") },
@@ -349,7 +437,7 @@ const filteredLiveStrategyGroups = computed<StrategyGroup[]>(() => {
     .filter((group) => group.strategies.length > 0);
 });
 const activeLiveSymbolOptions = computed(
-  () => liveSymbolsByMarket.value[liveMarket.value] ?? [],
+  () => (liveSymbolsByMarket.value[liveMarket.value] ?? []).map(localizedLiveSymbolOption),
 );
 const filteredLiveSymbolOptions = computed(() => {
   const query = liveSymbolSearch.value;
@@ -469,6 +557,62 @@ const breadthPutCall = computed(() => {
   const symbol = breadthPayload.value?.put_call_symbol;
   return symbol ? breadthPayload.value?.series[symbol] ?? null : null;
 });
+const filteredFutoiInstruments = computed(() => {
+  const query = normalizeSearchText(futoiInstrumentSearch.value);
+  if (!query) {
+    return futoiInstruments.value;
+  }
+  return futoiInstruments.value.filter((instrument) =>
+    normalizeSearchText(
+      `${instrument.ticker} ${instrument.client_groups.join(" ")} ${instrument.last_trade_date ?? ""}`,
+    ).includes(query),
+  );
+});
+const selectedFutoiInstrument = computed(() =>
+  futoiInstruments.value.find((instrument) => instrument.ticker === selectedFutoiTicker.value) ??
+  null,
+);
+const futoiChartPoints = computed<FutoiChartPoint[]>(() => buildFutoiChartPoints(futoiRecords.value));
+const futoiChartLabels = computed<FutoiChartLabels>(() => ({
+  aria: t("chart.futoiAria"),
+  empty: t("empty.noFutoi"),
+  net: t("chart.futoiNet"),
+  long: t("chart.futoiLong"),
+  short: t("chart.futoiShort"),
+  openInterest: t("chart.futoiOpenInterest"),
+}));
+const futoiRecordClientGroups = computed(() =>
+  [...new Set(futoiRecords.value.map((record) => record.client_group))].sort().join(", "),
+);
+const futoiRecordMetrics = computed<FutoiMetric[]>(() => {
+  const selected = selectedFutoiInstrument.value;
+  return [
+    {
+      label: t("labels.futoiOpenInterest"),
+      value: formatNumber(selected?.gross_position ?? 0),
+    },
+    {
+      label: t("labels.netPosition"),
+      value: formatNumber(selected?.net_position ?? 0),
+    },
+    {
+      label: t("labels.longPosition"),
+      value: formatNumber(selected?.long_position ?? 0),
+    },
+    {
+      label: t("labels.shortPosition"),
+      value: formatNumber(selected?.short_position ?? 0),
+    },
+    {
+      label: t("labels.clientGroups"),
+      value: futoiRecordClientGroups.value || selected?.client_groups.join(", ") || "—",
+    },
+    {
+      label: t("labels.rows"),
+      value: formatNumber(futoiRecords.value.length || selected?.row_count || 0),
+    },
+  ];
+});
 const chartLabels = computed(() => ({
   aria: t("chart.aria"),
   empty: t("empty.noCandles"),
@@ -487,6 +631,9 @@ const displayedSignals = computed(() => {
   }
   return limitRecentSignals(consensusSignals.value, liveMaxSignals.value);
 });
+const sortedQuantStrategyIdeas = computed(() =>
+  [...quantStrategyIdeas.value].sort((left, right) => Math.abs(right.score) - Math.abs(left.score)),
+);
 
 watch(liveMarket, () => {
   liveSymbolSearch.value = "";
@@ -508,6 +655,9 @@ watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], ()
   if (activeMode.value === "live") {
     refreshLiveChart();
   }
+  if (activeMode.value === "quant") {
+    void loadQuantStrategyIdeas();
+  }
 });
 
 watch([liveMarket, liveSymbol, liveVisibleIndicators, liveStrategyRequest], () => {
@@ -526,6 +676,12 @@ watch(locale, () => {
   }
   if (!breadthStatusType.value) {
     breadthStatus.value = t("status.ready");
+  }
+  if (!quantStatusType.value) {
+    quantStatus.value = t("status.ready");
+  }
+  if (!futoiStatusType.value) {
+    futoiStatus.value = t("status.ready");
   }
   if (!adminStatusType.value) {
     adminStatus.value = t("status.ready");
@@ -574,7 +730,7 @@ function modeFromLocation(): Mode {
 }
 
 function isFeatureMode(mode: Mode): boolean {
-  return mode === "live" || mode === "breadth" || mode === "feedback";
+  return mode === "live" || mode === "breadth" || mode === "quant" || mode === "futoi" || mode === "feedback";
 }
 
 function permittedMode(mode: Mode): Mode {
@@ -605,12 +761,27 @@ function setMode(mode: Mode, updateUrl = true) {
   if (nextMode === "breadth") {
     void loadMarketBreadth();
   }
+  if (nextMode === "quant") {
+    void loadQuantStrategyIdeas();
+  }
+  if (nextMode === "futoi") {
+    void loadFutoiDashboard();
+  }
   if (nextMode === "profile") {
     void loadProfile();
   }
   if (nextMode === "admin") {
     void loadAdminPanel();
   }
+}
+
+function closeAccountMenu() {
+  accountMenu.value?.removeAttribute("open");
+}
+
+function selectAccountMode(mode: Mode) {
+  closeAccountMenu();
+  setMode(mode);
 }
 
 function setLiveStatus(message: string, type: StatusType = "") {
@@ -621,6 +792,16 @@ function setLiveStatus(message: string, type: StatusType = "") {
 function setBreadthStatus(message: string, type: StatusType = "") {
   breadthStatus.value = message;
   breadthStatusType.value = type;
+}
+
+function setQuantStatus(message: string, type: StatusType = "") {
+  quantStatus.value = message;
+  quantStatusType.value = type;
+}
+
+function setFutoiStatus(message: string, type: StatusType = "") {
+  futoiStatus.value = message;
+  futoiStatusType.value = type;
 }
 
 function setAdminStatus(message: string, type: StatusType = "") {
@@ -1158,11 +1339,21 @@ async function logout() {
   authUser.value = null;
   stopLivePolling();
   livePayload.value = null;
+  quantPayload.value = null;
+  quantStrategyIdeas.value = [];
   breadthPayload.value = null;
+  futoiRecords.value = [];
+  futoiInstruments.value = [];
+  selectedFutoiTicker.value = "";
   adminUsers.value = [];
   adminFeedback.value = [];
   feedbackForm.title = "";
   feedbackForm.description = "";
+}
+
+async function logoutFromMenu() {
+  closeAccountMenu();
+  await logout();
 }
 
 async function loadStrategies() {
@@ -1206,6 +1397,32 @@ async function loadLiveChart() {
   }
 }
 
+async function loadQuantStrategyIdeas() {
+  if (!canUseFeatures.value) {
+    setQuantStatus(t("auth.inactive"), "error");
+    return;
+  }
+  setQuantStatus(t("status.loadingQuantStrategies"), "busy");
+  try {
+    const query = toQuery({
+      ...settings,
+      market: liveMarket.value,
+      symbol: liveSymbol.value,
+      interval: liveInterval.value,
+      limit: liveLimit.value,
+      strategy: liveStrategyRequest.value,
+    });
+    const payload = await requestJson<QuantStrategiesPayload>(`/api/quant-strategies?${query}`);
+    quantPayload.value = payload;
+    quantStrategyIdeas.value = payload.ideas;
+    setQuantStatus(`${t("status.updated")} ${payload.ideas.length}`);
+  } catch (error) {
+    quantPayload.value = null;
+    quantStrategyIdeas.value = [];
+    setQuantStatus(errorMessage(error), "error");
+  }
+}
+
 function toggleLiveStrategy(strategyName: string) {
   if (liveSelectedStrategies.value.includes(strategyName)) {
     if (liveSelectedStrategies.value.length > 1) {
@@ -1244,6 +1461,16 @@ function closeLiveStrategyMenu() {
 
 function resetLiveStrategies() {
   liveSelectedStrategies.value = [strategies.value[0]?.name ?? "ema-rsi"];
+}
+
+function localizedLiveSymbolOption(option: SelectOption): SelectOption {
+  if (locale.value === "ru") {
+    const russianLabel = russianLiveSymbolLabels[String(option.value).toUpperCase()];
+    if (russianLabel) {
+      return { ...option, label: russianLabel };
+    }
+  }
+  return option;
 }
 
 function selectLiveSymbol(value: string | number) {
@@ -1296,6 +1523,109 @@ async function loadMarketBreadth() {
   }
 }
 
+async function loadFutoiDashboard() {
+  const hasInstruments = await loadFutoiInstruments();
+  if (hasInstruments) {
+    await loadFutoi();
+  }
+}
+
+async function loadFutoiInstruments(): Promise<boolean> {
+  if (!canUseFeatures.value) {
+    setFutoiStatus(t("auth.inactive"), "error");
+    return false;
+  }
+  setFutoiStatus(t("status.loadingFutoi"), "busy");
+  try {
+    const payload = await requestJson<FutoiInstrumentsPayload>("/api/futoi/instruments");
+    futoiInstruments.value = payload.instruments;
+    const selectedExists = payload.instruments.some(
+      (instrument) => instrument.ticker === selectedFutoiTicker.value,
+    );
+    if (!selectedExists) {
+      selectedFutoiTicker.value = payload.instruments[0]?.ticker ?? "";
+    }
+    futoiForm.ticker = selectedFutoiTicker.value;
+    if (!payload.instruments.length) {
+      futoiRecords.value = [];
+      setFutoiStatus(`${t("status.updated")} 0`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    futoiInstruments.value = [];
+    selectedFutoiTicker.value = "";
+    futoiRecords.value = [];
+    setFutoiStatus(errorMessage(error), "error");
+    return false;
+  }
+}
+
+async function loadFutoi() {
+  if (!canUseFeatures.value) {
+    setFutoiStatus(t("auth.inactive"), "error");
+    return;
+  }
+  setFutoiStatus(t("status.loadingFutoi"), "busy");
+  const params = new URLSearchParams();
+  if (futoiForm.date) {
+    params.set("date", futoiForm.date);
+  }
+  const selectedTicker = selectedFutoiTicker.value || futoiForm.ticker.trim().toUpperCase();
+  if (selectedTicker) {
+    params.set("ticker", selectedTicker);
+  }
+  if (futoiForm.limit) {
+    params.set("limit", futoiForm.limit);
+  }
+  try {
+    const payload = await requestJson<FutoiPayload>(`/api/futoi?${params.toString()}`);
+    futoiRecords.value = payload.records;
+    setFutoiStatus(`${t("status.updated")} ${payload.records.length}`);
+  } catch (error) {
+    futoiRecords.value = [];
+    setFutoiStatus(errorMessage(error), "error");
+  }
+}
+
+function selectFutoiInstrument(ticker: string) {
+  selectedFutoiTicker.value = ticker;
+  futoiForm.ticker = ticker;
+  void loadFutoi();
+}
+
+function buildFutoiChartPoints(records: FutoiRecord[]): FutoiChartPoint[] {
+  const pointsByTime = new Map<number, FutoiChartPoint>();
+  for (const record of records) {
+    const time = futoiRecordTime(record);
+    if (time === null) {
+      continue;
+    }
+    const point = pointsByTime.get(time) ?? {
+      time,
+      net_position: 0,
+      long_position: 0,
+      short_position: 0,
+      open_interest: 0,
+    };
+    point.net_position += Number(record.position);
+    point.long_position += Number(record.position_long);
+    point.short_position += Number(record.position_short);
+    point.open_interest += Math.abs(Number(record.position_long)) + Math.abs(Number(record.position_short));
+    pointsByTime.set(time, point);
+  }
+  return [...pointsByTime.values()].sort((left, right) => left.time - right.time);
+}
+
+function futoiRecordTime(record: FutoiRecord): number | null {
+  const timestamp = Date.parse(`${record.trade_date}T${record.trade_time}`);
+  if (Number.isFinite(timestamp)) {
+    return Math.floor(timestamp / 1000);
+  }
+  const fallback = Date.parse(record.trade_date);
+  return Number.isFinite(fallback) ? Math.floor(fallback / 1000) : null;
+}
+
 function strategyTitle(name: string): string {
   return translateStrategyTitle(locale.value, name, name);
 }
@@ -1342,6 +1672,24 @@ function latestBreadthClose(symbol: string): string {
 
 function formatBreadthPercent(value: number | null): string {
   return value === null ? "—" : `${formatNumber(value)}%`;
+}
+
+function quantIdeaActionLabel(action: QuantStrategyIdea["action"]): string {
+  return t(`strategyActions.${action}` as MessageKey);
+}
+
+function quantIdeaConfidenceLabel(confidence: QuantStrategyIdea["confidence"]): string {
+  return t(`confidence.${confidence}` as MessageKey);
+}
+
+function quantIdeaScoreStyle(score: number): Record<string, string> {
+  return {
+    "--score-width": `${Math.min(100, Math.abs(score))}%`,
+  };
+}
+
+function quantIdeaToneClass(idea: QuantStrategyIdea): string {
+  return `is-${idea.action}`;
 }
 
 function latestBreadthDate(symbol: string): string {
@@ -1489,26 +1837,26 @@ function errorMessage(error: unknown): string {
           <span>{{ item.label }}</span>
         </button>
       </div>
-      <button class="user-pill" type="button" @click="setMode('profile')">
-        <span>{{ authUser.username }}</span>
-        <b>{{ authUser.is_active ? t("auth.active") : t("auth.inactive") }}</b>
-      </button>
-      <button class="secondary logout-button" type="button" @click="logout">
-        {{ t("auth.logout") }}
-      </button>
-      <details class="profile-menu">
-        <summary class="secondary profile-button">
-          {{ t("tabs.profile") }}
+      <details ref="accountMenu" class="profile-menu account-menu" @keydown.escape.prevent="closeAccountMenu">
+        <summary class="account-menu-trigger" :aria-label="t('labels.account')">
+          <span>{{ t("labels.account") }}</span>
         </summary>
-        <div class="profile-menu-panel">
+        <div class="account-menu-panel">
           <button
             v-for="item in accountMenuItems"
             :key="item.mode"
             type="button"
-            @click="setMode(item.mode)"
+            class="account-menu-item"
+            :class="{ 'is-active': activeMode === item.mode }"
+            @click="selectAccountMode(item.mode)"
           >
             {{ item.label }}
           </button>
+          <div class="account-menu-footer">
+            <button class="account-menu-item account-menu-logout" type="button" @click="logoutFromMenu">
+              {{ t("auth.logout") }}
+            </button>
+          </div>
         </div>
       </details>
     </div>
@@ -1971,6 +2319,264 @@ function errorMessage(error: unknown): string {
       </template>
     </section>
 
+    <section v-else-if='activeMode === "quant"' class="panel quant-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("pages.quantStrategies") }}</h2>
+          <p>{{ t("pages.quantStrategiesSubtitle") }}</p>
+        </div>
+        <div class="actions">
+          <button class="primary" type="button" @click="loadQuantStrategyIdeas">
+            {{ t("actions.refresh") }}
+          </button>
+          <div class="status" :class="quantStatusType ? `is-${quantStatusType}` : ''">
+            {{ quantStatus }}
+          </div>
+        </div>
+      </div>
+      <div class="live-controls quant-controls">
+        <div class="live-control-section market-controls">
+          <label>
+            <span>{{ t("labels.market") }}</span>
+            <select v-model="liveMarket">
+              <option
+                v-for="option in liveMarketOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label class="symbol-picker">
+            <span>{{ t("labels.symbol") }}</span>
+            <select v-model="liveSymbol">
+              <option
+                v-for="option in activeLiveSymbolOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>{{ t("labels.interval") }}</span>
+            <select v-model="liveInterval">
+              <option
+                v-for="option in liveIntervalOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>{{ t("labels.candles") }}</span>
+            <select v-model="liveLimit">
+              <option
+                v-for="option in liveCandleOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div v-if="!sortedQuantStrategyIdeas.length" class="empty quant-empty">
+        {{ t("empty.noQuantStrategies") }}
+      </div>
+      <div class="chart-shell quant-chart-shell">
+        <div class="chart-legend">
+          <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
+          <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
+          <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">{{ t("chart.tradingView") }}</a>
+        </div>
+        <div class="chart-stage">
+          <TradingViewChart
+            v-if="quantPayload"
+            :candles="quantPayload.candles"
+            :signals="quantPayload.signals"
+            :indicators="quantPayload.indicators"
+            :show-signals="true"
+            :reset-key="`quant:${quantPayload.market}:${quantPayload.symbol}:${quantPayload.interval}`"
+            :aria-label="chartLabels.aria"
+            :empty-label="chartLabels.empty"
+            :long-signal-label="chartLabels.longSignal"
+            :short-signal-label="chartLabels.shortSignal"
+          />
+          <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
+        </div>
+      </div>
+      <div v-if="sortedQuantStrategyIdeas.length" class="strategy-ideas">
+        <article
+          v-for="idea in sortedQuantStrategyIdeas"
+          :key="idea.id"
+          class="strategy-idea-card"
+          :class="quantIdeaToneClass(idea)"
+        >
+          <header>
+            <div>
+              <span>{{ idea.group }}</span>
+              <h3>{{ idea.title }}</h3>
+            </div>
+            <strong>{{ quantIdeaActionLabel(idea.action) }}</strong>
+          </header>
+          <div class="strategy-idea-score" :style="quantIdeaScoreStyle(idea.score)">
+            <span></span>
+            <b>{{ formatNumber(idea.score) }}</b>
+          </div>
+          <dl class="strategy-idea-meta">
+            <div>
+              <dt>{{ t("labels.confidence") }}</dt>
+              <dd>{{ quantIdeaConfidenceLabel(idea.confidence) }}</dd>
+            </div>
+            <div
+              v-for="(value, key) in idea.metrics"
+              :key="`${idea.id}-${key}`"
+            >
+              <dt>{{ key }}</dt>
+              <dd>{{ formatNumber(value) }}</dd>
+            </div>
+          </dl>
+          <ul>
+            <li v-for="reason in idea.reasons" :key="reason">{{ reason }}</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section v-else-if='activeMode === "futoi"' class="panel futoi-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("pages.futoi") }}</h2>
+          <p>{{ t("pages.futoiSubtitle") }}</p>
+        </div>
+        <div class="actions">
+          <button class="primary" type="button" @click="loadFutoiDashboard">
+            {{ t("actions.refresh") }}
+          </button>
+          <div class="status" :class="futoiStatusType ? `is-${futoiStatusType}` : ''">
+            {{ futoiStatus }}
+          </div>
+        </div>
+      </div>
+      <div class="futoi-dashboard">
+        <aside class="futoi-instruments-panel">
+          <div class="futoi-section-heading">
+            <strong>{{ t("labels.futoiInstruments") }}</strong>
+            <span>{{ formatNumber(futoiInstruments.length) }}</span>
+          </div>
+          <label class="futoi-search">
+            <span>{{ t("labels.symbolSearch") }}</span>
+            <input
+              v-model.trim="futoiInstrumentSearch"
+              autocomplete="off"
+              type="search"
+              :placeholder="t('labels.symbolSearch')"
+            >
+          </label>
+          <div v-if="filteredFutoiInstruments.length" class="futoi-instrument-list">
+            <button
+              v-for="instrument in filteredFutoiInstruments"
+              :key="instrument.ticker"
+              type="button"
+              class="futoi-instrument-button"
+              :class="{ 'is-active': instrument.ticker === selectedFutoiTicker }"
+              @click="selectFutoiInstrument(instrument.ticker)"
+            >
+              <span>
+                <b>{{ instrument.ticker }}</b>
+                <small>{{ instrument.last_trade_date || "—" }} {{ instrument.last_trade_time || "" }}</small>
+              </span>
+              <strong>{{ formatNumber(instrument.gross_position) }}</strong>
+            </button>
+          </div>
+          <div v-else class="empty">{{ t("empty.noFutoiInstruments") }}</div>
+        </aside>
+
+        <div class="futoi-detail-panel">
+          <div class="futoi-detail-header">
+            <div>
+              <span>{{ t("labels.futoiTicker") }}</span>
+              <h3>{{ selectedFutoiTicker || "—" }}</h3>
+            </div>
+            <div>
+              <span>{{ t("labels.updated") }}</span>
+              <b>{{ formatDateTime(selectedFutoiInstrument?.system_time) }}</b>
+            </div>
+          </div>
+          <div class="futoi-detail-controls">
+            <label>
+              <span>{{ t("labels.futoiDate") }}</span>
+              <input v-model="futoiForm.date" type="date" @change="loadFutoi">
+            </label>
+            <label>
+              <span>{{ t("labels.limit") }}</span>
+              <input v-model="futoiForm.limit" type="number" min="1" max="5000" @change="loadFutoi">
+            </label>
+          </div>
+          <div class="futoi-metrics">
+            <div v-for="metric in futoiRecordMetrics" :key="metric.label" class="futoi-metric">
+              <span>{{ metric.label }}</span>
+              <b>{{ metric.value }}</b>
+            </div>
+          </div>
+          <div class="futoi-chart-shell">
+            <div class="futoi-chart-legend">
+              <span><i class="legend-dot net"></i>{{ futoiChartLabels.net }}</span>
+              <span><i class="legend-dot long"></i>{{ futoiChartLabels.long }}</span>
+              <span><i class="legend-dot short"></i>{{ futoiChartLabels.short }}</span>
+              <span><i class="legend-dot open-interest"></i>{{ futoiChartLabels.openInterest }}</span>
+            </div>
+            <FutoiPositionChart
+              :points="futoiChartPoints"
+              :labels="futoiChartLabels"
+            />
+          </div>
+          <div v-if="!futoiRecords.length" class="empty">{{ t("empty.noFutoi") }}</div>
+          <div v-else class="futoi-table-wrapper">
+            <table class="futoi-table">
+              <thead>
+                <tr>
+                  <th>{{ t("labels.futoiDate") }}</th>
+                  <th>{{ t("labels.tradeTime") }}</th>
+                  <th>{{ t("labels.futoiTicker") }}</th>
+                  <th>{{ t("labels.clientGroup") }}</th>
+                  <th>{{ t("labels.position") }}</th>
+                  <th>{{ t("labels.longPosition") }}</th>
+                  <th>{{ t("labels.shortPosition") }}</th>
+                  <th>{{ t("labels.longCount") }}</th>
+                  <th>{{ t("labels.shortCount") }}</th>
+                  <th>{{ t("labels.updated") }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="record in futoiRecords"
+                  :key="`${record.trade_date}:${record.trade_time}:${record.ticker}:${record.client_group}`"
+                >
+                  <td>{{ record.trade_date }}</td>
+                  <td>{{ record.trade_time }}</td>
+                  <td>{{ record.ticker }}</td>
+                  <td>{{ record.client_group }}</td>
+                  <td>{{ formatNumber(record.position) }}</td>
+                  <td>{{ formatNumber(record.position_long) }}</td>
+                  <td>{{ formatNumber(record.position_short) }}</td>
+                  <td>{{ formatNumber(record.position_long_count) }}</td>
+                  <td>{{ formatNumber(record.position_short_count) }}</td>
+                  <td>{{ formatDateTime(record.system_time) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section v-else-if='activeMode === "profile"' class="panel profile-panel">
       <div class="panel-heading">
         <div>
@@ -2051,8 +2657,8 @@ function errorMessage(error: unknown): string {
         </div>
       </div>
       <form class="feedback-form" @submit.prevent="submitFeedback">
-        <div class="field-grid feedback-field-grid">
-          <label>
+        <div class="feedback-form-body">
+          <label class="feedback-title-field">
             <span>{{ t("labels.feedbackTitle") }}</span>
             <input
               v-model.trim="feedbackForm.title"
@@ -2061,19 +2667,19 @@ function errorMessage(error: unknown): string {
               maxlength="160"
             >
           </label>
-          <label>
+          <label class="feedback-description-field">
             <span>{{ t("labels.feedbackDescription") }}</span>
             <textarea
               v-model.trim="feedbackForm.description"
               maxlength="4000"
-              rows="3"
+              rows="7"
             ></textarea>
           </label>
-          <div class="profile-form-actions">
-            <button class="primary" type="submit">{{ t("actions.sendFeedback") }}</button>
-            <div class="status" :class="feedbackStatusType ? `is-${feedbackStatusType}` : ''">
-              {{ feedbackStatus }}
-            </div>
+        </div>
+        <div class="feedback-form-footer">
+          <button class="primary" type="submit">{{ t("actions.sendFeedback") }}</button>
+          <div class="status" :class="feedbackStatusType ? `is-${feedbackStatusType}` : ''" aria-live="polite">
+            {{ feedbackStatus }}
           </div>
         </div>
       </form>

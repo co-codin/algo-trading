@@ -1,4 +1,3 @@
-import re
 import tempfile
 import time
 import unittest
@@ -208,6 +207,50 @@ class UiTests(unittest.TestCase):
         self.assertIn(".health-badge", style_source)
         self.assertIn(".alert-controls", style_source)
 
+    def test_frontend_exposes_quant_strategy_tab(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(encoding="utf-8")
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
+        style_source = (root / "frontend" / "src" / "styles" / "live.css").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("QuantStrategyIdea", types_source)
+        self.assertIn("QuantStrategiesPayload", types_source)
+        self.assertIn("candles: Candle[];", types_source)
+        self.assertIn("signals: Marker[];", types_source)
+        self.assertIn("indicators: IndicatorDefinition[];", types_source)
+        self.assertIn('"quant"', types_source)
+        self.assertIn('"/quant": "quant"', app_source)
+        self.assertIn('quant: "/quant"', app_source)
+        self.assertIn('{ mode: "quant" as const, label: t("tabs.quant") }', app_source)
+        self.assertIn("const quantPayload = ref<QuantStrategiesPayload | null>(null);", app_source)
+        self.assertIn("const quantStrategyIdeas = ref<QuantStrategyIdea[]>([]);", app_source)
+        self.assertIn("const quantStatus = ref(t(\"status.ready\"));", app_source)
+        self.assertIn("async function loadQuantStrategyIdeas()", app_source)
+        self.assertIn('requestJson<QuantStrategiesPayload>(`/api/quant-strategies?${query}`)', app_source)
+        self.assertIn('if (nextMode === "quant")', app_source)
+        self.assertIn('v-if="quantPayload"', app_source)
+        self.assertIn(':candles="quantPayload.candles"', app_source)
+        self.assertIn(':signals="quantPayload.signals"', app_source)
+        self.assertIn(':indicators="quantPayload.indicators"', app_source)
+        self.assertIn('class="strategy-ideas"', app_source)
+        self.assertIn('activeMode === "quant"', app_source)
+        self.assertIn('v-for="idea in sortedQuantStrategyIdeas"', app_source)
+        self.assertIn("quantIdeaActionLabel", app_source)
+        self.assertIn("quantIdeaScoreStyle", app_source)
+        self.assertIn('"tabs.quant": "Quant Strategies"', i18n_source)
+        self.assertIn('"pages.quantStrategies": "Quant strategies"', i18n_source)
+        self.assertIn('"labels.confidence": "Confidence"', i18n_source)
+        self.assertIn('"strategyActions.bullish": "Bullish"', i18n_source)
+        self.assertIn('"tabs.quant": "Квант-стратегии"', i18n_source)
+        self.assertIn('"pages.quantStrategies": "Квант-стратегии"', i18n_source)
+        self.assertIn('"tabs.quant": "量化策略"', i18n_source)
+        self.assertIn('"pages.quantStrategies": "量化策略"', i18n_source)
+        self.assertIn(".strategy-ideas", style_source)
+        self.assertIn(".strategy-idea-card", style_source)
+
     def test_admin_panel_exposes_free_trial_toggle(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
@@ -387,6 +430,18 @@ class UiTests(unittest.TestCase):
         self.assertNotIn('value: "ADAUSDT"', config_source)
         self.assertNotIn('value: "AVAXUSDT"', config_source)
 
+    def test_live_symbol_labels_follow_russian_locale(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("const russianLiveSymbolLabels: Record<string, string> = {", source)
+        self.assertIn('SBER: "SBER · Сбербанк"', source)
+        self.assertIn('IMOEX: "IMOEX · Индекс МосБиржи"', source)
+        self.assertIn("function localizedLiveSymbolOption(option: SelectOption): SelectOption", source)
+        self.assertIn("locale.value === \"ru\"", source)
+        self.assertIn(".map(localizedLiveSymbolOption)", source)
+
     def test_live_market_selector_changes_auto_refresh_chart(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
@@ -522,11 +577,12 @@ class UiTests(unittest.TestCase):
         )
 
         self.assertIn(
-            'export type Mode = "live" | "breadth" | "feedback" | "profile" | "admin";',
+            'export type Mode = "live" | "breadth" | "quant" | "futoi" | "feedback" | "profile" | "admin";',
             types_source,
         )
         self.assertIn('"/": "live"', source)
         self.assertNotIn('"/lab": "lab"', source)
+        self.assertIn('"/futoi": "futoi"', source)
         self.assertIn('"/feedback": "feedback"', source)
         self.assertIn('"/profile": "profile"', source)
         self.assertIn('"/admin": "admin"', source)
@@ -534,6 +590,8 @@ class UiTests(unittest.TestCase):
         self.assertNotIn('{ mode: "lab" as const, label: t("tabs.lab") }', source)
         self.assertIn('{ mode: "live" as const, label: t("tabs.live") }', source)
         self.assertIn('{ mode: "breadth" as const, label: t("tabs.breadth") }', source)
+        self.assertIn('{ mode: "quant" as const, label: t("tabs.quant") }', source)
+        self.assertIn('{ mode: "futoi" as const, label: t("tabs.futoi") }', source)
         self.assertIn('const accountMenuItems = computed', source)
         self.assertIn('{ mode: "profile" as const, label: t("tabs.profile") }', source)
         self.assertIn('{ mode: "feedback" as const, label: t("tabs.feedback") }', source)
@@ -541,6 +599,8 @@ class UiTests(unittest.TestCase):
         self.assertIn('{ mode: "admin" as const, label: t("tabs.admin") }', source)
         self.assertNotIn('"tabs.lab"', i18n_source)
         self.assertIn('"tabs.feedback"', i18n_source)
+        self.assertIn('"tabs.quant"', i18n_source)
+        self.assertIn('"tabs.futoi"', i18n_source)
         self.assertNotIn('{ mode: "backtest" as const', source)
         self.assertNotIn('{ mode: "paper" as const', source)
         self.assertNotIn('{ mode: "combos" as const', source)
@@ -549,6 +609,99 @@ class UiTests(unittest.TestCase):
         self.assertNotIn('"tabs.paper"', i18n_source)
         self.assertNotIn('"tabs.combos"', i18n_source)
         self.assertNotIn('"tabs.runs"', i18n_source)
+
+    def test_frontend_exposes_futoi_as_main_feature_tab(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("export type FutoiRecord", types_source)
+        self.assertIn("export type FutoiInstrument", types_source)
+        self.assertIn("export type FutoiPayload", types_source)
+        self.assertIn("export type FutoiInstrumentsPayload", types_source)
+        self.assertIn('const futoiRecords = ref<FutoiRecord[]>([]);', source)
+        self.assertIn('const futoiInstruments = ref<FutoiInstrument[]>([]);', source)
+        self.assertIn('const futoiInstrumentSearch = ref("");', source)
+        self.assertIn("const filteredFutoiInstruments = computed(() =>", source)
+        self.assertIn("const selectedFutoiInstrument = computed(() =>", source)
+        self.assertIn("async function loadFutoi()", source)
+        self.assertIn("async function loadFutoiInstruments()", source)
+        self.assertIn("async function loadFutoiDashboard()", source)
+        self.assertIn("function selectFutoiInstrument(ticker: string)", source)
+        self.assertIn('requestJson<FutoiInstrumentsPayload>("/api/futoi/instruments")', source)
+        self.assertIn('requestJson<FutoiPayload>(`/api/futoi?${params.toString()}`)', source)
+        self.assertIn('activeMode === "futoi"', source)
+        self.assertIn('class="panel futoi-panel"', source)
+        self.assertIn('class="futoi-dashboard"', source)
+        self.assertIn('class="futoi-instrument-list"', source)
+        self.assertIn('class="futoi-instrument-button"', source)
+        self.assertIn('class="futoi-detail-panel"', source)
+        self.assertIn('class="futoi-metrics"', source)
+        self.assertIn('v-for="instrument in filteredFutoiInstruments"', source)
+        self.assertIn('v-for="record in futoiRecords"', source)
+        self.assertIn('"tabs.futoi": "FUTOI"', i18n_source)
+        self.assertIn('"pages.futoi": "FUTOI"', i18n_source)
+        self.assertIn('"pages.futoiSubtitle"', i18n_source)
+        self.assertIn('"labels.futoiInstruments": "FUTOI instruments"', i18n_source)
+        self.assertIn('"labels.futoiInstruments": "Инструменты FUTOI"', i18n_source)
+        self.assertIn('"labels.futoiOpenInterest": "Открытый интерес"', i18n_source)
+        self.assertIn('"empty.noFutoi"', i18n_source)
+        self.assertIn('"empty.noFutoiInstruments"', i18n_source)
+
+    def test_frontend_adds_futoi_position_chart(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+        style_source = (root / "frontend" / "src" / "styles" / "live.css").read_text(
+            encoding="utf-8"
+        )
+        chart_source = (
+            root / "frontend" / "src" / "components" / "FutoiPositionChart.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("export type FutoiChartPoint", types_source)
+        self.assertIn("import FutoiPositionChart", source)
+        self.assertIn("type FutoiChartLabels", source)
+        self.assertIn("const futoiChartPoints = computed<FutoiChartPoint[]>(()", source)
+        self.assertIn("function buildFutoiChartPoints(records: FutoiRecord[]): FutoiChartPoint[]", source)
+        self.assertIn("record.trade_date", source)
+        self.assertIn("record.trade_time", source)
+        self.assertIn("point.net_position += Number(record.position)", source)
+        self.assertIn("point.long_position += Number(record.position_long)", source)
+        self.assertIn("point.short_position += Number(record.position_short)", source)
+        self.assertIn("point.open_interest += Math.abs(Number(record.position_long))", source)
+        self.assertIn(".sort((left, right) => left.time - right.time)", source)
+        self.assertIn('class="futoi-chart-shell"', source)
+        self.assertIn("<FutoiPositionChart", source)
+        self.assertIn(':points="futoiChartPoints"', source)
+        self.assertIn(':labels="futoiChartLabels"', source)
+        self.assertIn('"chart.futoiNet": "Net"', i18n_source)
+        self.assertIn('"chart.futoiLong": "Long"', i18n_source)
+        self.assertIn('"chart.futoiShort": "Short"', i18n_source)
+        self.assertIn('"chart.futoiOpenInterest": "Open interest"', i18n_source)
+        self.assertIn('"chart.futoiNet": "Чистая"', i18n_source)
+        self.assertIn('"chart.futoiNet": "净持仓"', i18n_source)
+        self.assertIn(".futoi-chart-shell", style_source)
+        self.assertIn(".futoi-chart-legend", style_source)
+        self.assertIn("createChart", chart_source)
+        self.assertIn("addSeries(LineSeries", chart_source)
+        self.assertIn("netSeries.value?.setData", chart_source)
+        self.assertIn("longSeries.value?.setData", chart_source)
+        self.assertIn("shortSeries.value?.setData", chart_source)
 
     def test_removed_frontend_pages_do_not_keep_client_functions(self):
         source = (
@@ -663,6 +816,9 @@ class UiTests(unittest.TestCase):
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
         )
+        header_source = app_source[
+            app_source.index('<header class="topbar">') : app_source.index("</header>")
+        ]
         i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
             encoding="utf-8"
         )
@@ -713,17 +869,28 @@ class UiTests(unittest.TestCase):
         self.assertIn("profile-panel", app_source)
         self.assertIn("admin-panel", app_source)
         self.assertIn('t("auth.inactive")', app_source)
-        self.assertIn('class="profile-menu"', app_source)
-        self.assertIn('class="secondary profile-button"', app_source)
+        self.assertIn('ref="accountMenu"', app_source)
+        self.assertIn('class="profile-menu account-menu"', app_source)
+        self.assertIn('class="account-menu-trigger"', app_source)
+        self.assertIn('class="account-menu-panel"', app_source)
+        self.assertIn('class="account-menu-footer"', app_source)
+        self.assertIn('t("labels.account")', app_source)
         self.assertIn('v-for="item in accountMenuItems"', app_source)
+        self.assertIn('@click="selectAccountMode(item.mode)"', app_source)
+        self.assertIn('@click="logoutFromMenu"', app_source)
+        self.assertNotIn('class="user-pill"', app_source)
+        self.assertNotIn("{{ authUser.username }}", header_source)
+        self.assertNotIn("{{ authUser.is_active ? t(\"auth.active\") : t(\"auth.inactive\") }}", header_source)
+        self.assertNotIn('class="secondary logout-button"', app_source)
         self.assertNotIn('class="safety"', app_source)
         self.assertNotIn('t("app.safety")', app_source)
         self.assertNotIn('"app.safety"', i18n_source)
         self.assertIn('"tabs.profile"', i18n_source)
         self.assertIn('"tabs.admin"', i18n_source)
+        self.assertIn('"labels.account"', i18n_source)
         self.assertIn('"auth.inactive"', i18n_source)
         self.assertIn('@submit.prevent="submitAuth"', app_source)
-        self.assertIn('@click="logout"', app_source)
+        self.assertIn('@click="logoutFromMenu"', app_source)
         self.assertIn('t("auth.login")', app_source)
         self.assertIn('t("auth.register")', app_source)
         self.assertIn('"auth.username"', i18n_source)
@@ -777,6 +944,11 @@ class UiTests(unittest.TestCase):
         self.assertIn('activeMode === "feedback"', app_source)
         self.assertIn('class="panel feedback-panel"', app_source)
         self.assertIn('class="feedback-form"', app_source)
+        self.assertIn('class="feedback-form-body"', app_source)
+        self.assertIn('class="feedback-form-footer"', app_source)
+        self.assertIn('class="feedback-title-field"', app_source)
+        self.assertIn('class="feedback-description-field"', app_source)
+        self.assertNotIn('class="field-grid feedback-field-grid"', app_source)
         self.assertNotIn('<form v-if="authUser.is_active" class="feedback-form"', app_source)
         self.assertIn('@submit.prevent="submitFeedback"', app_source)
         self.assertIn('v-model.trim="feedbackForm.title"', app_source)
@@ -1095,6 +1267,7 @@ class UiTests(unittest.TestCase):
         self.assertTrue(is_frontend_route("/live"))
         self.assertTrue(is_frontend_route("/chart"))
         self.assertTrue(is_frontend_route("/breadth"))
+        self.assertTrue(is_frontend_route("/futoi"))
         self.assertFalse(is_frontend_route("/lab"))
         self.assertTrue(is_frontend_route("/feedback"))
         self.assertTrue(is_frontend_route("/profile"))

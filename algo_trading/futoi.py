@@ -59,6 +59,24 @@ class FutoiRecord:
     trade_session_date: date | None = None
 
 
+@dataclass(frozen=True)
+class FutoiInstrument:
+    ticker: str
+    last_trade_date: date | None = None
+    last_trade_time: str | None = None
+    system_time: datetime | None = None
+    trade_session_date: date | None = None
+    client_groups: tuple[str, ...] = ()
+    net_position: float = 0.0
+    gross_position: float = 0.0
+    long_position: float = 0.0
+    short_position: float = 0.0
+    long_count: int = 0
+    short_count: int = 0
+    row_count: int = 0
+    updated_at: datetime | None = None
+
+
 class FutoiClient:
     def __init__(
         self,
@@ -90,26 +108,104 @@ class FutoiClient:
         if page_limit <= 0:
             raise ValueError("page_limit must be positive")
         selected_date = trading_date or date.today()
+        return self._fetch_pages(trading_date=selected_date, page_limit=page_limit)
+
+    def fetch_latest(self, *, page_limit: int = 1000) -> list[FutoiRecord]:
+        if not self.api_key:
+            raise MissingFutoiApiKey("MOEX FUTOI API key is required")
+        if page_limit <= 0:
+            raise ValueError("page_limit must be positive")
+        return self._fetch_pages(
+            trading_date=None,
+            page_limit=page_limit,
+            single_page=True,
+        )
+
+    def fetch_ticker(
+        self,
+        ticker: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        page_limit: int = 1000,
+    ) -> list[FutoiRecord]:
+        if not self.api_key:
+            raise MissingFutoiApiKey("MOEX FUTOI API key is required")
+        if page_limit <= 0:
+            raise ValueError("page_limit must be positive")
+        normalized_ticker = ticker.strip().upper()
+        if not normalized_ticker:
+            raise ValueError("ticker is required")
+        return self._fetch_pages(
+            trading_date=None,
+            ticker=normalized_ticker,
+            start_date=start_date,
+            end_date=end_date,
+            page_limit=page_limit,
+        )
+
+    def _fetch_pages(
+        self,
+        *,
+        trading_date: date | None,
+        ticker: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        page_limit: int,
+        single_page: bool = False,
+    ) -> list[FutoiRecord]:
         records: list[FutoiRecord] = []
+        seen_pages: set[str] = set()
         start = 0
         while True:
-            payload = self._request_page(selected_date, start=start, limit=page_limit)
+            payload = self._request_page(
+                trading_date,
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                start=start,
+                limit=page_limit,
+            )
             rows = _rows_from_moex_table(payload)
             if not rows:
                 break
+            page_signature = json.dumps(rows, sort_keys=True, default=str)
+            if page_signature in seen_pages:
+                break
+            seen_pages.add(page_signature)
             records.extend(_futoi_record_from_row(row) for row in rows)
+            if single_page or len(rows) < page_limit:
+                break
             start += len(rows)
         return records
 
-    def _request_page(self, trading_date: date, *, start: int, limit: int) -> dict[str, Any]:
-        query = urllib.parse.urlencode(
-            {
-                "date": trading_date.isoformat(),
-                "start": str(start),
-                "limit": str(limit),
-            }
+    def _request_page(
+        self,
+        trading_date: date | None,
+        *,
+        ticker: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        start: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        query_params: dict[str, str] = {
+            "start": str(start),
+            "limit": str(limit),
+        }
+        if trading_date is not None:
+            query_params["date"] = trading_date.isoformat()
+        if start_date is not None:
+            query_params["from"] = start_date.isoformat()
+        if end_date is not None:
+            query_params["till"] = end_date.isoformat()
+        query = urllib.parse.urlencode(query_params)
+        endpoint = (
+            f"{FUTOI_ENDPOINT_PATH}/{ticker.strip().upper()}"
+            if ticker
+            else FUTOI_ENDPOINT_PATH
         )
-        url = f"{self.base_url}/{FUTOI_ENDPOINT_PATH}.json?{query}"
+        url = f"{self.base_url}/{endpoint}.json?{query}"
         request = urllib.request.Request(
             url,
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -145,7 +241,11 @@ class FutoiCsvHistory:
         if records:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("w", encoding="utf-8", newline="") as output:
-                writer = csv.DictWriter(output, fieldnames=FUTOI_CSV_FIELDS)
+                writer = csv.DictWriter(
+                    output,
+                    fieldnames=FUTOI_CSV_FIELDS,
+                    lineterminator="\n",
+                )
                 writer.writeheader()
                 for record in sorted(deduped.values(), key=_record_key):
                     writer.writerow(_record_to_csv_row(record))
@@ -159,7 +259,11 @@ class FutoiCsvHistory:
             return 0
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("w", encoding="utf-8", newline="") as output:
-            writer = csv.DictWriter(output, fieldnames=FUTOI_CSV_FIELDS)
+            writer = csv.DictWriter(
+                output,
+                fieldnames=FUTOI_CSV_FIELDS,
+                lineterminator="\n",
+            )
             writer.writeheader()
             for record in sorted(kept, key=_record_key):
                 writer.writerow(_record_to_csv_row(record))
@@ -225,13 +329,50 @@ class FutoiRefreshService:
         except Exception:
             return {"requested": 1, "refreshed": 0, "records": 0, "failed": 1, "skipped": 0}
         if records:
-            self._store.upsert_futoi_records(records, source=FUTOI_SOURCE)
-            if self._csv_history is not None:
-                self._csv_history.upsert_records(records)
+            self._persist_records(records)
+            self._persist_instruments(records)
         return {
             "requested": 1,
             "refreshed": 1 if records else 0,
             "records": len(records),
+            "failed": 0,
+            "skipped": 0,
+        }
+
+    def refresh_all(self) -> dict[str, int]:
+        return self.refresh_instruments()
+
+    def refresh_instruments(self) -> dict[str, int]:
+        try:
+            records = self._client.fetch_latest()
+        except MissingFutoiApiKey:
+            return {
+                "requested": 1,
+                "refreshed": 0,
+                "records": 0,
+                "instruments": 0,
+                "failed": 0,
+                "skipped": 1,
+            }
+        except Exception:
+            return {
+                "requested": 1,
+                "refreshed": 0,
+                "records": 0,
+                "instruments": 0,
+                "failed": 1,
+                "skipped": 0,
+            }
+        instruments = futoi_instruments_from_records(records)
+        if records:
+            self._persist_records(records)
+        if instruments:
+            self._store.upsert_futoi_instruments(instruments, source=FUTOI_SOURCE)
+        return {
+            "requested": 1,
+            "refreshed": 1 if records else 0,
+            "records": len(records),
+            "instruments": len(instruments),
             "failed": 0,
             "skipped": 0,
         }
@@ -279,6 +420,23 @@ class FutoiRefreshService:
             limit=limit,
         )
 
+    def list_instruments(self) -> list[FutoiInstrument]:
+        instruments = self._store.list_futoi_instruments()
+        if instruments:
+            return instruments
+        records = self.load_records(limit=None)
+        return futoi_instruments_from_records(records)
+
+    def _persist_records(self, records: Sequence[FutoiRecord]) -> None:
+        self._store.upsert_futoi_records(records, source=FUTOI_SOURCE)
+        if self._csv_history is not None:
+            self._csv_history.upsert_records(records)
+
+    def _persist_instruments(self, records: Sequence[FutoiRecord]) -> None:
+        instruments = futoi_instruments_from_records(records)
+        if instruments:
+            self._store.upsert_futoi_instruments(instruments, source=FUTOI_SOURCE)
+
     def _retention_cutoff_date(self) -> date:
         return self._now().astimezone(timezone.utc).date() - timedelta(
             days=max(0, self._retention_days)
@@ -305,6 +463,31 @@ def public_futoi_record(record: FutoiRecord) -> dict[str, Any]:
     }
 
 
+def public_futoi_instrument(instrument: FutoiInstrument) -> dict[str, Any]:
+    return {
+        "ticker": instrument.ticker,
+        "last_trade_date": (
+            instrument.last_trade_date.isoformat() if instrument.last_trade_date else None
+        ),
+        "last_trade_time": instrument.last_trade_time,
+        "system_time": instrument.system_time.isoformat() if instrument.system_time else None,
+        "trade_session_date": (
+            instrument.trade_session_date.isoformat()
+            if instrument.trade_session_date
+            else None
+        ),
+        "client_groups": list(instrument.client_groups),
+        "net_position": instrument.net_position,
+        "gross_position": instrument.gross_position,
+        "long_position": instrument.long_position,
+        "short_position": instrument.short_position,
+        "long_count": instrument.long_count,
+        "short_count": instrument.short_count,
+        "row_count": instrument.row_count,
+        "updated_at": instrument.updated_at.isoformat() if instrument.updated_at else None,
+    }
+
+
 def parse_futoi_date(value: str | None) -> date | None:
     if not value:
         return None
@@ -312,6 +495,39 @@ def parse_futoi_date(value: str | None) -> date | None:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise ValueError("date must be YYYY-MM-DD") from exc
+
+
+def futoi_instruments_from_records(records: Sequence[FutoiRecord]) -> list[FutoiInstrument]:
+    grouped: dict[str, list[FutoiRecord]] = {}
+    for record in records:
+        grouped.setdefault(record.ticker.strip().upper(), []).append(_normalized_record(record))
+    return [
+        _futoi_instrument_from_group(ticker, grouped_records)
+        for ticker, grouped_records in sorted(grouped.items())
+        if grouped_records
+    ]
+
+
+def _futoi_instrument_from_group(
+    ticker: str,
+    records: Sequence[FutoiRecord],
+) -> FutoiInstrument:
+    latest = max(records, key=lambda record: (record.trade_date, record.trade_time))
+    return FutoiInstrument(
+        ticker=ticker,
+        last_trade_date=latest.trade_date,
+        last_trade_time=latest.trade_time,
+        system_time=latest.system_time,
+        trade_session_date=latest.trade_session_date,
+        client_groups=tuple(sorted({record.client_group.strip().upper() for record in records})),
+        net_position=sum(record.position for record in records),
+        gross_position=sum(abs(record.position) for record in records),
+        long_position=sum(record.position_long for record in records),
+        short_position=sum(abs(record.position_short) for record in records),
+        long_count=sum(record.position_long_count for record in records),
+        short_count=sum(record.position_short_count for record in records),
+        row_count=len(records),
+    )
 
 
 def _rows_from_moex_table(payload: dict[str, Any]) -> list[dict[str, Any]]:

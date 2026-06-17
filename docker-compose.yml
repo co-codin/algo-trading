@@ -45,6 +45,13 @@ services:
       DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading
       REDIS_URL: redis://redis:6379/0
       RQ_QUEUE: maintenance
+      API_RESPONSE_CACHE_ENABLED: "1"
+      API_CACHE_TTL_SYMBOLS_SECONDS: "30"
+      API_CACHE_TTL_LIVE_SYMBOLS_SECONDS: "300"
+      API_CACHE_TTL_LIVE_CHART_SECONDS: "10"
+      API_CACHE_TTL_MARKET_BREADTH_SECONDS: "300"
+      API_CACHE_TTL_FUTOI_SECONDS: "60"
+      API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS: "300"
       MARKET_BREADTH_DATA_DIR: /app/historical_data/breadth
       MARKET_BREADTH_RETENTION_DAYS: "365"
       HISTORICAL_DATA_DIR: /app/historical_data

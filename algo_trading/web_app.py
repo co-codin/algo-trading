@@ -46,6 +46,7 @@ from algo_trading.futoi import (
     FutoiRefreshService,
     FUTOI_PRUNE_SECONDS,
     parse_futoi_date,
+    public_futoi_instrument,
     public_futoi_record,
 )
 from algo_trading.historical_store import HistoricalDataStore, historical_store_from_env
@@ -59,11 +60,17 @@ from algo_trading.live_symbols import (
 )
 from algo_trading.logging_config import configure_error_logging
 from algo_trading.market_breadth import MarketBreadthService
+from algo_trading.response_cache import (
+    ResponseCache,
+    api_cache_key,
+    response_cache_from_env,
+)
 from algo_trading.ui import (
     WEB_DIST_ROOT,
     is_frontend_route,
     is_vite_asset_route,
     live_chart_payload,
+    quant_strategy_ideas_payload,
     strategies_payload,
     top_symbols_payload,
     _live_client_for_handler,
@@ -76,6 +83,13 @@ HISTORICAL_CSV_REFRESH_SECONDS = 60 * 60
 HISTORICAL_CSV_PRUNE_SECONDS = 24 * 60 * 60
 MOEX_FUTOI_REFRESH_SECONDS = 24 * 60 * 60
 MOEX_FUTOI_PRUNE_SECONDS = FUTOI_PRUNE_SECONDS
+API_CACHE_TTL_SYMBOLS_SECONDS = 30
+API_CACHE_TTL_LIVE_SYMBOLS_SECONDS = 300
+API_CACHE_TTL_LIVE_CHART_SECONDS = 10
+API_CACHE_TTL_QUANT_STRATEGIES_SECONDS = 30
+API_CACHE_TTL_MARKET_BREADTH_SECONDS = 300
+API_CACHE_TTL_FUTOI_SECONDS = 60
+API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS = 300
 
 
 def parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
@@ -110,6 +124,7 @@ def create_app(
     live_symbol_store: LiveSymbolStore | None = None,
     telegram_sender: TelegramSender | None = None,
     job_queue: JobQueue | None = None,
+    response_cache: ResponseCache | None = None,
     seed_admin: bool = True,
     admin_seed_password: str | None = None,
     log_dir: str | Path | None = None,
@@ -134,6 +149,7 @@ def create_app(
     csv_service = historical_csv_service or HistoricalCsvRefreshService()
     futoi = futoi_service or FutoiRefreshService(store=history_store)
     background_queue = job_queue if job_queue is not None else job_queue_from_env()
+    api_cache = response_cache if response_cache is not None else response_cache_from_env()
     expiry_interval = (
         expiry_check_seconds
         if expiry_check_seconds is not None
@@ -169,6 +185,30 @@ def create_app(
         if futoi_prune_seconds is not None
         else float(os.environ.get("MOEX_FUTOI_PRUNE_SECONDS", MOEX_FUTOI_PRUNE_SECONDS))
     )
+    api_cache_ttls = {
+        "symbols": env_int("API_CACHE_TTL_SYMBOLS_SECONDS", API_CACHE_TTL_SYMBOLS_SECONDS),
+        "live-symbols": env_int(
+            "API_CACHE_TTL_LIVE_SYMBOLS_SECONDS",
+            API_CACHE_TTL_LIVE_SYMBOLS_SECONDS,
+        ),
+        "live-chart": env_int(
+            "API_CACHE_TTL_LIVE_CHART_SECONDS",
+            API_CACHE_TTL_LIVE_CHART_SECONDS,
+        ),
+        "quant-strategies": env_int(
+            "API_CACHE_TTL_QUANT_STRATEGIES_SECONDS",
+            API_CACHE_TTL_QUANT_STRATEGIES_SECONDS,
+        ),
+        "market-breadth": env_int(
+            "API_CACHE_TTL_MARKET_BREADTH_SECONDS",
+            API_CACHE_TTL_MARKET_BREADTH_SECONDS,
+        ),
+        "futoi": env_int("API_CACHE_TTL_FUTOI_SECONDS", API_CACHE_TTL_FUTOI_SECONDS),
+        "futoi-instruments": env_int(
+            "API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS",
+            API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS,
+        ),
+    }
     maintenance_interval = min(
         [
             interval
@@ -252,7 +292,11 @@ def create_app(
                         description="Refresh US market breadth CSV files",
                     )
                 last_csv_refresh = now
-            refresh_futoi = getattr(futoi, "refresh_daily", None)
+            refresh_futoi = getattr(futoi, "refresh_all", None) or getattr(
+                futoi,
+                "refresh_daily",
+                None,
+            )
             if (
                 futoi_interval > 0
                 and callable(refresh_futoi)
@@ -262,7 +306,7 @@ def create_app(
                     background_jobs.refresh_futoi,
                     refresh_futoi,
                     job_id_prefix="refresh-futoi",
-                    description="Refresh MOEX FUTOI historical data",
+                    description="Refresh MOEX FUTOI instruments and historical data",
                 )
                 last_futoi = now
             prune_futoi = getattr(futoi, "prune_history", None)
@@ -312,6 +356,54 @@ def create_app(
     async def run_background_call(callback: Callable[[], Any]) -> None:
         with suppress(Exception):
             await asyncio.to_thread(callback)
+
+    def cached_api_payload(
+        request: Request,
+        namespace: str,
+        loader: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        ttl_seconds = api_cache_ttls.get(namespace, 0)
+        if api_cache is None or ttl_seconds <= 0:
+            return loader()
+        key = api_cache_key(namespace, request.query_params.multi_items())
+        try:
+            cached = api_cache.get_json(key)
+        except Exception:
+            cached = None
+        if cached is not None:
+            return cached
+        payload = loader()
+        try:
+            api_cache.set_json(key, payload, ttl_seconds=ttl_seconds)
+        except Exception:
+            pass
+        return payload
+
+    def read_cached_api_payload(
+        request: Request,
+        namespace: str,
+    ) -> tuple[str, dict[str, Any] | None]:
+        ttl_seconds = api_cache_ttls.get(namespace, 0)
+        key = api_cache_key(namespace, request.query_params.multi_items())
+        if api_cache is None or ttl_seconds <= 0:
+            return key, None
+        try:
+            return key, api_cache.get_json(key)
+        except Exception:
+            return key, None
+
+    def write_cached_api_payload(
+        namespace: str,
+        key: str,
+        payload: dict[str, Any],
+    ) -> None:
+        ttl_seconds = api_cache_ttls.get(namespace, 0)
+        if api_cache is None or ttl_seconds <= 0:
+            return
+        try:
+            api_cache.set_json(key, payload, ttl_seconds=ttl_seconds)
+        except Exception:
+            pass
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -502,16 +594,26 @@ def create_app(
 
     @app.get("/api/symbols")
     def get_symbols(
+        request: Request,
         top: int = 10,
         _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
-        return top_symbols_payload(client_factory(), top=top)
+        return cached_api_payload(
+            request,
+            "symbols",
+            lambda: top_symbols_payload(client_factory(), top=top),
+        )
 
     @app.get("/api/live-symbols")
     def get_live_symbols(
+        request: Request,
         _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
-        return live_symbols_payload(symbol_store)
+        return cached_api_payload(
+            request,
+            "live-symbols",
+            lambda: live_symbols_payload(symbol_store),
+        )
 
     @app.get("/api/strategies")
     def get_strategies(_user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:
@@ -524,6 +626,10 @@ def create_app(
         user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         payload = dict(request.query_params)
+        cache_key, cached = read_cached_api_payload(request, "live-chart")
+        if cached is not None:
+            maybe_send_telegram_rsi_alert(user, cached)
+            return cached
         cache_state: dict[str, bool] = {}
         chart_payload = live_chart_payload(
             payload,
@@ -534,8 +640,26 @@ def create_app(
         )
         if cache_state.get("cache_stale"):
             background_tasks.add_task(refresh_live_chart_cache, payload)
+        else:
+            write_cached_api_payload("live-chart", cache_key, chart_payload)
         maybe_send_telegram_rsi_alert(user, chart_payload)
         return chart_payload
+
+    @app.get("/api/quant-strategies")
+    def get_quant_strategies(
+        request: Request,
+        _user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        payload = dict(request.query_params)
+        return cached_api_payload(
+            request,
+            "quant-strategies",
+            lambda: quant_strategy_ideas_payload(
+                payload,
+                _live_client_for_handler(payload, client_factory),
+                historical_store=history_store,
+            ),
+        )
 
     def refresh_live_chart_cache(payload: dict[str, Any]) -> None:
         try:
@@ -549,6 +673,7 @@ def create_app(
 
     @app.get("/api/market-breadth")
     def get_market_breadth(
+        request: Request,
         symbols: str = "",
         _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
@@ -557,10 +682,15 @@ def create_app(
             if symbols
             else None
         )
-        return breadth_service.payload(requested_symbols)
+        return cached_api_payload(
+            request,
+            "market-breadth",
+            lambda: breadth_service.payload(requested_symbols),
+        )
 
     @app.get("/api/futoi")
     def get_futoi(
+        request: Request,
         date: str = "",
         ticker: str = "",
         limit: int = 500,
@@ -569,12 +699,38 @@ def create_app(
         if limit < 0:
             raise ValueError("limit cannot be negative")
         selected_date = parse_futoi_date(date)
-        records = futoi.load_records(
-            trading_date=selected_date,
-            ticker=ticker.strip().upper() or None,
-            limit=min(limit, 5000) if limit else None,
+        return cached_api_payload(
+            request,
+            "futoi",
+            lambda: {
+                "ok": True,
+                "records": [
+                    public_futoi_record(record)
+                    for record in futoi.load_records(
+                        trading_date=selected_date,
+                        ticker=ticker.strip().upper() or None,
+                        limit=min(limit, 5000) if limit else None,
+                    )
+                ],
+            },
         )
-        return {"ok": True, "records": [public_futoi_record(record) for record in records]}
+
+    @app.get("/api/futoi/instruments")
+    def get_futoi_instruments(
+        request: Request,
+        _user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        return cached_api_payload(
+            request,
+            "futoi-instruments",
+            lambda: {
+                "ok": True,
+                "instruments": [
+                    public_futoi_instrument(instrument)
+                    for instrument in futoi.list_instruments()
+                ],
+            },
+        )
 
     @app.post("/api/feedback")
     def submit_feedback(
@@ -736,6 +892,13 @@ def alert_store_from_env() -> AlertStore:
     if database_url:
         return PostgresAlertStore(database_url)
     return InMemoryAlertStore()
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def admin_email() -> str:

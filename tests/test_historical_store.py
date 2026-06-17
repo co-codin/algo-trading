@@ -1,9 +1,11 @@
 import unittest
 from datetime import date, datetime, timedelta, timezone
+from inspect import getsource
 
 from algo_trading.historical_store import (
     CandleSeries,
     InMemoryHistoricalDataStore,
+    PostgresHistoricalDataStore,
 )
 from algo_trading.futoi import FutoiRecord
 from algo_trading.market_breadth import MarketBreadthBar
@@ -11,6 +13,23 @@ from algo_trading.models import Candle
 
 
 class HistoricalStoreTests(unittest.TestCase):
+    def test_postgres_schema_adds_indexes_for_global_prune_and_recent_futoi_reads(self):
+        schema_source = getsource(PostgresHistoricalDataStore.ensure_schema)
+
+        self.assertIn(
+            "CREATE INDEX IF NOT EXISTS market_candles_open_time_idx",
+            schema_source,
+        )
+        self.assertIn("ON market_candles (open_time)", schema_source)
+        self.assertIn(
+            "CREATE INDEX IF NOT EXISTS moex_futoi_records_recent_idx",
+            schema_source,
+        )
+        self.assertIn(
+            "ON moex_futoi_records (trade_date DESC, trade_time DESC, ticker, client_group)",
+            schema_source,
+        )
+
     def test_memory_store_upserts_dedupes_and_loads_candles_by_series(self):
         store = InMemoryHistoricalDataStore()
         older = _candle(1000, 10.0)

@@ -18,6 +18,7 @@ from algo_trading.data import (
     YahooFuturesMarketDataClient,
 )
 from algo_trading.historical_store import HistoricalDataStore
+from algo_trading.market_breadth import default_symbols as default_breadth_symbols
 from algo_trading.models import (
     AllowedSide,
     Candle,
@@ -31,6 +32,10 @@ from algo_trading.strategy import (
     entry_signal_for_index,
     get_strategy,
     list_strategy_names,
+)
+from algo_trading.quant_strategies import (
+    build_quant_strategy_ideas,
+    public_quant_strategy_idea,
 )
 from algo_trading.symbols import ranked_usdt_symbols
 
@@ -46,6 +51,7 @@ RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 RUSSIAN_INDICES_MARKET = "russian_indices"
 RUSSIAN_FUTURES_MARKET = "russian_futures"
 RUSSIAN_INDICES_FUTURES_MARKET = "russian_indices_futures"
+DEFAULT_QUANT_BREADTH_SYMBOL_LIMIT = 8
 _DEFAULT_LIVE_CACHE_STALENESS_MS = 60_000
 _LIVE_CACHE_STALENESS_MULTIPLIER = 2
 FRONTEND_ROUTES = frozenset(
@@ -56,6 +62,8 @@ FRONTEND_ROUTES = frozenset(
         "/live",
         "/chart",
         "/breadth",
+        "/quant",
+        "/futoi",
         "/feedback",
         "/profile",
         "/admin",
@@ -259,6 +267,61 @@ def _current_millis() -> int:
     return int(time.time() * 1000)
 
 
+def _candle_from_payload(payload: dict[str, Any]) -> Candle:
+    return Candle(
+        open_time=int(payload["time"]),
+        open=float(payload["open"]),
+        high=float(payload["high"]),
+        low=float(payload["low"]),
+        close=float(payload["close"]),
+        volume=float(payload["volume"]),
+    )
+
+
+def _load_quant_breadth_bars(
+    historical_store: HistoricalDataStore | None,
+) -> dict[str, list[Any]]:
+    if historical_store is None:
+        return {}
+    bars_by_symbol: dict[str, list[Any]] = {}
+    for symbol in default_breadth_symbols()[:DEFAULT_QUANT_BREADTH_SYMBOL_LIMIT]:
+        try:
+            bars = historical_store.load_breadth_bars(symbol)
+        except Exception:
+            bars = []
+        if bars:
+            bars_by_symbol[symbol] = bars
+    return bars_by_symbol
+
+
+def _load_quant_futoi_records(
+    historical_store: HistoricalDataStore | None,
+    market: str,
+    symbol: str,
+) -> list[Any]:
+    if historical_store is None or market not in (
+        RUSSIAN_BLUECHIPS_MARKET,
+        RUSSIAN_INDICES_FUTURES_MARKET,
+    ):
+        return []
+    for ticker in _futoi_ticker_candidates(symbol):
+        try:
+            records = historical_store.load_futoi_records(ticker=ticker, limit=200)
+        except Exception:
+            records = []
+        if records:
+            return records
+    return []
+
+
+def _futoi_ticker_candidates(symbol: str) -> list[str]:
+    normalized = symbol.strip().upper()
+    candidates = [normalized]
+    if normalized and not normalized.endswith("F"):
+        candidates.append(f"{normalized}F")
+    return candidates
+
+
 def _interval_millis(interval: str) -> int:
     value = str(interval).strip()
     if not value:
@@ -314,6 +377,38 @@ def strategies_payload() -> dict[str, Any]:
             for name in list_strategy_names()
         ],
         "presets": [preset.value for preset in StrategyPreset],
+    }
+
+
+def quant_strategy_ideas_payload(
+    payload: dict[str, Any],
+    client: MarketDataClient | None = None,
+    historical_store: HistoricalDataStore | None = None,
+) -> dict[str, Any]:
+    chart_payload = live_chart_payload(
+        payload,
+        client,
+        historical_store=historical_store,
+        allow_stale_cache=True,
+    )
+    market = str(chart_payload["market"])
+    symbol = str(chart_payload["symbol"])
+    ideas = build_quant_strategy_ideas(
+        [_candle_from_payload(item) for item in chart_payload["candles"]],
+        market=market,
+        symbol=symbol,
+        breadth_bars_by_symbol=_load_quant_breadth_bars(historical_store),
+        futoi_records=_load_quant_futoi_records(historical_store, market, symbol),
+    )
+    return {
+        "ok": True,
+        "market": market,
+        "symbol": symbol,
+        "interval": str(chart_payload["interval"]),
+        "candles": chart_payload["candles"],
+        "signals": chart_payload["signals"],
+        "indicators": chart_payload["indicators"],
+        "ideas": [public_quant_strategy_idea(idea) for idea in ideas],
     }
 
 
