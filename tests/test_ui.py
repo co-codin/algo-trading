@@ -548,7 +548,7 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('export type Locale = "en" | "ru";', i18n_source)
+        self.assertIn('export type Locale = "en" | "ru" | "zh";', i18n_source)
         self.assertIn("SUPPORTED_LOCALES", i18n_source)
         self.assertIn('flag: "🇺🇸"', i18n_source)
         self.assertIn('flag: "🇷🇺"', i18n_source)
@@ -562,6 +562,32 @@ class UiTests(unittest.TestCase):
         self.assertIn("localStorage.setItem(LOCALE_STORAGE_KEY", app_source)
         self.assertIn('class="language-switcher"', app_source)
         self.assertIn("SUPPORTED_LOCALES", app_source)
+
+    def test_frontend_defines_chinese_i18n_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('export type Locale = "en" | "ru" | "zh";', i18n_source)
+        self.assertIn('{ code: "zh", label: "ZH", flag: "🇨🇳" }', i18n_source)
+        self.assertIn("zh:", i18n_source)
+        self.assertIn('"auth.title": "交易工作区"', i18n_source)
+        self.assertIn('"tabs.breadth": "美国市场宽度"', i18n_source)
+        self.assertIn('"actions.refreshChart": "刷新图表"', i18n_source)
+        self.assertIn('"labels.strategySearch": "搜索策略"', i18n_source)
+        self.assertIn('"empty.noCandles": "未返回K线"', i18n_source)
+        self.assertIn('"chart.longLegend": "做多信号"', i18n_source)
+        self.assertIn('"ema-rsi": "EMA + RSI"', i18n_source)
+        self.assertIn('macd: "MACD交叉"', i18n_source)
+        self.assertIn('"combined-signals": "组合信号"', i18n_source)
+        self.assertIn('"combined-signals": "可配置的策略确认组合"', i18n_source)
+        self.assertIn('return value === "ru" || value === "zh" ? value : "en";', i18n_source)
+        self.assertIn("SUPPORTED_LOCALES", app_source)
+        self.assertIn("setLocale(item.code)", app_source)
 
     def test_frontend_exposes_auth_shell_and_session_calls(self):
         root = Path(__file__).resolve().parents[1]
@@ -653,6 +679,45 @@ class UiTests(unittest.TestCase):
         self.assertIn('type="date"', app_source)
         self.assertIn('@click="updateUserExpiry(user)"', app_source)
         self.assertIn('"actions.saveExpiration"', i18n_source)
+
+    def test_frontend_exposes_feedback_form_and_admin_status_controls(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("export type FeedbackStatus", types_source)
+        self.assertIn("export type FeedbackItem", types_source)
+        self.assertIn("export type FeedbackPayload", types_source)
+        self.assertIn("export type AdminFeedbackPayload", types_source)
+        self.assertIn('const feedbackForm = reactive({', app_source)
+        self.assertIn('const feedbackStatus = ref(t("status.ready"));', app_source)
+        self.assertIn('const adminFeedback = ref<FeedbackItem[]>([]);', app_source)
+        self.assertIn("const feedbackStatusOptions = computed", app_source)
+        self.assertIn("async function submitFeedback()", app_source)
+        self.assertIn('requestJson<FeedbackPayload>("/api/feedback"', app_source)
+        self.assertIn("async function loadAdminFeedback()", app_source)
+        self.assertIn('requestJson<AdminFeedbackPayload>("/api/admin/feedback")', app_source)
+        self.assertIn("async function updateFeedbackStatus(feedback: FeedbackItem, status: FeedbackStatus)", app_source)
+        self.assertIn('`/api/admin/feedback/${feedback.id}/status`', app_source)
+        self.assertIn('v-if="authUser.is_active"', app_source)
+        self.assertIn('@submit.prevent="submitFeedback"', app_source)
+        self.assertIn('v-model.trim="feedbackForm.title"', app_source)
+        self.assertIn('v-model.trim="feedbackForm.description"', app_source)
+        self.assertIn('v-for="feedback in adminFeedback"', app_source)
+        self.assertIn('@change="updateFeedbackStatus(feedback, feedback.status)"', app_source)
+        self.assertIn('"pages.feedback": "Report a bug / feedback"', i18n_source)
+        self.assertIn('"pages.feedback": "Сообщить об ошибке / отзыв"', i18n_source)
+        self.assertIn('"pages.feedback": "报告问题 / 反馈"', i18n_source)
+        self.assertIn('"feedback.status.open": "Open"', i18n_source)
+        self.assertIn('"feedback.status.in_progress": "In progress"', i18n_source)
+        self.assertIn('"feedback.status.resolved": "Resolved"', i18n_source)
 
     def test_chart_accepts_translated_labels_from_parent(self):
         root = Path(__file__).resolve().parents[1]
@@ -852,6 +917,28 @@ class UiTests(unittest.TestCase):
             self.assertIn(f'value: "{symbol}"', config_source)
         self.assertIn('"options.mag7Stocks": "MAG 7 Stocks"', i18n_source)
         self.assertIn('"options.mag7Stocks": "Акции MAG 7"', i18n_source)
+
+    def test_live_page_exposes_hong_kong_stocks_market(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("export const hongKongStockSymbolOptions = [", config_source)
+        self.assertIn('value: "hong_kong_stocks"', app_source)
+        self.assertIn('t("options.hongKongStocks")', app_source)
+        self.assertIn("hong_kong_stocks: hongKongStockSymbolOptions", app_source)
+        for symbol in ("0700.HK", "9988.HK", "9888.HK", "3690.HK", "9618.HK"):
+            self.assertIn(f'value: "{symbol}"', config_source)
+        self.assertIn('"options.hongKongStocks": "Hong Kong Stocks"', i18n_source)
+        self.assertIn('"options.hongKongStocks": "Акции Гонконга"', i18n_source)
+        self.assertIn('"options.hongKongStocks": "港股"', i18n_source)
 
     def test_live_page_filters_symbol_picker_by_search_text_without_auto_select(self):
         root = Path(__file__).resolve().parents[1]
@@ -1442,6 +1529,31 @@ class UiTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "Yahoo Finance delayed US equities")
         self.assertEqual(payload["symbol"], "NVDA")
 
+    def test_live_chart_payload_accepts_hong_kong_stock_market(self):
+        client = FakeClient()
+        client.candles = [candle(index, price) for index, price in enumerate([100, 101, 102, 103, 104])]
+
+        payload = live_chart_payload(
+            {
+                "market": "hong_kong_stocks",
+                "symbol": "9988.hk",
+                "interval": "5m",
+                "limit": 5,
+                "strategy": "ema-rsi",
+                "fast_ema": 1,
+                "slow_ema": 3,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(client.kline_symbols, ["9988.HK"])
+        self.assertEqual(payload["market"], "hong_kong_stocks")
+        self.assertEqual(payload["data_source"], "Yahoo Finance delayed Hong Kong stocks")
+        self.assertEqual(payload["symbol"], "9988.HK")
+
     def test_market_data_client_from_payload_selects_futures_provider(self):
         self.assertIsInstance(
             market_data_client_from_payload({"market": "cme_futures"}),
@@ -1453,6 +1565,10 @@ class UiTests(unittest.TestCase):
         )
         self.assertIsInstance(
             market_data_client_from_payload({"market": "mag7_stocks"}),
+            YahooFuturesMarketDataClient,
+        )
+        self.assertIsInstance(
+            market_data_client_from_payload({"market": "hong_kong_stocks"}),
             YahooFuturesMarketDataClient,
         )
         self.assertIsInstance(

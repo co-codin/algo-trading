@@ -28,6 +28,29 @@ export const mag7StockSymbolOptions = [
   { value: "TSLA", label: "TSLA · Tesla" },
 ] satisfies SelectOption[];
 
+export const hongKongStockSymbolOptions = [
+  { value: "0700.HK", label: "0700.HK · Tencent" },
+  { value: "9988.HK", label: "9988.HK · Alibaba" },
+  { value: "9888.HK", label: "9888.HK · Baidu" },
+  { value: "3690.HK", label: "3690.HK · Meituan" },
+  { value: "9618.HK", label: "9618.HK · JD.com" },
+  { value: "9999.HK", label: "9999.HK · NetEase" },
+  { value: "1810.HK", label: "1810.HK · Xiaomi" },
+  { value: "1024.HK", label: "1024.HK · Kuaishou" },
+  { value: "0968.HK", label: "0968.HK · Xpeng" },
+  { value: "2015.HK", label: "2015.HK · Li Auto" },
+  { value: "1211.HK", label: "1211.HK · BYD" },
+  { value: "2318.HK", label: "2318.HK · Ping An" },
+  { value: "0939.HK", label: "0939.HK · China Construction Bank" },
+  { value: "1398.HK", label: "1398.HK · ICBC" },
+  { value: "0388.HK", label: "0388.HK · HKEX" },
+  { value: "1299.HK", label: "1299.HK · AIA" },
+  { value: "0005.HK", label: "0005.HK · HSBC" },
+  { value: "0941.HK", label: "0941.HK · China Mobile" },
+  { value: "0883.HK", label: "0883.HK · CNOOC" },
+  { value: "2628.HK", label: "2628.HK · China Life" },
+] satisfies SelectOption[];
+
 export const moexBluechipSymbolOptions = [
   { value: "AFKS", label: "AFKS" },
   { value: "AFLT", label: "AFLT" },

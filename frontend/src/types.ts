@@ -27,6 +27,29 @@ export type AdminUsersPayload = {
   users: AuthUser[];
 };
 
+export type FeedbackStatus = "open" | "in_progress" | "resolved";
+
+export type FeedbackItem = {
+  id: number;
+  user_id: number;
+  username: string;
+  title: string;
+  description: string;
+  status: FeedbackStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FeedbackPayload = {
+  ok: true;
+  feedback: FeedbackItem;
+};
+
+export type AdminFeedbackPayload = {
+  ok: true;
+  feedback: FeedbackItem[];
+};
+
 export type StrategyInfo = {
   name: string;
   description: string;

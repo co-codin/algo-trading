@@ -33,6 +33,7 @@ _CRYPTO_SPOT_MARKET = "crypto_spot"
 _CME_FUTURES_MARKET = "cme_futures"
 _COMMODITIES_MARKET = "commodities"
 _MAG7_STOCKS_MARKET = "mag7_stocks"
+_HONG_KONG_STOCKS_MARKET = "hong_kong_stocks"
 _RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 _RUSSIAN_INDICES_MARKET = "russian_indices"
 _RUSSIAN_FUTURES_MARKET = "russian_futures"
@@ -148,6 +149,12 @@ def _market_from_name(value: str) -> str:
         "magnificent7": _MAG7_STOCKS_MARKET,
         "magnificent_7": _MAG7_STOCKS_MARKET,
         "magnificent_seven": _MAG7_STOCKS_MARKET,
+        "hk": _HONG_KONG_STOCKS_MARKET,
+        "hk_stocks": _HONG_KONG_STOCKS_MARKET,
+        "hongkong": _HONG_KONG_STOCKS_MARKET,
+        "hong_kong": _HONG_KONG_STOCKS_MARKET,
+        "hong_kong_stocks": _HONG_KONG_STOCKS_MARKET,
+        "hong-kong-stocks": _HONG_KONG_STOCKS_MARKET,
         "moex": _RUSSIAN_BLUECHIPS_MARKET,
         "russian": _RUSSIAN_BLUECHIPS_MARKET,
         "russian_bluechips": _RUSSIAN_BLUECHIPS_MARKET,
@@ -169,7 +176,12 @@ def _market_from_name(value: str) -> str:
 def _market_client_for_name(market: str) -> HistoricalMarketDataClient:
     if market == _CRYPTO_SPOT_MARKET:
         return BinanceMarketDataClient()
-    if market in (_CME_FUTURES_MARKET, _COMMODITIES_MARKET, _MAG7_STOCKS_MARKET):
+    if market in (
+        _CME_FUTURES_MARKET,
+        _COMMODITIES_MARKET,
+        _MAG7_STOCKS_MARKET,
+        _HONG_KONG_STOCKS_MARKET,
+    ):
         return YahooFuturesMarketDataClient()
     if market in {
         _RUSSIAN_BLUECHIPS_MARKET,
@@ -388,7 +400,7 @@ def _add_candles_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     parser.add_argument(
         "--market",
         default=_CRYPTO_SPOT_MARKET,
-        help="market provider: crypto_spot/binance, cme_futures/yahoo, commodities, mag7_stocks, russian_bluechips/moex, russian_indices, or russian_futures",
+        help="market provider: crypto_spot/binance, cme_futures/yahoo, commodities, mag7_stocks, hong_kong_stocks, russian_bluechips/moex, russian_indices, or russian_futures",
     )
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--interval", default="1h")

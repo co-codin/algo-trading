@@ -148,6 +148,45 @@ class DataTests(unittest.TestCase):
         self.assertEqual(candles[-1].close, 472.0)
         self.assertIn("/v8/finance/chart/NVDA?", requests[0].full_url)
 
+    def test_yahoo_client_accepts_hong_kong_stock_tickers(self):
+        requests = []
+
+        def opener(request, timeout):
+            requests.append(request)
+            return FakeResponse(
+                {
+                    "chart": {
+                        "result": [
+                            {
+                                "timestamp": [1_700_000_000, 1_700_000_300],
+                                "indicators": {
+                                    "quote": [
+                                        {
+                                            "open": [106.0, 107.0],
+                                            "high": [108.0, 109.0],
+                                            "low": [105.0, 106.0],
+                                            "close": [107.0, 108.0],
+                                            "volume": [1000, 1200],
+                                        }
+                                    ]
+                                },
+                            }
+                        ],
+                        "error": None,
+                    }
+                }
+            )
+
+        client = YahooFuturesMarketDataClient(opener=opener)
+
+        alibaba_candles = client.get_klines("alibaba", "5m", 2)
+        baidu_candles = client.get_klines("9888.hk", "5m", 2)
+
+        self.assertEqual(alibaba_candles[-1].close, 108.0)
+        self.assertEqual(baidu_candles[-1].close, 108.0)
+        self.assertIn("/v8/finance/chart/9988.HK?", requests[0].full_url)
+        self.assertIn("/v8/finance/chart/9888.HK?", requests[1].full_url)
+
     def test_yahoo_futures_client_maps_hourly_interval_to_yahoo_interval(self):
         requests = []
 

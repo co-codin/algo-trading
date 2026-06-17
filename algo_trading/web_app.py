@@ -25,6 +25,12 @@ from algo_trading.auth import (
 )
 from algo_trading.data import BinanceMarketDataClient, MarketDataClient
 from algo_trading.env import load_env_file
+from algo_trading.feedback import (
+    FeedbackStore,
+    InMemoryFeedbackStore,
+    PostgresFeedbackStore,
+    public_feedback,
+)
 from algo_trading.historical_store import HistoricalDataStore, historical_store_from_env
 from algo_trading.historical_data import HistoricalCsvRefreshService
 from algo_trading import jobs as background_jobs
@@ -72,6 +78,7 @@ def create_app(
     historical_csv_refresh_seconds: float | None = None,
     historical_csv_prune_seconds: float | None = None,
     historical_store: HistoricalDataStore | None = None,
+    feedback_store: FeedbackStore | None = None,
     job_queue: JobQueue | None = None,
     seed_admin: bool = True,
     admin_seed_password: str | None = None,
@@ -83,6 +90,8 @@ def create_app(
     store.ensure_schema()
     if seed_admin:
         store.seed_admin_user(admin_email(), admin_seed_password or admin_password())
+    feedback = feedback_store or feedback_store_from_env()
+    feedback.ensure_schema()
     history_store = historical_store or historical_store_from_env()
     history_store.ensure_schema()
     breadth_service = market_breadth_service or MarketBreadthService(store=history_store)
@@ -406,6 +415,42 @@ def create_app(
         )
         return breadth_service.payload(requested_symbols)
 
+    @app.post("/api/feedback")
+    def submit_feedback(
+        payload: dict[str, Any] | None = Body(default=None),
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        feedback_payload = payload or {}
+        created = feedback.create_feedback(
+            user_id=user.id,
+            username=user.username,
+            title=str(feedback_payload.get("title") or ""),
+            description=optional_text(feedback_payload.get("description")),
+        )
+        return {"ok": True, "feedback": public_feedback(created)}
+
+    @app.get("/api/admin/feedback")
+    def get_admin_feedback(
+        _admin: AuthUser = Depends(require_admin_user),
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "feedback": [public_feedback(item) for item in feedback.list_feedback()],
+        }
+
+    @app.patch("/api/admin/feedback/{feedback_id}/status")
+    def update_admin_feedback_status(
+        feedback_id: int,
+        payload: dict[str, Any] | None = Body(default=None),
+        _admin: AuthUser = Depends(require_admin_user),
+    ) -> dict[str, Any]:
+        status_payload = payload or {}
+        updated = feedback.update_feedback_status(
+            feedback_id,
+            str(status_payload.get("status") or ""),
+        )
+        return {"ok": True, "feedback": public_feedback(updated)}
+
     @app.api_route(
         "/api/{_full_path:path}",
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -441,6 +486,13 @@ def auth_store_from_env() -> AuthStore:
     if database_url:
         return PostgresAuthStore(database_url)
     return InMemoryAuthStore()
+
+
+def feedback_store_from_env() -> FeedbackStore:
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if database_url:
+        return PostgresFeedbackStore(database_url)
+    return InMemoryFeedbackStore()
 
 
 def admin_email() -> str:

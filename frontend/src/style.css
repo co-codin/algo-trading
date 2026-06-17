@@ -38,7 +38,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -336,7 +337,8 @@ label span {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 34px;
   border: 1px solid var(--line);
@@ -346,8 +348,16 @@ select {
   padding: 0 9px;
 }
 
+textarea {
+  min-height: 86px;
+  resize: vertical;
+  padding-top: 8px;
+  line-height: 1.35;
+}
+
 input:focus,
 select:focus,
+textarea:focus,
 button:focus {
   outline: 2px solid rgba(41, 98, 255, 0.45);
   outline-offset: 1px;
@@ -418,6 +428,53 @@ button:focus {
   display: grid;
   grid-template-columns: minmax(240px, 420px);
   gap: 10px;
+}
+
+.feedback-form {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  padding: 12px;
+}
+
+.feedback-form h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.feedback-form p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.feedback-field-grid {
+  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr) minmax(220px, 0.7fr);
+}
+
+.admin-feedback-section {
+  display: grid;
+  gap: 10px;
+  min-width: 860px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.compact-heading {
+  margin-bottom: 0;
+}
+
+.compact-heading h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.feedback-status-label {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .admin-expiry-field {
@@ -1217,6 +1274,10 @@ th {
 
   .profile-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .feedback-field-grid {
+    grid-template-columns: 1fr;
   }
 
   .topbar {

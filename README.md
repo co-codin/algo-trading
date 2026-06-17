@@ -145,6 +145,13 @@ python3 -m algo_trading.cli candles --market cme_futures --symbol SP500 --interv
 python3 -m algo_trading.cli candles --market cme_futures --symbol NASDAQ --interval 1d --days 365 --limit 1000 --output historical_data/NASDAQ-1d-365d.csv
 ```
 
+Export delayed Yahoo Finance Hong Kong stock candles:
+
+```bash
+python3 -m algo_trading.cli candles --market hong_kong_stocks --symbol 9988.HK --interval 1d --days 365 --limit 1000 --output historical_data/hong_kong_stocks/9988.HK-1d-365d.csv
+python3 -m algo_trading.cli candles --market hong_kong_stocks --symbol 9888.HK --interval 1d --days 365 --limit 1000 --output historical_data/hong_kong_stocks/9888.HK-1d-365d.csv
+```
+
 Export the last 365 days of MOEX Russian stock candles. With `MOEX_API_KEY` set, this uses MOEX APIM:
 
 ```bash
