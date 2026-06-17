@@ -237,6 +237,7 @@ const lastAlertSignature = ref("");
 const showSignals = ref(true);
 const liveDataUpdatedAt = ref<string | null>(null);
 let liveTimer = 0;
+let liveChartRequestId = 0;
 let isApplyingLiveSettingsFromUrl = false;
 
 const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
@@ -1224,6 +1225,7 @@ async function loadStrategies() {
 }
 
 async function loadLiveChart() {
+  const requestId = ++liveChartRequestId;
   if (!canUseFeatures.value) {
     setLiveStatus(t("auth.inactive"), "error");
     return;
@@ -1237,10 +1239,17 @@ async function loadLiveChart() {
       limit: liveLimit.value,
       strategy: liveStrategyRequest.value,
     });
-    livePayload.value = await requestJson<LiveChartPayload>(`/api/live-chart?${query}`);
+    const chartPayload = await requestJson<LiveChartPayload>(`/api/live-chart?${query}`);
+    if (requestId !== liveChartRequestId) {
+      return;
+    }
+    livePayload.value = chartPayload;
     liveDataUpdatedAt.value = new Date().toISOString();
     setLiveStatus(`${t("status.updated")} ${new Date().toLocaleTimeString()}`);
   } catch (error) {
+    if (requestId !== liveChartRequestId) {
+      return;
+    }
     livePayload.value = null;
     liveDataUpdatedAt.value = null;
     setLiveStatus(errorMessage(error), "error");
@@ -1644,12 +1653,9 @@ function errorMessage(error: unknown): string {
                 {{ t("empty.noMatchingSymbols") }}
               </div>
             </div>
-            <select v-model="liveSymbol">
-              <option v-if="!filteredLiveSymbolOptions.length" disabled value="">
-                {{ t("empty.noMatchingSymbols") }}
-              </option>
+            <select v-model="liveSymbol" @change="liveSymbolSearch = ''">
               <option
-                v-for="option in filteredLiveSymbolOptions"
+                v-for="option in activeLiveSymbolOptions"
                 :key="option.value"
                 :value="option.value"
               >

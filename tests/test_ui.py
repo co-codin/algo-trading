@@ -371,6 +371,40 @@ class UiTests(unittest.TestCase):
         self.assertIn("refreshLiveChart();", source)
         self.assertIn("market: liveMarket.value", source)
 
+    def test_live_symbol_switch_uses_full_list_and_ignores_stale_chart_responses(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
+        ).read_text(encoding="utf-8")
+        symbol_picker_source = source.split('<label class="symbol-picker">', 1)[1].split(
+            "</label>",
+            1,
+        )[0]
+        select_source = symbol_picker_source.split('<select v-model="liveSymbol"', 1)[1].split(
+            "</select>",
+            1,
+        )[0]
+
+        self.assertIn('v-for="option in filteredLiveSymbolOptions"', symbol_picker_source)
+        self.assertIn('@change="liveSymbolSearch = \'\'"', symbol_picker_source)
+        self.assertIn('v-for="option in activeLiveSymbolOptions"', select_source)
+        self.assertNotIn('v-for="option in filteredLiveSymbolOptions"', select_source)
+        self.assertIn("let liveChartRequestId = 0;", source)
+        self.assertIn("const requestId = ++liveChartRequestId;", source)
+        self.assertIn(
+            "if (requestId !== liveChartRequestId) {\n"
+            "      return;\n"
+            "    }\n"
+            "    livePayload.value = chartPayload;",
+            source,
+        )
+        self.assertIn(
+            "if (requestId !== liveChartRequestId) {\n"
+            "      return;\n"
+            "    }\n"
+            "    livePayload.value = null;",
+            source,
+        )
+
     def test_live_page_does_not_render_chart_loader(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
