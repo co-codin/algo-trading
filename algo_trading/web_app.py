@@ -42,6 +42,12 @@ from algo_trading.feedback import (
     PostgresFeedbackStore,
     public_feedback,
 )
+from algo_trading.futoi import (
+    FutoiRefreshService,
+    FUTOI_PRUNE_SECONDS,
+    parse_futoi_date,
+    public_futoi_record,
+)
 from algo_trading.historical_store import HistoricalDataStore, historical_store_from_env
 from algo_trading.historical_data import HistoricalCsvRefreshService
 from algo_trading import jobs as background_jobs
@@ -63,6 +69,8 @@ ADMIN_PASSWORD = "Vladimir960904"
 EXPIRY_CHECK_SECONDS = 60 * 60
 HISTORICAL_CSV_REFRESH_SECONDS = 60 * 60
 HISTORICAL_CSV_PRUNE_SECONDS = 24 * 60 * 60
+MOEX_FUTOI_REFRESH_SECONDS = 24 * 60 * 60
+MOEX_FUTOI_PRUNE_SECONDS = FUTOI_PRUNE_SECONDS
 
 
 def parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
@@ -85,9 +93,12 @@ def create_app(
     auth_store: AuthStore | None = None,
     market_breadth_service: Any | None = None,
     historical_csv_service: Any | None = None,
+    futoi_service: Any | None = None,
     expiry_check_seconds: float | None = None,
     historical_csv_refresh_seconds: float | None = None,
     historical_csv_prune_seconds: float | None = None,
+    futoi_refresh_seconds: float | None = None,
+    futoi_prune_seconds: float | None = None,
     historical_store: HistoricalDataStore | None = None,
     feedback_store: FeedbackStore | None = None,
     alert_store: AlertStore | None = None,
@@ -112,6 +123,7 @@ def create_app(
     history_store.ensure_schema()
     breadth_service = market_breadth_service or MarketBreadthService(store=history_store)
     csv_service = historical_csv_service or HistoricalCsvRefreshService()
+    futoi = futoi_service or FutoiRefreshService(store=history_store)
     background_queue = job_queue if job_queue is not None else job_queue_from_env()
     expiry_interval = (
         expiry_check_seconds
@@ -137,6 +149,24 @@ def create_app(
                 HISTORICAL_CSV_PRUNE_SECONDS,
             )
         )
+    )
+    futoi_interval = (
+        futoi_refresh_seconds
+        if futoi_refresh_seconds is not None
+        else float(os.environ.get("MOEX_FUTOI_REFRESH_SECONDS", MOEX_FUTOI_REFRESH_SECONDS))
+    )
+    futoi_prune_interval = (
+        futoi_prune_seconds
+        if futoi_prune_seconds is not None
+        else float(os.environ.get("MOEX_FUTOI_PRUNE_SECONDS", MOEX_FUTOI_PRUNE_SECONDS))
+    )
+    maintenance_interval = min(
+        [
+            interval
+            for interval in (csv_refresh_interval, futoi_interval, futoi_prune_interval)
+            if interval > 0
+        ],
+        default=0,
     )
     expiry_task: asyncio.Task[None] | None = None
     historical_csv_task: asyncio.Task[None] | None = None
@@ -180,37 +210,65 @@ def create_app(
             await asyncio.sleep(max(1.0, expiry_interval))
 
     async def maintain_historical_csvs_loop() -> None:
+        last_csv_refresh = 0.0
         last_prune = 0.0
+        last_futoi = 0.0
+        last_futoi_prune = 0.0
         while True:
-            await asyncio.sleep(max(0.01, csv_refresh_interval))
-            await enqueue_or_run_background_job(
-                background_jobs.refresh_historical_csvs,
-                csv_service.refresh_all,
-                job_id_prefix="refresh-historical-csvs",
-                description="Refresh live-page historical candle CSV files",
-            )
-            refresh_breadth = getattr(breadth_service, "refresh_default_symbols", None)
-            if callable(refresh_breadth):
-                await enqueue_or_run_background_job(
-                    background_jobs.refresh_market_breadth,
-                    refresh_breadth,
-                    job_id_prefix="refresh-market-breadth",
-                    description="Refresh US market breadth CSV files",
-                )
-            if csv_prune_interval <= 0:
-                continue
+            await asyncio.sleep(max(0.01, maintenance_interval))
             now = time.monotonic()
-            if now - last_prune < csv_prune_interval:
-                continue
-            prune_all = getattr(csv_service, "prune_all", None)
-            if callable(prune_all):
+            if csv_refresh_interval > 0 and now - last_csv_refresh >= csv_refresh_interval:
                 await enqueue_or_run_background_job(
-                    background_jobs.prune_historical_csvs,
-                    prune_all,
-                    job_id_prefix="prune-historical-csvs",
-                    description="Prune expired historical candle CSV rows",
+                    background_jobs.refresh_historical_csvs,
+                    csv_service.refresh_all,
+                    job_id_prefix="refresh-historical-csvs",
+                    description="Refresh live-page historical candle CSV files",
                 )
-            last_prune = now
+                refresh_breadth = getattr(breadth_service, "refresh_default_symbols", None)
+                if callable(refresh_breadth):
+                    await enqueue_or_run_background_job(
+                        background_jobs.refresh_market_breadth,
+                        refresh_breadth,
+                        job_id_prefix="refresh-market-breadth",
+                        description="Refresh US market breadth CSV files",
+                    )
+                last_csv_refresh = now
+            refresh_futoi = getattr(futoi, "refresh_daily", None)
+            if (
+                futoi_interval > 0
+                and callable(refresh_futoi)
+                and now - last_futoi >= futoi_interval
+            ):
+                await enqueue_or_run_background_job(
+                    background_jobs.refresh_futoi,
+                    refresh_futoi,
+                    job_id_prefix="refresh-futoi",
+                    description="Refresh MOEX FUTOI historical data",
+                )
+                last_futoi = now
+            prune_futoi = getattr(futoi, "prune_history", None)
+            if (
+                futoi_prune_interval > 0
+                and callable(prune_futoi)
+                and now - last_futoi_prune >= futoi_prune_interval
+            ):
+                await enqueue_or_run_background_job(
+                    background_jobs.prune_futoi,
+                    prune_futoi,
+                    job_id_prefix="prune-futoi",
+                    description="Prune MOEX FUTOI historical data older than retention",
+                )
+                last_futoi_prune = now
+            if csv_prune_interval > 0 and now - last_prune >= csv_prune_interval:
+                prune_all = getattr(csv_service, "prune_all", None)
+                if callable(prune_all):
+                    await enqueue_or_run_background_job(
+                        background_jobs.prune_historical_csvs,
+                        prune_all,
+                        job_id_prefix="prune-historical-csvs",
+                        description="Prune expired historical candle CSV rows",
+                    )
+                last_prune = now
 
     async def enqueue_or_run_background_job(
         queued_callback: Callable[[], Any],
@@ -242,7 +300,7 @@ def create_app(
         store.deactivate_expired_users()
         if expiry_interval > 0:
             expiry_task = asyncio.create_task(deactivate_expired_users_loop())
-        if csv_refresh_interval > 0:
+        if maintenance_interval > 0:
             historical_csv_task = asyncio.create_task(maintain_historical_csvs_loop())
         try:
             yield
@@ -432,6 +490,23 @@ def create_app(
             else None
         )
         return breadth_service.payload(requested_symbols)
+
+    @app.get("/api/futoi")
+    def get_futoi(
+        date: str = "",
+        ticker: str = "",
+        limit: int = 500,
+        _user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        if limit < 0:
+            raise ValueError("limit cannot be negative")
+        selected_date = parse_futoi_date(date)
+        records = futoi.load_records(
+            trading_date=selected_date,
+            ticker=ticker.strip().upper() or None,
+            limit=min(limit, 5000) if limit else None,
+        )
+        return {"ok": True, "records": [public_futoi_record(record) for record in records]}
 
     @app.post("/api/feedback")
     def submit_feedback(

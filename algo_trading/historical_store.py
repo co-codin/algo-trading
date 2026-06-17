@@ -71,6 +71,23 @@ class HistoricalDataStore(Protocol):
         exclude_symbols: Iterable[str] = (),
     ) -> int: ...
 
+    def upsert_futoi_records(
+        self,
+        records: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int: ...
+
+    def load_futoi_records(
+        self,
+        *,
+        trading_date: date | None = None,
+        ticker: str | None = None,
+        limit: int | None = None,
+    ) -> list[Any]: ...
+
+    def prune_futoi_records(self, cutoff_date: date) -> int: ...
+
 
 class InMemoryHistoricalDataStore:
     def __init__(
@@ -83,6 +100,7 @@ class InMemoryHistoricalDataStore:
         self._series_sources: dict[CandleSeries, str] = {}
         self._breadth_bars: dict[str, dict[date, Any]] = {}
         self._breadth_updated_at: dict[str, datetime] = {}
+        self._futoi_records: dict[tuple[date, str, str, str], Any] = {}
 
     def ensure_schema(self) -> None:
         return None
@@ -203,6 +221,46 @@ class InMemoryHistoricalDataStore:
             deleted += len(old_dates)
         return deleted
 
+    def upsert_futoi_records(
+        self,
+        records: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int:
+        before = set(self._futoi_records)
+        for record in records:
+            self._futoi_records[futoi_record_key(record)] = record
+        return len(set(self._futoi_records) - before)
+
+    def load_futoi_records(
+        self,
+        *,
+        trading_date: date | None = None,
+        ticker: str | None = None,
+        limit: int | None = None,
+    ) -> list[Any]:
+        normalized_ticker = normalize_symbol(ticker) if ticker else None
+        records = [
+            record
+            for record in self._futoi_records.values()
+            if (trading_date is None or record.trade_date == trading_date)
+            and (normalized_ticker is None or normalize_symbol(record.ticker) == normalized_ticker)
+        ]
+        records = sorted(records, key=futoi_record_key)
+        if limit is not None and limit > 0:
+            records = records[-limit:]
+        return records
+
+    def prune_futoi_records(self, cutoff_date: date) -> int:
+        old_keys = [
+            key
+            for key, record in self._futoi_records.items()
+            if record.trade_date < cutoff_date
+        ]
+        for key in old_keys:
+            self._futoi_records.pop(key, None)
+        return len(old_keys)
+
     def _utcnow(self) -> datetime:
         return self._now().astimezone(timezone.utc) + self._time_offset
 
@@ -271,6 +329,34 @@ class PostgresHistoricalDataStore:
                     """
                     CREATE INDEX IF NOT EXISTS market_breadth_bars_symbol_date_idx
                     ON market_breadth_bars (symbol, bar_date DESC)
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS moex_futoi_records (
+                        trade_date DATE NOT NULL,
+                        trade_time TEXT NOT NULL,
+                        ticker TEXT NOT NULL,
+                        client_group TEXT NOT NULL,
+                        position DOUBLE PRECISION NOT NULL,
+                        position_long DOUBLE PRECISION NOT NULL,
+                        position_short DOUBLE PRECISION NOT NULL,
+                        position_long_count BIGINT NOT NULL,
+                        position_short_count BIGINT NOT NULL,
+                        session_id BIGINT,
+                        sequence_number BIGINT,
+                        system_time TIMESTAMPTZ,
+                        trade_session_date DATE,
+                        source TEXT NOT NULL DEFAULT '',
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        PRIMARY KEY (trade_date, trade_time, ticker, client_group)
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS moex_futoi_records_ticker_date_idx
+                    ON moex_futoi_records (ticker, trade_date DESC, trade_time DESC)
                     """
                 )
 
@@ -557,6 +643,141 @@ class PostgresHistoricalDataStore:
                     )
                 return int(cursor.rowcount)
 
+    def upsert_futoi_records(
+        self,
+        records: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int:
+        deduped = {futoi_record_key(record): record for record in records}
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    INSERT INTO moex_futoi_records (
+                        trade_date,
+                        trade_time,
+                        ticker,
+                        client_group,
+                        position,
+                        position_long,
+                        position_short,
+                        position_long_count,
+                        position_short_count,
+                        session_id,
+                        sequence_number,
+                        system_time,
+                        trade_session_date,
+                        source
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (trade_date, trade_time, ticker, client_group) DO UPDATE
+                    SET position = EXCLUDED.position,
+                        position_long = EXCLUDED.position_long,
+                        position_short = EXCLUDED.position_short,
+                        position_long_count = EXCLUDED.position_long_count,
+                        position_short_count = EXCLUDED.position_short_count,
+                        session_id = EXCLUDED.session_id,
+                        sequence_number = EXCLUDED.sequence_number,
+                        system_time = EXCLUDED.system_time,
+                        trade_session_date = EXCLUDED.trade_session_date,
+                        source = EXCLUDED.source,
+                        updated_at = now()
+                    """,
+                    [
+                        (
+                            record.trade_date,
+                            record.trade_time,
+                            normalize_symbol(record.ticker),
+                            str(record.client_group).strip().upper(),
+                            record.position,
+                            record.position_long,
+                            record.position_short,
+                            record.position_long_count,
+                            record.position_short_count,
+                            record.session_id,
+                            record.sequence_number,
+                            record.system_time,
+                            record.trade_session_date,
+                            source,
+                        )
+                        for record in deduped.values()
+                    ],
+                )
+        return len(deduped)
+
+    def load_futoi_records(
+        self,
+        *,
+        trading_date: date | None = None,
+        ticker: str | None = None,
+        limit: int | None = None,
+    ) -> list[Any]:
+        from algo_trading.futoi import FutoiRecord
+
+        filters: list[str] = []
+        params: list[Any] = []
+        if trading_date is not None:
+            filters.append("trade_date = %s")
+            params.append(trading_date)
+        if ticker:
+            filters.append("ticker = %s")
+            params.append(normalize_symbol(ticker))
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        query = f"""
+            SELECT
+                trade_date,
+                trade_time,
+                ticker,
+                client_group,
+                position,
+                position_long,
+                position_short,
+                position_long_count,
+                position_short_count,
+                session_id,
+                sequence_number,
+                system_time,
+                trade_session_date
+            FROM moex_futoi_records
+            {where_clause}
+            ORDER BY trade_date DESC, trade_time DESC, ticker, client_group
+        """
+        if limit is not None and limit > 0:
+            query += " LIMIT %s"
+            params.append(limit)
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+        return [
+            FutoiRecord(
+                trade_date=row[0],
+                trade_time=str(row[1]),
+                ticker=str(row[2]),
+                client_group=str(row[3]),
+                position=float(row[4]),
+                position_long=float(row[5]),
+                position_short=float(row[6]),
+                position_long_count=int(row[7]),
+                position_short_count=int(row[8]),
+                session_id=int(row[9]) if row[9] is not None else None,
+                sequence_number=int(row[10]) if row[10] is not None else None,
+                system_time=row[11],
+                trade_session_date=row[12],
+            )
+            for row in reversed(rows)
+        ]
+
+    def prune_futoi_records(self, cutoff_date: date) -> int:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM moex_futoi_records WHERE trade_date < %s",
+                    (cutoff_date,),
+                )
+                return int(cursor.rowcount)
+
     def _connect(self) -> Any:
         import psycopg
 
@@ -585,3 +806,12 @@ def normalize_candle_series(market: str, symbol: str, interval: str) -> CandleSe
 
 def normalize_symbol(symbol: str) -> str:
     return str(symbol).strip().upper()
+
+
+def futoi_record_key(record: Any) -> tuple[date, str, str, str]:
+    return (
+        record.trade_date,
+        str(record.trade_time),
+        normalize_symbol(record.ticker),
+        str(record.client_group).strip().upper(),
+    )

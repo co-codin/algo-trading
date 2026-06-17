@@ -2,7 +2,7 @@ import logging
 import tempfile
 import time
 import unittest
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from algo_trading.alerts import InMemoryAlertStore
 from algo_trading.auth import InMemoryAuthStore, utcnow
 from algo_trading.feedback import InMemoryFeedbackStore
+from algo_trading.futoi import FutoiRecord
 from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.models import Candle
 from algo_trading.web_app import create_app
@@ -221,12 +222,27 @@ class WebAppTests(unittest.TestCase):
             def refresh_default_symbols(self) -> None:
                 self.calls += 1
 
+        class FakeFutoiRefreshService:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.prune_calls = 0
+
+            def refresh_daily(self) -> None:
+                self.calls += 1
+
+            def prune_history(self) -> None:
+                self.prune_calls += 1
+
         service = FakeHistoricalCsvService()
         breadth_service = FakeMarketBreadthRefreshService()
+        futoi_service = FakeFutoiRefreshService()
         client = self.make_client(
             historical_csv_service=service,
             market_breadth_service=breadth_service,
+            futoi_service=futoi_service,
             historical_csv_refresh_seconds=0.01,
+            futoi_refresh_seconds=0.01,
+            futoi_prune_seconds=0.01,
         )
 
         with client:
@@ -234,6 +250,8 @@ class WebAppTests(unittest.TestCase):
 
         self.assertGreaterEqual(service.calls, 1)
         self.assertGreaterEqual(breadth_service.calls, 1)
+        self.assertGreaterEqual(futoi_service.calls, 1)
+        self.assertGreaterEqual(futoi_service.prune_calls, 1)
 
     def test_app_enqueues_maintenance_jobs_when_queue_is_configured(self):
         class FakeHistoricalCsvService:
@@ -254,6 +272,17 @@ class WebAppTests(unittest.TestCase):
             def refresh_default_symbols(self) -> None:
                 self.calls += 1
 
+        class FakeFutoiRefreshService:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.prune_calls = 0
+
+            def refresh_daily(self) -> None:
+                self.calls += 1
+
+            def prune_history(self) -> None:
+                self.prune_calls += 1
+
         class FakeJobQueue:
             def __init__(self) -> None:
                 self.jobs: list[str] = []
@@ -270,13 +299,17 @@ class WebAppTests(unittest.TestCase):
 
         service = FakeHistoricalCsvService()
         breadth_service = FakeMarketBreadthRefreshService()
+        futoi_service = FakeFutoiRefreshService()
         queue = FakeJobQueue()
         client = self.make_client(
             historical_csv_service=service,
             market_breadth_service=breadth_service,
+            futoi_service=futoi_service,
             job_queue=queue,
             historical_csv_refresh_seconds=0.01,
             historical_csv_prune_seconds=0.01,
+            futoi_refresh_seconds=0.01,
+            futoi_prune_seconds=0.01,
             expiry_check_seconds=0.01,
         )
 
@@ -285,11 +318,15 @@ class WebAppTests(unittest.TestCase):
 
         self.assertIn("refresh_historical_csvs", queue.jobs)
         self.assertIn("refresh_market_breadth", queue.jobs)
+        self.assertIn("refresh_futoi", queue.jobs)
+        self.assertIn("prune_futoi", queue.jobs)
         self.assertIn("prune_historical_csvs", queue.jobs)
         self.assertIn("deactivate_expired_users", queue.jobs)
         self.assertEqual(service.refresh_calls, 0)
         self.assertEqual(service.prune_calls, 0)
         self.assertEqual(breadth_service.calls, 0)
+        self.assertEqual(futoi_service.calls, 0)
+        self.assertEqual(futoi_service.prune_calls, 0)
 
     def test_trading_api_requires_authentication(self):
         client = self.make_client()
@@ -301,6 +338,43 @@ class WebAppTests(unittest.TestCase):
             response.json(),
             {"ok": False, "error": "authentication required"},
         )
+
+    def test_active_user_can_read_stored_futoi_records(self):
+        auth_store = InMemoryAuthStore()
+        history_store = InMemoryHistoricalDataStore()
+        history_store.upsert_futoi_records(
+            [
+                FutoiRecord(
+                    trade_date=date(2024, 4, 8),
+                    trade_time="18:45:00",
+                    ticker="IMOEXF",
+                    client_group="YUR",
+                    position=-19.0,
+                    position_long=213.0,
+                    position_short=232.0,
+                    position_long_count=18,
+                    position_short_count=24,
+                )
+            ],
+            source="unit-test",
+        )
+        client = self.make_client(auth_store=auth_store, historical_store=history_store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        user = auth_store.list_users()[0]
+
+        inactive = client.get("/api/futoi?date=2024-04-08&ticker=IMOEXF")
+        self.assertEqual(inactive.status_code, 403)
+
+        auth_store.set_user_access(user.id, is_active=True, activated_at=utcnow())
+        active = client.get("/api/futoi?date=2024-04-08&ticker=IMOEXF")
+
+        self.assertEqual(active.status_code, 200)
+        self.assertEqual(active.json()["records"][0]["ticker"], "IMOEXF")
+        self.assertEqual(active.json()["records"][0]["client_group"], "YUR")
+        self.assertEqual(active.json()["records"][0]["trade_date"], "2024-04-08")
 
     def test_register_sets_inactive_session_and_blocks_trading_api(self):
         client = self.make_client()
