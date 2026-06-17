@@ -14,6 +14,17 @@ from typing import Any, Callable
 from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
+from algo_trading.alerts import (
+    AlertStore,
+    InMemoryAlertStore,
+    PostgresAlertStore,
+    TelegramBotClient,
+    TelegramSender,
+    build_signal_signature,
+    build_telegram_signal_message,
+    build_telegram_test_message,
+    public_telegram_alert_settings,
+)
 from algo_trading.auth import (
     AuthStore,
     AuthUser,
@@ -79,6 +90,8 @@ def create_app(
     historical_csv_prune_seconds: float | None = None,
     historical_store: HistoricalDataStore | None = None,
     feedback_store: FeedbackStore | None = None,
+    alert_store: AlertStore | None = None,
+    telegram_sender: TelegramSender | None = None,
     job_queue: JobQueue | None = None,
     seed_admin: bool = True,
     admin_seed_password: str | None = None,
@@ -92,6 +105,9 @@ def create_app(
         store.seed_admin_user(admin_email(), admin_seed_password or admin_password())
     feedback = feedback_store or feedback_store_from_env()
     feedback.ensure_schema()
+    alerts = alert_store or alert_store_from_env()
+    alerts.ensure_schema()
+    telegram = telegram_sender or TelegramBotClient()
     history_store = historical_store or historical_store_from_env()
     history_store.ensure_schema()
     breadth_service = market_breadth_service or MarketBreadthService(store=history_store)
@@ -394,14 +410,16 @@ def create_app(
     @app.get("/api/live-chart")
     def get_live_chart(
         request: Request,
-        _user: AuthUser = Depends(require_active_user),
+        user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         payload = dict(request.query_params)
-        return live_chart_payload(
+        chart_payload = live_chart_payload(
             payload,
             _live_client_for_handler(payload, client_factory),
             historical_store=history_store,
         )
+        maybe_send_telegram_rsi_alert(user, chart_payload)
+        return chart_payload
 
     @app.get("/api/market-breadth")
     def get_market_breadth(
@@ -428,6 +446,45 @@ def create_app(
             description=optional_text(feedback_payload.get("description")),
         )
         return {"ok": True, "feedback": public_feedback(created)}
+
+    @app.get("/api/alerts/telegram")
+    def get_telegram_alert_settings(
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "settings": public_telegram_alert_settings(
+                alerts.get_telegram_settings(user.id)
+            ),
+        }
+
+    @app.put("/api/alerts/telegram")
+    def update_telegram_alert_settings(
+        payload: dict[str, Any] | None = Body(default=None),
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        settings_payload = payload or {}
+        settings = alerts.upsert_telegram_settings(
+            user_id=user.id,
+            enabled=bool(settings_payload.get("enabled")),
+            bot_token=optional_text(settings_payload.get("bot_token")),
+            chat_id=optional_text(settings_payload.get("chat_id")),
+        )
+        return {"ok": True, "settings": public_telegram_alert_settings(settings)}
+
+    @app.post("/api/alerts/telegram/test")
+    def test_telegram_alert(
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        settings = alerts.get_telegram_settings(user.id)
+        if not settings.enabled or not settings.bot_token or not settings.chat_id:
+            raise ValueError("telegram alerts are not configured")
+        telegram.send_message(
+            settings.bot_token,
+            settings.chat_id,
+            build_telegram_test_message(user.username),
+        )
+        return {"ok": True}
 
     @app.get("/api/admin/feedback")
     def get_admin_feedback(
@@ -478,6 +535,42 @@ def create_app(
             )
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="not found")
 
+    def maybe_send_telegram_rsi_alert(
+        user: AuthUser,
+        chart_payload: dict[str, Any],
+    ) -> None:
+        settings = alerts.get_telegram_settings(user.id)
+        if not settings.enabled or not settings.bot_token or not settings.chat_id:
+            return
+        signal = chart_payload.get("rsi_alert_signal")
+        if not isinstance(signal, dict):
+            return
+        market = str(chart_payload.get("market") or "")
+        symbol = str(chart_payload.get("symbol") or "")
+        interval = str(chart_payload.get("interval") or "")
+        signature = build_signal_signature(
+            market=market,
+            symbol=symbol,
+            interval=interval,
+            signal=signal,
+        )
+        if alerts.has_signal_delivery(user.id, signature):
+            return
+        try:
+            telegram.send_message(
+                settings.bot_token,
+                settings.chat_id,
+                build_telegram_signal_message(
+                    market=market,
+                    symbol=symbol,
+                    interval=interval,
+                    signal=signal,
+                ),
+            )
+        except Exception:
+            return
+        alerts.record_signal_delivery(user.id, signature)
+
     return app
 
 
@@ -493,6 +586,13 @@ def feedback_store_from_env() -> FeedbackStore:
     if database_url:
         return PostgresFeedbackStore(database_url)
     return InMemoryFeedbackStore()
+
+
+def alert_store_from_env() -> AlertStore:
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if database_url:
+        return PostgresAlertStore(database_url)
+    return InMemoryAlertStore()
 
 
 def admin_email() -> str:

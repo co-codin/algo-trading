@@ -49,6 +49,8 @@ import type {
   Mode,
   StrategyInfo,
   StrategyPayload,
+  TelegramAlertSettings,
+  TelegramAlertSettingsPayload,
 } from "./types";
 
 type StatusType = "" | "busy" | "error";
@@ -176,12 +178,21 @@ const feedbackForm = reactive({
   title: "",
   description: "",
 });
+const telegramAlertForm = reactive({
+  enabled: false,
+  bot_token: "",
+  chat_id: "",
+  bot_token_configured: false,
+  bot_token_preview: "",
+});
 const authStatus = ref("");
 const authStatusType = ref<StatusType>("");
 const profileStatus = ref(t("status.ready"));
 const profileStatusType = ref<StatusType>("");
 const feedbackStatus = ref(t("status.ready"));
 const feedbackStatusType = ref<StatusType>("");
+const telegramAlertStatus = ref(t("status.ready"));
+const telegramAlertStatusType = ref<StatusType>("");
 const adminUsers = ref<AuthUser[]>([]);
 const adminFeedback = ref<FeedbackItem[]>([]);
 const adminExpiryEdits = reactive<Record<number, string>>({});
@@ -552,6 +563,9 @@ watch(locale, () => {
   if (!feedbackStatusType.value) {
     feedbackStatus.value = t("status.ready");
   }
+  if (!telegramAlertStatusType.value) {
+    telegramAlertStatus.value = t("status.ready");
+  }
   if (!authStatusType.value && authStatus.value) {
     authStatus.value = t("auth.ready");
   }
@@ -652,6 +666,11 @@ function setProfileStatus(message: string, type: StatusType = "") {
 function setFeedbackStatus(message: string, type: StatusType = "") {
   feedbackStatus.value = message;
   feedbackStatusType.value = type;
+}
+
+function setTelegramAlertStatus(message: string, type: StatusType = "") {
+  telegramAlertStatus.value = message;
+  telegramAlertStatusType.value = type;
 }
 
 async function loadCurrentUser() {
@@ -934,6 +953,11 @@ async function loadProfile() {
   const payload = await requestJson<AuthMePayload>("/api/profile");
   authUser.value = payload.user;
   setProfileForm(payload.user);
+  if (payload.user?.is_active) {
+    await loadTelegramAlertSettings();
+  } else {
+    clearTelegramAlertForm();
+  }
 }
 
 async function loadAdminUsers() {
@@ -966,6 +990,21 @@ async function loadAdminPanel() {
   }
 }
 
+async function loadTelegramAlertSettings() {
+  if (!authUser.value?.is_active) {
+    clearTelegramAlertForm();
+    return;
+  }
+  try {
+    const payload = await requestJson<TelegramAlertSettingsPayload>("/api/alerts/telegram");
+    applyTelegramAlertSettings(payload.settings);
+    setTelegramAlertStatus(t("status.telegramSettingsLoaded"));
+  } catch (error) {
+    clearTelegramAlertForm();
+    setTelegramAlertStatus(errorMessage(error), "error");
+  }
+}
+
 async function saveProfile() {
   setProfileStatus(t("status.savingProfile"), "busy");
   try {
@@ -978,6 +1017,42 @@ async function saveProfile() {
     setProfileStatus(t("status.profileSaved"));
   } catch (error) {
     setProfileStatus(errorMessage(error), "error");
+  }
+}
+
+async function saveTelegramAlertSettings() {
+  if (!authUser.value?.is_active) {
+    setTelegramAlertStatus(t("auth.inactive"), "error");
+    return;
+  }
+  setTelegramAlertStatus(t("status.savingTelegramSettings"), "busy");
+  try {
+    const payload = await requestJson<TelegramAlertSettingsPayload>("/api/alerts/telegram", {
+      method: "PUT",
+      body: JSON.stringify({
+        enabled: telegramAlertForm.enabled,
+        bot_token: telegramAlertForm.bot_token,
+        chat_id: telegramAlertForm.chat_id,
+      }),
+    });
+    applyTelegramAlertSettings(payload.settings);
+    setTelegramAlertStatus(t("status.telegramSettingsSaved"));
+  } catch (error) {
+    setTelegramAlertStatus(errorMessage(error), "error");
+  }
+}
+
+async function testTelegramAlert() {
+  if (!authUser.value?.is_active) {
+    setTelegramAlertStatus(t("auth.inactive"), "error");
+    return;
+  }
+  setTelegramAlertStatus(t("status.sendingTelegramTest"), "busy");
+  try {
+    await requestJson<{ ok: true }>("/api/alerts/telegram/test", { method: "POST" });
+    setTelegramAlertStatus(t("status.telegramTestSent"));
+  } catch (error) {
+    setTelegramAlertStatus(errorMessage(error), "error");
   }
 }
 
@@ -1096,6 +1171,22 @@ function setProfileForm(user: AuthUser | null) {
   profileForm.middle_name = user?.middle_name ?? "";
 }
 
+function applyTelegramAlertSettings(settings: TelegramAlertSettings) {
+  telegramAlertForm.enabled = settings.enabled;
+  telegramAlertForm.bot_token = "";
+  telegramAlertForm.chat_id = settings.chat_id;
+  telegramAlertForm.bot_token_configured = settings.bot_token_configured;
+  telegramAlertForm.bot_token_preview = settings.bot_token_preview;
+}
+
+function clearTelegramAlertForm() {
+  telegramAlertForm.enabled = false;
+  telegramAlertForm.bot_token = "";
+  telegramAlertForm.chat_id = "";
+  telegramAlertForm.bot_token_configured = false;
+  telegramAlertForm.bot_token_preview = "";
+}
+
 function syncAdminExpiryEdits(users: AuthUser[]) {
   for (const user of users) {
     adminExpiryEdits[user.id] = dateInputValue(user.expired_at);
@@ -1120,6 +1211,7 @@ async function logout() {
   adminFeedback.value = [];
   feedbackForm.title = "";
   feedbackForm.description = "";
+  clearTelegramAlertForm();
 }
 
 async function loadStrategies() {
@@ -1978,6 +2070,45 @@ function errorMessage(error: unknown): string {
             <button class="primary" type="submit">{{ t("actions.sendFeedback") }}</button>
             <div class="status" :class="feedbackStatusType ? `is-${feedbackStatusType}` : ''">
               {{ feedbackStatus }}
+            </div>
+          </div>
+        </div>
+      </form>
+      <form v-if="authUser.is_active" class="telegram-alert-form" @submit.prevent="saveTelegramAlertSettings">
+        <div>
+          <h3>{{ t("pages.telegramAlerts") }}</h3>
+          <p>{{ t("pages.telegramAlertsSubtitle") }}</p>
+        </div>
+        <div class="field-grid telegram-alert-grid">
+          <label class="toggle-row">
+            <input v-model="telegramAlertForm.enabled" type="checkbox">
+            <span>{{ t("labels.telegramAlertsEnabled") }}</span>
+          </label>
+          <label>
+            <span>{{ t("labels.telegramBotToken") }}</span>
+            <input
+              v-model.trim="telegramAlertForm.bot_token"
+              autocomplete="off"
+              type="password"
+              :placeholder="telegramAlertForm.bot_token_configured ? telegramAlertForm.bot_token_preview : ''"
+              maxlength="256"
+            >
+          </label>
+          <label>
+            <span>{{ t("labels.telegramChatId") }}</span>
+            <input
+              v-model.trim="telegramAlertForm.chat_id"
+              autocomplete="off"
+              maxlength="128"
+            >
+          </label>
+          <div class="profile-form-actions">
+            <button class="primary" type="submit">{{ t("actions.saveTelegramAlerts") }}</button>
+            <button class="secondary" type="button" @click="testTelegramAlert">
+              {{ t("actions.testTelegramAlert") }}
+            </button>
+            <div class="status" :class="telegramAlertStatusType ? `is-${telegramAlertStatusType}` : ''">
+              {{ telegramAlertStatus }}
             </div>
           </div>
         </div>

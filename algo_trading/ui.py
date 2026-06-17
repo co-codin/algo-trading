@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import time
 import urllib.parse
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -147,6 +148,7 @@ def live_chart_payload(
         "strategy": strategy_value,
         "candles": [_candle_payload(candle) for candle in candles],
         "signals": signals,
+        "rsi_alert_signal": _latest_rsi_alert_signal(candles, config),
         "indicators": _popular_indicator_payload(candles, config),
     }
 
@@ -591,6 +593,18 @@ def _all_strategy_signal_markers(
         markers,
         key=lambda item: (int(item["time"]), str(item["reason"]), str(item["type"])),
     )
+
+
+def _latest_rsi_alert_signal(
+    candles: list[Candle],
+    config: StrategyConfig,
+) -> dict[str, Any] | None:
+    rsi_config = replace(config, strategy=StrategyName.RSI_REVERSAL)
+    markers = _strategy_signal_markers(candles, rsi_config)
+    if not markers or not candles:
+        return None
+    latest_marker = markers[-1]
+    return latest_marker if latest_marker["time"] == candles[-1].open_time else None
 
 
 def _popular_indicator_payload(
