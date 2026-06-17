@@ -11,7 +11,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, Body, Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
 from algo_trading.alerts import (
@@ -468,16 +468,32 @@ def create_app(
     @app.get("/api/live-chart")
     def get_live_chart(
         request: Request,
+        background_tasks: BackgroundTasks,
         user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         payload = dict(request.query_params)
+        cache_state: dict[str, bool] = {}
         chart_payload = live_chart_payload(
             payload,
             _live_client_for_handler(payload, client_factory),
             historical_store=history_store,
+            allow_stale_cache=True,
+            cache_state=cache_state,
         )
+        if cache_state.get("cache_stale"):
+            background_tasks.add_task(refresh_live_chart_cache, payload)
         maybe_send_telegram_rsi_alert(user, chart_payload)
         return chart_payload
+
+    def refresh_live_chart_cache(payload: dict[str, Any]) -> None:
+        try:
+            live_chart_payload(
+                payload,
+                _live_client_for_handler(payload, client_factory),
+                historical_store=history_store,
+            )
+        except Exception:
+            error_logger.warning("Live chart stale-cache refresh failed", exc_info=True)
 
     @app.get("/api/market-breadth")
     def get_market_breadth(

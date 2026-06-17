@@ -1856,5 +1856,40 @@ class UiTests(unittest.TestCase):
             [latest_open_time - (5 * 60 * 1000), latest_open_time],
         )
 
+    def test_live_chart_payload_can_return_stale_cache_without_provider_call(self):
+        client = FakeClient()
+        client.candles = [candle(3000, 13), candle(4000, 14)]
+        store = InMemoryHistoricalDataStore()
+        store.upsert_candles(
+            "crypto_spot",
+            "BTCUSDT",
+            "5m",
+            [candle(1000, 11), candle(2000, 12)],
+            source="seed",
+        )
+        cache_state: dict[str, bool] = {}
+
+        payload = live_chart_payload(
+            {
+                "market": "crypto_spot",
+                "symbol": "BTCUSDT",
+                "interval": "5m",
+                "limit": 2,
+                "fast_ema": 1,
+                "slow_ema": 2,
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+            historical_store=store,
+            allow_stale_cache=True,
+            cache_state=cache_state,
+        )
+
+        self.assertEqual(client.kline_symbols, [])
+        self.assertEqual([item["time"] for item in payload["candles"]], [1000, 2000])
+        self.assertEqual(cache_state, {"cache_hit": True, "cache_stale": True})
+
 if __name__ == "__main__":
     unittest.main()

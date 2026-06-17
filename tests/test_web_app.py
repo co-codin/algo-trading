@@ -574,6 +574,75 @@ class WebAppTests(unittest.TestCase):
             [1000, 2000],
         )
 
+    def test_live_chart_route_returns_stale_cache_then_refreshes_in_background(self):
+        class FakeMarketClient:
+            kline_calls: list[tuple[str, str, int]] = []
+
+            def get_24h_tickers(self) -> list[dict[str, object]]:
+                return []
+
+            def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+                self.kline_calls.append((symbol, interval, limit))
+                return [
+                    Candle(
+                        open_time=3000 + index,
+                        open=price,
+                        high=price + 1.0,
+                        low=price - 1.0,
+                        close=price,
+                        volume=1.0,
+                    )
+                    for index, price in enumerate([13, 14])
+                ][:limit]
+
+        auth_store = InMemoryAuthStore()
+        historical_store = InMemoryHistoricalDataStore()
+        historical_store.upsert_candles(
+            "crypto_spot",
+            "BTCUSDT",
+            "5m",
+            [
+                Candle(1000, 11, 12, 10, 11, 1),
+                Candle(2000, 12, 13, 11, 12, 1),
+            ],
+            source="seed",
+        )
+        client = self.make_client(
+            auth_store=auth_store,
+            client_factory=FakeMarketClient,
+            historical_store=historical_store,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice", "password": "password123"},
+        )
+        auth_store.set_user_access(
+            auth_store.list_users()[0].id,
+            is_active=True,
+            activated_at=utcnow(),
+        )
+
+        response = client.get(
+            "/api/live-chart?market=crypto_spot&symbol=BTCUSDT&interval=5m"
+            "&limit=2&fast_ema=1&slow_ema=2&rsi_period=2"
+            "&rsi_overbought=100&rsi_oversold=0"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["time"] for item in response.json()["candles"]], [1000, 2000])
+        self.assertEqual(FakeMarketClient.kline_calls, [("BTCUSDT", "5m", 2)])
+        self.assertEqual(
+            [
+                stored.open_time
+                for stored in historical_store.load_candles(
+                    "crypto_spot",
+                    "BTCUSDT",
+                    "5m",
+                )
+            ],
+            [1000, 2000, 3000, 3001],
+        )
+
     def test_login_and_logout_manage_session_access(self):
         client = self.make_client()
         client.post(

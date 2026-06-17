@@ -90,6 +90,9 @@ def live_chart_payload(
     payload: dict[str, Any],
     client: MarketDataClient | None = None,
     historical_store: HistoricalDataStore | None = None,
+    *,
+    allow_stale_cache: bool = False,
+    cache_state: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     market = _market_from_payload(payload)
     market_client = client or market_data_client_from_payload(payload)
@@ -107,13 +110,21 @@ def live_chart_payload(
     )
     config = configs[0]
     data_source = _data_source_label(market, market_client, config.symbol)
-    candles = _load_fresh_live_candles(
+    candles = _load_cached_live_candles(
         historical_store,
         market,
         config.symbol,
         config.interval,
         limit=limit,
     )
+    cache_hit = False
+    cache_stale = False
+    if candles:
+        cache_stale = not _live_candles_are_fresh(candles, config.interval)
+        if cache_stale and not allow_stale_cache:
+            candles = []
+        else:
+            cache_hit = True
     if not candles:
         candles = _get_klines_with_retries(
             market_client,
@@ -134,6 +145,9 @@ def live_chart_payload(
             limit=limit,
             source=data_source,
         )
+    if cache_state is not None:
+        cache_state.clear()
+        cache_state.update({"cache_hit": cache_hit, "cache_stale": cache_hit and cache_stale})
     signals = (
         _all_strategy_signal_markers(candles, configs)
         if len(configs) > 1
@@ -161,6 +175,26 @@ def _load_fresh_live_candles(
     *,
     limit: int,
 ) -> list[Candle]:
+    stored = _load_cached_live_candles(
+        historical_store,
+        market,
+        symbol,
+        interval,
+        limit=limit,
+    )
+    if not stored or not _live_candles_are_fresh(stored, interval):
+        return []
+    return stored
+
+
+def _load_cached_live_candles(
+    historical_store: HistoricalDataStore | None,
+    market: str,
+    symbol: str,
+    interval: str,
+    *,
+    limit: int,
+) -> list[Candle]:
     if historical_store is None:
         return []
     try:
@@ -172,7 +206,7 @@ def _load_fresh_live_candles(
         )
     except Exception:
         return []
-    if len(stored) < limit or not _live_candles_are_fresh(stored, interval):
+    if len(stored) < limit:
         return []
     return stored
 
