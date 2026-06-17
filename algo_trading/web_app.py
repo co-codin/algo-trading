@@ -14,6 +14,17 @@ from typing import Any, Callable
 from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
+from algo_trading.alerts import (
+    AlertStore,
+    InMemoryAlertStore,
+    PostgresAlertStore,
+    TelegramBotClient,
+    TelegramSender,
+    build_signal_signature,
+    build_telegram_signal_message,
+    build_telegram_test_message,
+    public_telegram_alert_settings,
+)
 from algo_trading.auth import (
     AuthStore,
     AuthUser,
@@ -30,6 +41,12 @@ from algo_trading.feedback import (
     InMemoryFeedbackStore,
     PostgresFeedbackStore,
     public_feedback,
+)
+from algo_trading.futoi import (
+    FutoiRefreshService,
+    FUTOI_PRUNE_SECONDS,
+    parse_futoi_date,
+    public_futoi_record,
 )
 from algo_trading.historical_store import HistoricalDataStore, historical_store_from_env
 from algo_trading.historical_data import HistoricalCsvRefreshService
@@ -52,6 +69,8 @@ ADMIN_PASSWORD = "Vladimir960904"
 EXPIRY_CHECK_SECONDS = 60 * 60
 HISTORICAL_CSV_REFRESH_SECONDS = 60 * 60
 HISTORICAL_CSV_PRUNE_SECONDS = 24 * 60 * 60
+MOEX_FUTOI_REFRESH_SECONDS = 24 * 60 * 60
+MOEX_FUTOI_PRUNE_SECONDS = FUTOI_PRUNE_SECONDS
 
 
 def parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
@@ -74,11 +93,16 @@ def create_app(
     auth_store: AuthStore | None = None,
     market_breadth_service: Any | None = None,
     historical_csv_service: Any | None = None,
+    futoi_service: Any | None = None,
     expiry_check_seconds: float | None = None,
     historical_csv_refresh_seconds: float | None = None,
     historical_csv_prune_seconds: float | None = None,
+    futoi_refresh_seconds: float | None = None,
+    futoi_prune_seconds: float | None = None,
     historical_store: HistoricalDataStore | None = None,
     feedback_store: FeedbackStore | None = None,
+    alert_store: AlertStore | None = None,
+    telegram_sender: TelegramSender | None = None,
     job_queue: JobQueue | None = None,
     seed_admin: bool = True,
     admin_seed_password: str | None = None,
@@ -92,10 +116,14 @@ def create_app(
         store.seed_admin_user(admin_email(), admin_seed_password or admin_password())
     feedback = feedback_store or feedback_store_from_env()
     feedback.ensure_schema()
+    alerts = alert_store or alert_store_from_env()
+    alerts.ensure_schema()
+    telegram = telegram_sender or TelegramBotClient()
     history_store = historical_store or historical_store_from_env()
     history_store.ensure_schema()
     breadth_service = market_breadth_service or MarketBreadthService(store=history_store)
     csv_service = historical_csv_service or HistoricalCsvRefreshService()
+    futoi = futoi_service or FutoiRefreshService(store=history_store)
     background_queue = job_queue if job_queue is not None else job_queue_from_env()
     expiry_interval = (
         expiry_check_seconds
@@ -121,6 +149,24 @@ def create_app(
                 HISTORICAL_CSV_PRUNE_SECONDS,
             )
         )
+    )
+    futoi_interval = (
+        futoi_refresh_seconds
+        if futoi_refresh_seconds is not None
+        else float(os.environ.get("MOEX_FUTOI_REFRESH_SECONDS", MOEX_FUTOI_REFRESH_SECONDS))
+    )
+    futoi_prune_interval = (
+        futoi_prune_seconds
+        if futoi_prune_seconds is not None
+        else float(os.environ.get("MOEX_FUTOI_PRUNE_SECONDS", MOEX_FUTOI_PRUNE_SECONDS))
+    )
+    maintenance_interval = min(
+        [
+            interval
+            for interval in (csv_refresh_interval, futoi_interval, futoi_prune_interval)
+            if interval > 0
+        ],
+        default=0,
     )
     expiry_task: asyncio.Task[None] | None = None
     historical_csv_task: asyncio.Task[None] | None = None
@@ -164,37 +210,65 @@ def create_app(
             await asyncio.sleep(max(1.0, expiry_interval))
 
     async def maintain_historical_csvs_loop() -> None:
+        last_csv_refresh = 0.0
         last_prune = 0.0
+        last_futoi = 0.0
+        last_futoi_prune = 0.0
         while True:
-            await asyncio.sleep(max(0.01, csv_refresh_interval))
-            await enqueue_or_run_background_job(
-                background_jobs.refresh_historical_csvs,
-                csv_service.refresh_all,
-                job_id_prefix="refresh-historical-csvs",
-                description="Refresh live-page historical candle CSV files",
-            )
-            refresh_breadth = getattr(breadth_service, "refresh_default_symbols", None)
-            if callable(refresh_breadth):
-                await enqueue_or_run_background_job(
-                    background_jobs.refresh_market_breadth,
-                    refresh_breadth,
-                    job_id_prefix="refresh-market-breadth",
-                    description="Refresh US market breadth CSV files",
-                )
-            if csv_prune_interval <= 0:
-                continue
+            await asyncio.sleep(max(0.01, maintenance_interval))
             now = time.monotonic()
-            if now - last_prune < csv_prune_interval:
-                continue
-            prune_all = getattr(csv_service, "prune_all", None)
-            if callable(prune_all):
+            if csv_refresh_interval > 0 and now - last_csv_refresh >= csv_refresh_interval:
                 await enqueue_or_run_background_job(
-                    background_jobs.prune_historical_csvs,
-                    prune_all,
-                    job_id_prefix="prune-historical-csvs",
-                    description="Prune expired historical candle CSV rows",
+                    background_jobs.refresh_historical_csvs,
+                    csv_service.refresh_all,
+                    job_id_prefix="refresh-historical-csvs",
+                    description="Refresh live-page historical candle CSV files",
                 )
-            last_prune = now
+                refresh_breadth = getattr(breadth_service, "refresh_default_symbols", None)
+                if callable(refresh_breadth):
+                    await enqueue_or_run_background_job(
+                        background_jobs.refresh_market_breadth,
+                        refresh_breadth,
+                        job_id_prefix="refresh-market-breadth",
+                        description="Refresh US market breadth CSV files",
+                    )
+                last_csv_refresh = now
+            refresh_futoi = getattr(futoi, "refresh_daily", None)
+            if (
+                futoi_interval > 0
+                and callable(refresh_futoi)
+                and now - last_futoi >= futoi_interval
+            ):
+                await enqueue_or_run_background_job(
+                    background_jobs.refresh_futoi,
+                    refresh_futoi,
+                    job_id_prefix="refresh-futoi",
+                    description="Refresh MOEX FUTOI historical data",
+                )
+                last_futoi = now
+            prune_futoi = getattr(futoi, "prune_history", None)
+            if (
+                futoi_prune_interval > 0
+                and callable(prune_futoi)
+                and now - last_futoi_prune >= futoi_prune_interval
+            ):
+                await enqueue_or_run_background_job(
+                    background_jobs.prune_futoi,
+                    prune_futoi,
+                    job_id_prefix="prune-futoi",
+                    description="Prune MOEX FUTOI historical data older than retention",
+                )
+                last_futoi_prune = now
+            if csv_prune_interval > 0 and now - last_prune >= csv_prune_interval:
+                prune_all = getattr(csv_service, "prune_all", None)
+                if callable(prune_all):
+                    await enqueue_or_run_background_job(
+                        background_jobs.prune_historical_csvs,
+                        prune_all,
+                        job_id_prefix="prune-historical-csvs",
+                        description="Prune expired historical candle CSV rows",
+                    )
+                last_prune = now
 
     async def enqueue_or_run_background_job(
         queued_callback: Callable[[], Any],
@@ -226,7 +300,7 @@ def create_app(
         store.deactivate_expired_users()
         if expiry_interval > 0:
             expiry_task = asyncio.create_task(deactivate_expired_users_loop())
-        if csv_refresh_interval > 0:
+        if maintenance_interval > 0:
             historical_csv_task = asyncio.create_task(maintain_historical_csvs_loop())
         try:
             yield
@@ -394,14 +468,16 @@ def create_app(
     @app.get("/api/live-chart")
     def get_live_chart(
         request: Request,
-        _user: AuthUser = Depends(require_active_user),
+        user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         payload = dict(request.query_params)
-        return live_chart_payload(
+        chart_payload = live_chart_payload(
             payload,
             _live_client_for_handler(payload, client_factory),
             historical_store=history_store,
         )
+        maybe_send_telegram_rsi_alert(user, chart_payload)
+        return chart_payload
 
     @app.get("/api/market-breadth")
     def get_market_breadth(
@@ -414,6 +490,23 @@ def create_app(
             else None
         )
         return breadth_service.payload(requested_symbols)
+
+    @app.get("/api/futoi")
+    def get_futoi(
+        date: str = "",
+        ticker: str = "",
+        limit: int = 500,
+        _user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        if limit < 0:
+            raise ValueError("limit cannot be negative")
+        selected_date = parse_futoi_date(date)
+        records = futoi.load_records(
+            trading_date=selected_date,
+            ticker=ticker.strip().upper() or None,
+            limit=min(limit, 5000) if limit else None,
+        )
+        return {"ok": True, "records": [public_futoi_record(record) for record in records]}
 
     @app.post("/api/feedback")
     def submit_feedback(
@@ -428,6 +521,45 @@ def create_app(
             description=optional_text(feedback_payload.get("description")),
         )
         return {"ok": True, "feedback": public_feedback(created)}
+
+    @app.get("/api/alerts/telegram")
+    def get_telegram_alert_settings(
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "settings": public_telegram_alert_settings(
+                alerts.get_telegram_settings(user.id)
+            ),
+        }
+
+    @app.put("/api/alerts/telegram")
+    def update_telegram_alert_settings(
+        payload: dict[str, Any] | None = Body(default=None),
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        settings_payload = payload or {}
+        settings = alerts.upsert_telegram_settings(
+            user_id=user.id,
+            enabled=bool(settings_payload.get("enabled")),
+            bot_token=optional_text(settings_payload.get("bot_token")),
+            chat_id=optional_text(settings_payload.get("chat_id")),
+        )
+        return {"ok": True, "settings": public_telegram_alert_settings(settings)}
+
+    @app.post("/api/alerts/telegram/test")
+    def test_telegram_alert(
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        settings = alerts.get_telegram_settings(user.id)
+        if not settings.enabled or not settings.bot_token or not settings.chat_id:
+            raise ValueError("telegram alerts are not configured")
+        telegram.send_message(
+            settings.bot_token,
+            settings.chat_id,
+            build_telegram_test_message(user.username),
+        )
+        return {"ok": True}
 
     @app.get("/api/admin/feedback")
     def get_admin_feedback(
@@ -478,6 +610,42 @@ def create_app(
             )
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="not found")
 
+    def maybe_send_telegram_rsi_alert(
+        user: AuthUser,
+        chart_payload: dict[str, Any],
+    ) -> None:
+        settings = alerts.get_telegram_settings(user.id)
+        if not settings.enabled or not settings.bot_token or not settings.chat_id:
+            return
+        signal = chart_payload.get("rsi_alert_signal")
+        if not isinstance(signal, dict):
+            return
+        market = str(chart_payload.get("market") or "")
+        symbol = str(chart_payload.get("symbol") or "")
+        interval = str(chart_payload.get("interval") or "")
+        signature = build_signal_signature(
+            market=market,
+            symbol=symbol,
+            interval=interval,
+            signal=signal,
+        )
+        if alerts.has_signal_delivery(user.id, signature):
+            return
+        try:
+            telegram.send_message(
+                settings.bot_token,
+                settings.chat_id,
+                build_telegram_signal_message(
+                    market=market,
+                    symbol=symbol,
+                    interval=interval,
+                    signal=signal,
+                ),
+            )
+        except Exception:
+            return
+        alerts.record_signal_delivery(user.id, signature)
+
     return app
 
 
@@ -493,6 +661,13 @@ def feedback_store_from_env() -> FeedbackStore:
     if database_url:
         return PostgresFeedbackStore(database_url)
     return InMemoryFeedbackStore()
+
+
+def alert_store_from_env() -> AlertStore:
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if database_url:
+        return PostgresAlertStore(database_url)
+    return InMemoryAlertStore()
 
 
 def admin_email() -> str:

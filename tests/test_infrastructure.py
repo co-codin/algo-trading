@@ -53,6 +53,7 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("postgres-data:", compose)
         self.assertIn("MOEX_API_KEY: ${MOEX_API_KEY:-}", compose)
         self.assertIn("MOEXALGO_API_KEY: ${MOEXALGO_API_KEY:-}", compose)
+        self.assertIn("MOEX_FUTOI_API_KEY: ${MOEX_FUTOI_API_KEY:-}", compose)
 
     def test_compose_adds_redis_queue_and_worker(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
@@ -74,12 +75,17 @@ class InfrastructureTests(unittest.TestCase):
 
         self.assertIn(".env", gitignore.splitlines())
         self.assertIn("MOEX_API_KEY=", env_example)
+        self.assertIn("MOEX_FUTOI_API_KEY=", env_example)
         self.assertIn("ADMIN_EMAIL=", env_example)
         self.assertIn("# REDIS_URL=redis://localhost:6379/0", env_example)
         self.assertIn("RQ_QUEUE=maintenance", env_example)
         self.assertIn("HISTORICAL_CSV_RETENTION_DAYS=1095", env_example)
         self.assertIn("HISTORICAL_CSV_REFRESH_SECONDS=3600", env_example)
         self.assertIn("HISTORICAL_CSV_PRUNE_SECONDS=86400", env_example)
+        self.assertIn("MOEX_FUTOI_DATA_DIR=historical_data/futoi", env_example)
+        self.assertIn("MOEX_FUTOI_RETENTION_DAYS=730", env_example)
+        self.assertIn("MOEX_FUTOI_REFRESH_SECONDS=86400", env_example)
+        self.assertIn("MOEX_FUTOI_PRUNE_SECONDS=604800", env_example)
 
     def test_compose_persists_market_breadth_historical_csvs(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
@@ -92,6 +98,10 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn('HISTORICAL_CSV_RETENTION_DAYS: "1095"', compose)
         self.assertIn('HISTORICAL_CSV_REFRESH_SECONDS: "3600"', compose)
         self.assertIn('HISTORICAL_CSV_PRUNE_SECONDS: "86400"', compose)
+        self.assertIn("MOEX_FUTOI_DATA_DIR: /app/historical_data/futoi", compose)
+        self.assertIn('MOEX_FUTOI_RETENTION_DAYS: "730"', compose)
+        self.assertIn('MOEX_FUTOI_REFRESH_SECONDS: "86400"', compose)
+        self.assertIn('MOEX_FUTOI_PRUNE_SECONDS: "604800"', compose)
         self.assertIn('MARKET_BREADTH_RETENTION_DAYS: "365"', compose)
         self.assertIn("HISTORICAL_DATA_DIR ?= $(CURDIR)/historical_data", makefile)
         self.assertIn('"$(HISTORICAL_DATA_DIR)"', makefile)

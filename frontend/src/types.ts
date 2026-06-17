@@ -50,6 +50,19 @@ export type AdminFeedbackPayload = {
   feedback: FeedbackItem[];
 };
 
+export type TelegramAlertSettings = {
+  enabled: boolean;
+  bot_token_configured: boolean;
+  bot_token_preview: string;
+  chat_id: string;
+  updated_at: string | null;
+};
+
+export type TelegramAlertSettingsPayload = {
+  ok: true;
+  settings: TelegramAlertSettings;
+};
+
 export type StrategyInfo = {
   name: string;
   description: string;
@@ -115,6 +128,7 @@ export type LiveChartPayload = {
   strategy: string;
   candles: Candle[];
   signals: Marker[];
+  rsi_alert_signal: Marker | null;
   indicators: IndicatorDefinition[];
 };
 

@@ -47,6 +47,34 @@ class BackgroundJobTests(unittest.TestCase):
         self.assertEqual(result["requested"], 16)
         self.assertEqual(result["failed"], 0)
 
+    def test_refresh_futoi_returns_service_summary(self):
+        class FakeFutoiRefreshService:
+            def refresh_daily(self):
+                return {"requested": 1, "refreshed": 1, "records": 10, "failed": 0, "skipped": 0}
+
+        with patch(
+            "algo_trading.jobs.FutoiRefreshService",
+            return_value=FakeFutoiRefreshService(),
+        ):
+            result = jobs.refresh_futoi()
+
+        self.assertEqual(result["records"], 10)
+        self.assertEqual(result["skipped"], 0)
+
+    def test_prune_futoi_returns_service_summary(self):
+        class FakeFutoiRefreshService:
+            def prune_history(self):
+                return {"retention_days": 730, "store_deleted": 2, "csv_deleted": 2, "failed": 0}
+
+        with patch(
+            "algo_trading.jobs.FutoiRefreshService",
+            return_value=FakeFutoiRefreshService(),
+        ):
+            result = jobs.prune_futoi()
+
+        self.assertEqual(result["retention_days"], 730)
+        self.assertEqual(result["store_deleted"], 2)
+
     def test_deactivate_expired_users_uses_configured_store(self):
         class FakeAuthStore:
             def __init__(self) -> None:

@@ -719,6 +719,35 @@ class UiTests(unittest.TestCase):
         self.assertIn('"feedback.status.in_progress": "In progress"', i18n_source)
         self.assertIn('"feedback.status.resolved": "Resolved"', i18n_source)
 
+    def test_frontend_exposes_telegram_rsi_alert_settings(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(
+            encoding="utf-8"
+        )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("export type TelegramAlertSettings", types_source)
+        self.assertIn("export type TelegramAlertSettingsPayload", types_source)
+        self.assertIn("const telegramAlertForm = reactive({", app_source)
+        self.assertIn("async function loadTelegramAlertSettings()", app_source)
+        self.assertIn('requestJson<TelegramAlertSettingsPayload>("/api/alerts/telegram")', app_source)
+        self.assertIn("async function saveTelegramAlertSettings()", app_source)
+        self.assertIn('requestJson<TelegramAlertSettingsPayload>("/api/alerts/telegram",', app_source)
+        self.assertIn("async function testTelegramAlert()", app_source)
+        self.assertIn('requestJson<{ ok: true }>("/api/alerts/telegram/test"', app_source)
+        self.assertIn('v-model="telegramAlertForm.enabled"', app_source)
+        self.assertIn('v-model.trim="telegramAlertForm.bot_token"', app_source)
+        self.assertIn('v-model.trim="telegramAlertForm.chat_id"', app_source)
+        self.assertIn('"pages.telegramAlerts": "Telegram RSI alerts"', i18n_source)
+        self.assertIn('"labels.telegramBotToken": "Bot token"', i18n_source)
+        self.assertIn('"labels.telegramChatId": "Chat ID"', i18n_source)
+        self.assertIn('"actions.testTelegramAlert": "Send test alert"', i18n_source)
+
     def test_chart_accepts_translated_labels_from_parent(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
@@ -1201,6 +1230,30 @@ class UiTests(unittest.TestCase):
         self.assertIn("long_signal", signal_types)
         self.assertIn("short_signal", signal_types)
         self.assertIn("indicators", payload)
+        self.assertIsNone(payload["rsi_alert_signal"])
+
+    def test_live_chart_payload_exposes_latest_rsi_alert_signal(self):
+        client = FakeClient()
+        client.candles = [
+            candle(index, price)
+            for index, price in enumerate([10, 9, 8, 7, 8])
+        ]
+
+        payload = live_chart_payload(
+            {
+                "symbol": "BTCUSDT",
+                "interval": "5m",
+                "limit": 5,
+                "strategy": "ema-rsi",
+                "rsi_period": 2,
+                "rsi_overbought": 100,
+                "rsi_oversold": 0,
+            },
+            client=client,
+        )
+
+        self.assertEqual(payload["rsi_alert_signal"]["reason"], "rsi_reversal_long")
+        self.assertEqual(payload["rsi_alert_signal"]["time"], 4)
 
     def test_live_chart_payload_returns_ten_popular_indicators(self):
         client = FakeClient()

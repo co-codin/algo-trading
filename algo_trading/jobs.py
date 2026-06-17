@@ -4,6 +4,7 @@ import os
 
 from algo_trading.auth import AuthStore, InMemoryAuthStore, PostgresAuthStore
 from algo_trading.env import load_env_file
+from algo_trading.futoi import FutoiRefreshService
 from algo_trading.historical_data import HistoricalCsvRefreshService
 from algo_trading.historical_store import historical_store_from_env
 from algo_trading.market_breadth import MarketBreadthService
@@ -15,6 +16,14 @@ def refresh_historical_csvs() -> dict[str, int]:
 
 def refresh_market_breadth() -> dict[str, int]:
     return MarketBreadthService(store=historical_store_from_env()).refresh_default_symbols()
+
+
+def refresh_futoi() -> dict[str, int]:
+    return FutoiRefreshService(store=historical_store_from_env()).refresh_daily()
+
+
+def prune_futoi() -> dict[str, int]:
+    return FutoiRefreshService(store=historical_store_from_env()).prune_history()
 
 
 def prune_historical_csvs() -> dict[str, int]:

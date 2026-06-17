@@ -20,7 +20,8 @@
   gap: 10px;
 }
 
-.feedback-form {
+.feedback-form,
+.telegram-alert-form {
   display: grid;
   gap: 10px;
   border: 1px solid var(--line);
@@ -29,18 +30,34 @@
   padding: 12px;
 }
 
-.feedback-form h3 {
+.feedback-form h3,
+.telegram-alert-form h3 {
   margin: 0 0 4px;
   font-size: 16px;
 }
 
-.feedback-form p {
+.feedback-form p,
+.telegram-alert-form p {
   margin: 0;
   color: var(--muted);
 }
 
 .feedback-field-grid {
   grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr) minmax(220px, 0.7fr);
+}
+
+.telegram-alert-grid {
+  grid-template-columns: minmax(180px, 0.5fr) minmax(260px, 1fr) minmax(220px, 0.8fr) minmax(260px, 0.9fr);
+}
+
+.toggle-row {
+  align-items: center;
+  grid-auto-flow: column;
+  grid-template-columns: auto 1fr;
+}
+
+.toggle-row input {
+  width: auto;
 }
 
 .admin-feedback-section {
@@ -72,7 +89,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .feedback-field-grid {
+  .feedback-field-grid,
+  .telegram-alert-grid {
     grid-template-columns: 1fr;
   }
 }
