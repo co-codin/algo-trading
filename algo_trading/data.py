@@ -161,6 +161,65 @@ MAG7_STOCK_SYMBOLS = frozenset(
         "TSLA",
     }
 )
+HONG_KONG_STOCK_SYMBOL_ALIASES = {
+    "0005": "0005.HK",
+    "5": "0005.HK",
+    "HSBC": "0005.HK",
+    "0388": "0388.HK",
+    "388": "0388.HK",
+    "HKEX": "0388.HK",
+    "0700": "0700.HK",
+    "700": "0700.HK",
+    "TENCENT": "0700.HK",
+    "0883": "0883.HK",
+    "883": "0883.HK",
+    "CNOOC": "0883.HK",
+    "0939": "0939.HK",
+    "939": "0939.HK",
+    "CCB": "0939.HK",
+    "0941": "0941.HK",
+    "941": "0941.HK",
+    "CHINA_MOBILE": "0941.HK",
+    "CHINA-MOBILE": "0941.HK",
+    "0968": "0968.HK",
+    "968": "0968.HK",
+    "XPENG": "0968.HK",
+    "1024": "1024.HK",
+    "KUAISHOU": "1024.HK",
+    "1211": "1211.HK",
+    "BYD": "1211.HK",
+    "1299": "1299.HK",
+    "AIA": "1299.HK",
+    "1398": "1398.HK",
+    "ICBC": "1398.HK",
+    "1810": "1810.HK",
+    "XIAOMI": "1810.HK",
+    "2015": "2015.HK",
+    "LI": "2015.HK",
+    "LI_AUTO": "2015.HK",
+    "LI-AUTO": "2015.HK",
+    "2318": "2318.HK",
+    "PING_AN": "2318.HK",
+    "PING-AN": "2318.HK",
+    "2628": "2628.HK",
+    "CHINA_LIFE": "2628.HK",
+    "CHINA-LIFE": "2628.HK",
+    "3690": "3690.HK",
+    "MEITUAN": "3690.HK",
+    "9618": "9618.HK",
+    "JD": "9618.HK",
+    "JDCOM": "9618.HK",
+    "JD.COM": "9618.HK",
+    "9888": "9888.HK",
+    "BIDU": "9888.HK",
+    "BAIDU": "9888.HK",
+    "9988": "9988.HK",
+    "BABA": "9988.HK",
+    "ALIBABA": "9988.HK",
+    "9999": "9999.HK",
+    "NETEASE": "9999.HK",
+}
+HONG_KONG_STOCK_SYMBOLS = frozenset(HONG_KONG_STOCK_SYMBOL_ALIASES.values())
 
 
 class BinanceMarketDataClient:
@@ -741,6 +800,10 @@ def _yahoo_futures_symbol(symbol: str) -> str:
     value = symbol.strip().upper()
     if value in MAG7_STOCK_SYMBOLS:
         return value
+    if value in HONG_KONG_STOCK_SYMBOLS:
+        return value
+    if value in HONG_KONG_STOCK_SYMBOL_ALIASES:
+        return HONG_KONG_STOCK_SYMBOL_ALIASES[value]
     aliases = {
         "ES": "ES=F",
         "/ES": "ES=F",

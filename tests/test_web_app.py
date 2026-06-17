@@ -9,6 +9,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from algo_trading.auth import InMemoryAuthStore, utcnow
+from algo_trading.feedback import InMemoryFeedbackStore
 from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.models import Candle
 from algo_trading.web_app import create_app
@@ -228,6 +229,80 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(protected.status_code, 200)
         self.assertTrue(protected.json()["ok"])
+
+    def test_feedback_requires_active_user_and_title(self):
+        store = InMemoryAuthStore()
+        feedback_store = InMemoryFeedbackStore()
+        client = self.make_client(auth_store=store, feedback_store=feedback_store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice", "password": "password123"},
+        )
+
+        inactive = client.post("/api/feedback", json={"title": "Chart bug"})
+
+        self.assertEqual(inactive.status_code, 403)
+        self.assertEqual(inactive.json(), {"ok": False, "error": "account inactive"})
+
+        store.set_user_access(store.list_users()[0].id, is_active=True, activated_at=utcnow())
+        missing_title = client.post("/api/feedback", json={"title": " "})
+
+        self.assertEqual(missing_title.status_code, 400)
+        self.assertEqual(
+            missing_title.json(),
+            {"ok": False, "error": "feedback title is required"},
+        )
+
+    def test_active_user_can_submit_feedback_and_admin_can_update_status(self):
+        store = InMemoryAuthStore()
+        feedback_store = InMemoryFeedbackStore()
+        client = self.make_client(auth_store=store, feedback_store=feedback_store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        alice = store.list_users()[0]
+        store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
+
+        created = client.post(
+            "/api/feedback",
+            json={"title": " Chart bug ", "description": ""},
+        )
+
+        self.assertEqual(created.status_code, 200)
+        feedback = created.json()["feedback"]
+        self.assertEqual(feedback["title"], "Chart bug")
+        self.assertEqual(feedback["description"], "")
+        self.assertEqual(feedback["status"], "open")
+        self.assertEqual(feedback["username"], "alice@example.com")
+
+        forbidden = client.get("/api/admin/feedback")
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(forbidden.json(), {"ok": False, "error": "admin required"})
+
+        client.post("/api/auth/logout")
+        store.seed_admin_user("admin@example.com", "Vladimir960904")
+        client.post(
+            "/api/auth/login",
+            json={"username": "admin@example.com", "password": "Vladimir960904"},
+        )
+
+        listed = client.get("/api/admin/feedback")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()["feedback"]), 1)
+        self.assertEqual(listed.json()["feedback"][0]["id"], feedback["id"])
+
+        updated = client.patch(
+            f"/api/admin/feedback/{feedback['id']}/status",
+            json={"status": "in_progress"},
+        )
+
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["feedback"]["status"], "in_progress")
+        self.assertEqual(
+            client.get("/api/admin/feedback").json()["feedback"][0]["status"],
+            "in_progress",
+        )
 
     def test_live_chart_route_persists_fetched_candles_to_historical_store(self):
         class FakeMarketClient:

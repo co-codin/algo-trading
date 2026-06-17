@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from algo_trading.data import MoexSharesMarketDataClient
+from algo_trading.data import MoexSharesMarketDataClient, YahooFuturesMarketDataClient
 from algo_trading.historical_data import (
     HistoricalDataRefreshService,
     historical_client_for_market,
@@ -203,6 +203,42 @@ class HistoricalDataTests(unittest.TestCase):
         self.assertEqual(summary["refreshed"], 2)
         self.assertEqual(markets, ["mag7_stocks", "mag7_stocks"])
 
+    def test_refresh_service_infers_hong_kong_stock_market_from_symbol_and_directory(self):
+        now = int(datetime(2026, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
+        markets: list[str] = []
+        store = InMemoryHistoricalDataStore()
+
+        def client_factory(market: str) -> FakeHistoricalClient:
+            markets.append(market)
+            return FakeHistoricalClient([_candle(now, 108.0)])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "9988.HK-1d.csv").write_text(
+                "open_time,open,high,low,close,volume\n"
+                f"{now},108,109,107,108,1\n",
+                encoding="utf-8",
+            )
+            hk_dir = base / "hong_kong_stocks"
+            hk_dir.mkdir()
+            (hk_dir / "9888.HK-1d.csv").write_text(
+                "open_time,open,high,low,close,volume\n"
+                f"{now},110,111,109,110,1\n",
+                encoding="utf-8",
+            )
+            service = HistoricalDataRefreshService(
+                data_dir=base,
+                client_factory=client_factory,
+                now=lambda: datetime(2026, 6, 16, tzinfo=timezone.utc),
+                store=store,
+                import_legacy_csv=True,
+            )
+
+            summary = service.refresh_all()
+
+        self.assertEqual(summary["refreshed"], 2)
+        self.assertEqual(markets, ["hong_kong_stocks", "hong_kong_stocks"])
+
     def test_refresh_service_infers_moex_index_and_futures_markets(self):
         now = int(datetime(2026, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
         markets: list[str] = []
@@ -247,6 +283,12 @@ class HistoricalDataTests(unittest.TestCase):
         self.assertIsInstance(
             historical_client_for_market("russian_futures"),
             MoexSharesMarketDataClient,
+        )
+
+    def test_historical_client_accepts_hong_kong_stock_market(self):
+        self.assertIsInstance(
+            historical_client_for_market("hong_kong_stocks"),
+            YahooFuturesMarketDataClient,
         )
 
 

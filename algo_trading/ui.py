@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 from algo_trading.data import (
     BinanceMarketDataClient,
+    HONG_KONG_STOCK_SYMBOL_ALIASES,
+    HONG_KONG_STOCK_SYMBOLS,
     MAG7_STOCK_SYMBOLS,
     MarketDataClient,
     MoexSharesMarketDataClient,
@@ -38,6 +40,7 @@ CRYPTO_SPOT_MARKET = "crypto_spot"
 CME_FUTURES_MARKET = "cme_futures"
 COMMODITIES_MARKET = "commodities"
 MAG7_STOCKS_MARKET = "mag7_stocks"
+HONG_KONG_STOCKS_MARKET = "hong_kong_stocks"
 RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 RUSSIAN_INDICES_MARKET = "russian_indices"
 RUSSIAN_FUTURES_MARKET = "russian_futures"
@@ -245,7 +248,12 @@ def _interval_millis(interval: str) -> int:
 
 def market_data_client_from_payload(payload: dict[str, Any]) -> MarketDataClient:
     market = _market_from_payload(payload)
-    if market in (CME_FUTURES_MARKET, COMMODITIES_MARKET, MAG7_STOCKS_MARKET):
+    if market in (
+        CME_FUTURES_MARKET,
+        COMMODITIES_MARKET,
+        MAG7_STOCKS_MARKET,
+        HONG_KONG_STOCKS_MARKET,
+    ):
         return YahooFuturesMarketDataClient()
     if market in (
         RUSSIAN_BLUECHIPS_MARKET,
@@ -321,6 +329,12 @@ def _market_from_payload(payload: dict[str, Any]) -> str:
         "magnificent7": MAG7_STOCKS_MARKET,
         "magnificent_7": MAG7_STOCKS_MARKET,
         "magnificent_seven": MAG7_STOCKS_MARKET,
+        "hk": HONG_KONG_STOCKS_MARKET,
+        "hk_stocks": HONG_KONG_STOCKS_MARKET,
+        "hongkong": HONG_KONG_STOCKS_MARKET,
+        "hong_kong": HONG_KONG_STOCKS_MARKET,
+        "hong_kong_stocks": HONG_KONG_STOCKS_MARKET,
+        "hong-kong-stocks": HONG_KONG_STOCKS_MARKET,
         "moex": RUSSIAN_BLUECHIPS_MARKET,
         "russian": RUSSIAN_BLUECHIPS_MARKET,
         "russian_bluechips": RUSSIAN_BLUECHIPS_MARKET,
@@ -347,6 +361,8 @@ def _live_symbol_from_payload(payload: dict[str, Any], market: str) -> str:
         default_symbol = "GC=F"
     if market == MAG7_STOCKS_MARKET:
         default_symbol = "AAPL"
+    if market == HONG_KONG_STOCKS_MARKET:
+        default_symbol = "9988.HK"
     if market == RUSSIAN_BLUECHIPS_MARKET:
         default_symbol = "SBER"
     if market == RUSSIAN_INDICES_MARKET:
@@ -356,6 +372,13 @@ def _live_symbol_from_payload(payload: dict[str, Any], market: str) -> str:
     symbol = str(payload.get("symbol") or default_symbol).upper()
     if market == MAG7_STOCKS_MARKET and symbol not in MAG7_STOCK_SYMBOLS:
         raise ValueError(f"unsupported MAG 7 stock symbol: {symbol}")
+    if market == HONG_KONG_STOCKS_MARKET:
+        if symbol in HONG_KONG_STOCK_SYMBOLS:
+            return symbol
+        try:
+            return HONG_KONG_STOCK_SYMBOL_ALIASES[symbol]
+        except KeyError as exc:
+            raise ValueError(f"unsupported Hong Kong stock symbol: {symbol}") from exc
     return symbol
 
 
@@ -370,6 +393,8 @@ def _data_source_label(
         return "Yahoo Finance delayed commodity futures"
     if market == MAG7_STOCKS_MARKET:
         return "Yahoo Finance delayed US equities"
+    if market == HONG_KONG_STOCKS_MARKET:
+        return "Yahoo Finance delayed Hong Kong stocks"
     if market == RUSSIAN_INDICES_MARKET:
         return "MOEX APIM index"
     if market == RUSSIAN_FUTURES_MARKET:

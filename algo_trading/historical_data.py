@@ -9,6 +9,8 @@ from pathlib import Path
 from algo_trading.data import (
     BinanceMarketDataClient,
     HistoricalMarketDataClient,
+    HONG_KONG_STOCK_SYMBOL_ALIASES,
+    HONG_KONG_STOCK_SYMBOLS,
     MAG7_STOCK_SYMBOLS,
     MOEX_BLUECHIP_SYMBOLS,
     MOEX_FUTURES_SYMBOLS,
@@ -50,6 +52,7 @@ _CRYPTO_SPOT_MARKET = "crypto_spot"
 _CME_FUTURES_MARKET = "cme_futures"
 _COMMODITIES_MARKET = "commodities"
 _MAG7_STOCKS_MARKET = "mag7_stocks"
+_HONG_KONG_STOCKS_MARKET = "hong_kong_stocks"
 _RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
 _RUSSIAN_INDICES_MARKET = "russian_indices"
 _RUSSIAN_FUTURES_MARKET = "russian_futures"
@@ -281,7 +284,12 @@ HistoricalCsvRefreshService = HistoricalDataRefreshService
 def historical_client_for_market(market: str) -> HistoricalMarketDataClient:
     if market == _CRYPTO_SPOT_MARKET:
         return BinanceMarketDataClient()
-    if market in {_CME_FUTURES_MARKET, _COMMODITIES_MARKET, _MAG7_STOCKS_MARKET}:
+    if market in {
+        _CME_FUTURES_MARKET,
+        _COMMODITIES_MARKET,
+        _MAG7_STOCKS_MARKET,
+        _HONG_KONG_STOCKS_MARKET,
+    }:
         return YahooFuturesMarketDataClient()
     if market in {
         _RUSSIAN_BLUECHIPS_MARKET,
@@ -305,6 +313,12 @@ def _infer_market(relative_path: Path, symbol: str) -> str:
     symbol_key = symbol.upper()
     if relative_path.parent.name == _MAG7_STOCKS_MARKET or symbol_key in MAG7_STOCK_SYMBOLS:
         return _MAG7_STOCKS_MARKET
+    if (
+        relative_path.parent.name == _HONG_KONG_STOCKS_MARKET
+        or symbol_key in HONG_KONG_STOCK_SYMBOLS
+        or symbol_key in HONG_KONG_STOCK_SYMBOL_ALIASES
+    ):
+        return _HONG_KONG_STOCKS_MARKET
     if relative_path.parent.name == _RUSSIAN_INDICES_MARKET or symbol_key in MOEX_INDEX_SYMBOLS:
         return _RUSSIAN_INDICES_MARKET
     if relative_path.parent.name == _RUSSIAN_FUTURES_MARKET or symbol_key in MOEX_FUTURES_SYMBOLS:

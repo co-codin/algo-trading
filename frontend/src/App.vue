@@ -5,6 +5,7 @@ import TradingViewChart from "./components/TradingViewChart.vue";
 import {
   LIVE_WORKSPACE_STORAGE_KEY,
   defaultLiveIndicators,
+  hongKongStockSymbolOptions,
   liveCandleOptions,
   liveIntervalOptions,
   liveSymbolOptions,
@@ -36,6 +37,10 @@ import type {
   AuthMePayload,
   AuthPayload,
   AuthUser,
+  AdminFeedbackPayload,
+  FeedbackItem,
+  FeedbackPayload,
+  FeedbackStatus,
   IndicatorDefinition,
   LiveChartPayload,
   MarketBreadthBar,
@@ -167,11 +172,18 @@ const profileForm = reactive({
   last_name: "",
   middle_name: "",
 });
+const feedbackForm = reactive({
+  title: "",
+  description: "",
+});
 const authStatus = ref("");
 const authStatusType = ref<StatusType>("");
 const profileStatus = ref(t("status.ready"));
 const profileStatusType = ref<StatusType>("");
+const feedbackStatus = ref(t("status.ready"));
+const feedbackStatusType = ref<StatusType>("");
 const adminUsers = ref<AuthUser[]>([]);
+const adminFeedback = ref<FeedbackItem[]>([]);
 const adminExpiryEdits = reactive<Record<number, string>>({});
 const adminSearch = ref("");
 const adminStatus = ref(t("status.ready"));
@@ -239,11 +251,17 @@ const filteredAdminUsers = computed(() => {
   }
   return adminUsers.value.filter((user) => user.username.toLowerCase().includes(query));
 });
+const feedbackStatusOptions = computed<SelectOption[]>(() => [
+  { value: "open", label: t("feedback.status.open") },
+  { value: "in_progress", label: t("feedback.status.in_progress") },
+  { value: "resolved", label: t("feedback.status.resolved") },
+]);
 const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "crypto_spot", label: t("options.cryptoSpot") },
   { value: "cme_futures", label: t("options.usIndexFutures") },
   { value: "commodities", label: t("options.commodities") },
   { value: "mag7_stocks", label: t("options.mag7Stocks") },
+  { value: "hong_kong_stocks", label: t("options.hongKongStocks") },
   { value: "russian_bluechips", label: t("options.moexBluechips") },
   { value: "russian_indices", label: t("options.moexIndices") },
   { value: "russian_futures", label: t("options.moexFutures") },
@@ -265,6 +283,7 @@ const liveSymbolsByMarket = computed<Record<string, SelectOption[]>>(() => ({
   cme_futures: liveFuturesSymbolOptions.value,
   commodities: commoditySymbolOptions.value,
   mag7_stocks: mag7StockSymbolOptions,
+  hong_kong_stocks: hongKongStockSymbolOptions,
   russian_bluechips: moexBluechipSymbolOptions,
   russian_indices: moexIndexSymbolOptions,
   russian_futures: moexFuturesSymbolOptions,
@@ -530,6 +549,9 @@ watch(locale, () => {
   if (!profileStatusType.value) {
     profileStatus.value = t("status.ready");
   }
+  if (!feedbackStatusType.value) {
+    feedbackStatus.value = t("status.ready");
+  }
   if (!authStatusType.value && authStatus.value) {
     authStatus.value = t("auth.ready");
   }
@@ -603,7 +625,7 @@ function setMode(mode: Mode, updateUrl = true) {
     void loadProfile();
   }
   if (nextMode === "admin") {
-    void loadAdminUsers();
+    void loadAdminPanel();
   }
 }
 
@@ -625,6 +647,11 @@ function setAdminStatus(message: string, type: StatusType = "") {
 function setProfileStatus(message: string, type: StatusType = "") {
   profileStatus.value = message;
   profileStatusType.value = type;
+}
+
+function setFeedbackStatus(message: string, type: StatusType = "") {
+  feedbackStatus.value = message;
+  feedbackStatusType.value = type;
 }
 
 async function loadCurrentUser() {
@@ -922,6 +949,23 @@ async function loadAdminUsers() {
   }
 }
 
+async function loadAdminFeedback() {
+  try {
+    const payload = await requestJson<AdminFeedbackPayload>("/api/admin/feedback");
+    adminFeedback.value = payload.feedback;
+  } catch (error) {
+    adminFeedback.value = [];
+    setAdminStatus(errorMessage(error), "error");
+  }
+}
+
+async function loadAdminPanel() {
+  await loadAdminUsers();
+  if (!adminStatusType.value) {
+    await loadAdminFeedback();
+  }
+}
+
 async function saveProfile() {
   setProfileStatus(t("status.savingProfile"), "busy");
   try {
@@ -934,6 +978,25 @@ async function saveProfile() {
     setProfileStatus(t("status.profileSaved"));
   } catch (error) {
     setProfileStatus(errorMessage(error), "error");
+  }
+}
+
+async function submitFeedback() {
+  if (!authUser.value?.is_active) {
+    setFeedbackStatus(t("auth.inactive"), "error");
+    return;
+  }
+  setFeedbackStatus(t("status.sendingFeedback"), "busy");
+  try {
+    await requestJson<FeedbackPayload>("/api/feedback", {
+      method: "POST",
+      body: JSON.stringify(feedbackForm),
+    });
+    feedbackForm.title = "";
+    feedbackForm.description = "";
+    setFeedbackStatus(t("status.feedbackSent"));
+  } catch (error) {
+    setFeedbackStatus(errorMessage(error), "error");
   }
 }
 
@@ -983,6 +1046,22 @@ async function updateUserExpiry(user: AuthUser) {
       setProfileForm(payload.user);
     }
     setAdminStatus(t("status.expirationUpdated"));
+  } catch (error) {
+    setAdminStatus(errorMessage(error), "error");
+  }
+}
+
+async function updateFeedbackStatus(feedback: FeedbackItem, status: FeedbackStatus) {
+  setAdminStatus(t("status.updatingFeedback"), "busy");
+  try {
+    const payload = await requestJson<FeedbackPayload>(`/api/admin/feedback/${feedback.id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    adminFeedback.value = adminFeedback.value.map((existingFeedback) =>
+      existingFeedback.id === payload.feedback.id ? payload.feedback : existingFeedback,
+    );
+    setAdminStatus(t("status.feedbackUpdated"));
   } catch (error) {
     setAdminStatus(errorMessage(error), "error");
   }
@@ -1038,6 +1117,9 @@ async function logout() {
   livePayload.value = null;
   breadthPayload.value = null;
   adminUsers.value = [];
+  adminFeedback.value = [];
+  feedbackForm.title = "";
+  feedbackForm.description = "";
 }
 
 async function loadStrategies() {
@@ -1191,6 +1273,10 @@ function formatNumber(value: unknown): string {
 
 function formatDateTime(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "—";
+}
+
+function formatFeedbackStatus(status: FeedbackStatus): string {
+  return t(`feedback.status.${status}` as MessageKey);
 }
 
 function latestBreadthCandle(symbol: string): MarketBreadthBar | null {
@@ -1865,6 +1951,37 @@ function errorMessage(error: unknown): string {
           </div>
         </div>
       </form>
+      <form v-if="authUser.is_active" class="feedback-form" @submit.prevent="submitFeedback">
+        <div>
+          <h3>{{ t("pages.feedback") }}</h3>
+          <p>{{ t("pages.feedbackSubtitle") }}</p>
+        </div>
+        <div class="field-grid feedback-field-grid">
+          <label>
+            <span>{{ t("labels.feedbackTitle") }}</span>
+            <input
+              v-model.trim="feedbackForm.title"
+              autocomplete="off"
+              required
+              maxlength="160"
+            >
+          </label>
+          <label>
+            <span>{{ t("labels.feedbackDescription") }}</span>
+            <textarea
+              v-model.trim="feedbackForm.description"
+              maxlength="4000"
+              rows="3"
+            ></textarea>
+          </label>
+          <div class="profile-form-actions">
+            <button class="primary" type="submit">{{ t("actions.sendFeedback") }}</button>
+            <div class="status" :class="feedbackStatusType ? `is-${feedbackStatusType}` : ''">
+              {{ feedbackStatus }}
+            </div>
+          </div>
+        </div>
+      </form>
       <div class="profile-grid">
         <div class="profile-field">
           <span>{{ t("labels.username") }}</span>
@@ -1961,6 +2078,49 @@ function errorMessage(error: unknown): string {
           </tr>
         </tbody>
       </table>
+      <section class="admin-feedback-section">
+        <div class="panel-heading compact-heading">
+          <div>
+            <h3>{{ t("pages.feedbackInbox") }}</h3>
+            <p>{{ t("pages.feedbackInboxSubtitle") }}</p>
+          </div>
+        </div>
+        <div v-if="!adminFeedback.length" class="empty">{{ t("empty.noFeedback") }}</div>
+        <table v-else>
+          <thead>
+            <tr>
+              <th>{{ t("table.created") }}</th>
+              <th>{{ t("table.username") }}</th>
+              <th>{{ t("labels.feedbackTitle") }}</th>
+              <th>{{ t("labels.feedbackDescription") }}</th>
+              <th>{{ t("labels.status") }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="feedback in adminFeedback" :key="feedback.id">
+              <td>{{ formatDateTime(feedback.created_at) }}</td>
+              <td>{{ feedback.username }}</td>
+              <td>{{ feedback.title }}</td>
+              <td>{{ feedback.description || "—" }}</td>
+              <td>
+                <select
+                  v-model="feedback.status"
+                  @change="updateFeedbackStatus(feedback, feedback.status)"
+                >
+                  <option
+                    v-for="option in feedbackStatusOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+                <span class="feedback-status-label">{{ formatFeedbackStatus(feedback.status) }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
     </section>
 
   </main>

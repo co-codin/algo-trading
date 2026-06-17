@@ -301,6 +301,44 @@ class CliTests(unittest.TestCase):
             self.assertTrue(output.exists())
             self.assertIn("wrote 2 SP500 candles", stdout.getvalue())
 
+    def test_candles_command_exports_hong_kong_stock_market_last_n_days(self):
+        fake_client = FakeYahooClient()
+        stdout = StringIO()
+        now_seconds = 1_700_000_000.0
+        expected_end = int(now_seconds * 1000)
+        expected_start = expected_end - (365 * 24 * 60 * 60 * 1000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "9988.HK-1d-365d.csv"
+            with patch("algo_trading.cli.YahooFuturesMarketDataClient", return_value=fake_client):
+                with patch("algo_trading.cli.time.time", return_value=now_seconds):
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "candles",
+                                "--market",
+                                "hong_kong_stocks",
+                                "--symbol",
+                                "9988.hk",
+                                "--interval",
+                                "1d",
+                                "--days",
+                                "365",
+                                "--limit",
+                                "1000",
+                                "--output",
+                                str(output),
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                fake_client.historical_requests,
+                [("9988.HK", "1d", expected_start, expected_end, 1000)],
+            )
+            self.assertTrue(output.exists())
+            self.assertIn("wrote 2 9988.HK candles", stdout.getvalue())
+
     def test_candles_command_exports_moex_market_last_n_days(self):
         fake_client = FakeMoexClient()
         stdout = StringIO()
