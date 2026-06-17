@@ -82,6 +82,9 @@ class UiTests(unittest.TestCase):
         config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
             encoding="utf-8"
         )
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("liveSymbolOptions", source)
         self.assertIn("export const liveSymbolOptions = [", config_source)
@@ -100,6 +103,16 @@ class UiTests(unittest.TestCase):
         self.assertIn('t("options.usIndexFutures")', source)
         self.assertIn('value: "ES=F"', source)
         self.assertIn('t("options.sp500Future")', source)
+        self.assertIn('value: "NQ=F"', source)
+        self.assertIn('t("options.nasdaq100Future")', source)
+        self.assertIn('value: "YM=F"', source)
+        self.assertIn('t("options.dowJonesFuture")', source)
+        self.assertIn('"options.nasdaq100Future": "Nasdaq 100 Future"', i18n_source)
+        self.assertIn('"options.dowJonesFuture": "Dow Jones Future"', i18n_source)
+        self.assertIn('"options.nasdaq100Future": "Фьючерс Nasdaq 100"', i18n_source)
+        self.assertIn('"options.dowJonesFuture": "Фьючерс Dow Jones"', i18n_source)
+        self.assertIn('"options.nasdaq100Future": "纳斯达克100期货"', i18n_source)
+        self.assertIn('"options.dowJonesFuture": "道琼斯期货"', i18n_source)
         self.assertIn('<select v-model="liveMarket"', source)
         self.assertIn('<select v-model="liveSymbol"', source)
         self.assertIn('<select v-model="liveInterval"', source)

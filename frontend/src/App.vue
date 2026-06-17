@@ -280,6 +280,8 @@ const liveMarketOptions = computed<SelectOption[]>(() => [
 ]);
 const liveFuturesSymbolOptions = computed<SelectOption[]>(() => [
   { value: "ES=F", label: t("options.sp500Future") },
+  { value: "NQ=F", label: t("options.nasdaq100Future") },
+  { value: "YM=F", label: t("options.dowJonesFuture") },
 ]);
 const commoditySymbolOptions = computed<SelectOption[]>(() => [
   { value: "GC=F", label: t("options.commodityGold") },
