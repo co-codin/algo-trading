@@ -67,6 +67,9 @@ const TradingViewChart = defineAsyncComponent(() => import("./components/Trading
 
 type StatusType = "" | "busy" | "error";
 type SignalDisplayMode = "consensus" | "individual";
+type ChartLoadOptions = {
+  showLoader?: boolean;
+};
 type StrategyOption = StrategyInfo & {
   title: string;
   description: string;
@@ -404,6 +407,7 @@ const watchlistForm = reactive<WatchlistForm>({
 });
 const liveStatus = ref(t("status.ready"));
 const liveStatusType = ref<StatusType>("");
+const liveChartLoading = ref(false);
 const quantStatus = ref(t("status.ready"));
 const quantStatusType = ref<StatusType>("");
 const breadthStatus = ref(t("status.ready"));
@@ -428,6 +432,7 @@ const russianLiveVisibleIndicators = ref<string[]>([
 ]);
 const russianLiveStatus = ref(t("status.ready"));
 const russianLiveStatusType = ref<StatusType>("");
+const russianLiveChartLoading = ref(false);
 const liveRefresh = ref("10");
 const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
 const liveConsensusMinConfirmations = ref(5);
@@ -450,8 +455,11 @@ const futoiForm = reactive({
   limit: "500",
 });
 let liveTimer = 0;
+let russianLiveTimer = 0;
 let liveChartRequestId = 0;
 let russianLiveChartRequestId = 0;
+let liveChartLoadingRequestId = 0;
+let russianLiveChartLoadingRequestId = 0;
 let isApplyingLiveSettingsFromUrl = false;
 let isApplyingRussianLiveSettingsFromUrl = false;
 
@@ -946,7 +954,7 @@ watch(
   [russianLiveMarket, russianLiveSymbol, russianLiveInterval, russianLiveLimit, russianLiveStrategyRequest, russianLiveAlgoPackDatasets],
   () => {
     if (activeMode.value === "russian-live") {
-      void loadRussianLiveChart();
+      refreshRussianLiveChart();
     }
   },
   { deep: true },
@@ -1089,10 +1097,10 @@ function setMode(mode: Mode, updateUrl = true) {
     window.history.pushState({ mode: nextMode }, "", nextUrl);
   }
   if (nextMode === "live") {
-    startLivePolling();
+    startLivePolling(true);
   }
   if (nextMode === "russian-live") {
-    void loadRussianLiveChart();
+    startRussianLivePolling(true);
   }
   if (nextMode === "breadth") {
     void loadMarketBreadth();
@@ -2010,11 +2018,16 @@ async function loadStrategies() {
   strategies.value = payload.strategies;
 }
 
-async function loadLiveChart() {
+async function loadLiveChart({ showLoader = false }: ChartLoadOptions = {}) {
   const requestId = ++liveChartRequestId;
   if (!canUseFeatures.value) {
     setLiveStatus(t("auth.inactive"), "error");
     return;
+  }
+  if (showLoader) {
+    liveChartLoading.value = true;
+    liveChartLoadingRequestId = requestId;
+    setLiveStatus(t("status.loadingChart"), "busy");
   }
   try {
     const query = toQuery({
@@ -2039,16 +2052,25 @@ async function loadLiveChart() {
     livePayload.value = null;
     liveDataUpdatedAt.value = null;
     setLiveStatus(errorMessage(error), "error");
+  } finally {
+    if (showLoader && liveChartLoadingRequestId === requestId) {
+      liveChartLoading.value = false;
+      liveChartLoadingRequestId = 0;
+    }
   }
 }
 
-async function loadRussianLiveChart() {
+async function loadRussianLiveChart({ showLoader = false }: ChartLoadOptions = {}) {
   const requestId = ++russianLiveChartRequestId;
   if (!canUseFeatures.value) {
     setRussianLiveStatus(t("auth.inactive"), "error");
     return;
   }
-  setRussianLiveStatus(t("status.ready"), "busy");
+  if (showLoader) {
+    russianLiveChartLoading.value = true;
+    russianLiveChartLoadingRequestId = requestId;
+    setRussianLiveStatus(t("status.loadingChart"), "busy");
+  }
   try {
     const params = new URLSearchParams(toQuery({
       ...settings,
@@ -2071,6 +2093,11 @@ async function loadRussianLiveChart() {
     }
     russianLivePayload.value = null;
     setRussianLiveStatus(errorMessage(error), "error");
+  } finally {
+    if (showLoader && russianLiveChartLoadingRequestId === requestId) {
+      russianLiveChartLoading.value = false;
+      russianLiveChartLoadingRequestId = 0;
+    }
   }
 }
 
@@ -2212,10 +2239,16 @@ function isAlgoPackIndicator(indicatorId: string): boolean {
   return indicatorId.startsWith("algopack-");
 }
 
-function startLivePolling() {
-  void loadLiveChart();
+function startLivePolling(showLoader = false) {
+  void loadLiveChart({ showLoader });
   const seconds = Math.max(2, Number(liveRefresh.value || 10));
   liveTimer = window.setInterval(() => void loadLiveChart(), seconds * 1000);
+}
+
+function startRussianLivePolling(showLoader = false) {
+  void loadRussianLiveChart({ showLoader });
+  const seconds = Math.max(2, Number(liveRefresh.value || 10));
+  russianLiveTimer = window.setInterval(() => void loadRussianLiveChart(), seconds * 1000);
 }
 
 function stopLivePolling() {
@@ -2223,19 +2256,28 @@ function stopLivePolling() {
     window.clearInterval(liveTimer);
     liveTimer = 0;
   }
+  if (russianLiveTimer) {
+    window.clearInterval(russianLiveTimer);
+    russianLiveTimer = 0;
+  }
 }
 
 function refreshLiveChart() {
   stopLivePolling();
   if (activeMode.value === "live") {
-    startLivePolling();
+    startLivePolling(true);
     return;
   }
-  void loadLiveChart();
+  void loadLiveChart({ showLoader: true });
 }
 
 function refreshRussianLiveChart() {
-  void loadRussianLiveChart();
+  stopLivePolling();
+  if (activeMode.value === "russian-live") {
+    startRussianLivePolling(true);
+    return;
+  }
+  void loadRussianLiveChart({ showLoader: true });
 }
 
 async function loadMarketBreadth() {
@@ -3237,7 +3279,7 @@ function errorMessage(error: unknown): string {
           <span>{{ option.label }}</span>
         </label>
       </div>
-      <div class="chart-shell">
+      <div class="chart-shell" :class="{ 'is-loading': liveChartLoading }">
         <div class="chart-legend">
           <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
           <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
@@ -3257,6 +3299,10 @@ function errorMessage(error: unknown): string {
             :short-signal-label="chartLabels.shortSignal"
           />
           <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
+          <div v-if="liveChartLoading" class="chart-loader" role="status" aria-live="polite">
+            <span class="chart-loader-spinner"></span>
+            <b>{{ t("status.loadingChart") }}</b>
+          </div>
         </div>
       </div>
       <div class="market-event-feed">
@@ -3500,7 +3546,7 @@ function errorMessage(error: unknown): string {
           <span>{{ option.label }}</span>
         </label>
       </div>
-      <div class="chart-shell">
+      <div class="chart-shell" :class="{ 'is-loading': russianLiveChartLoading }">
         <div class="chart-legend">
           <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
           <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
@@ -3520,6 +3566,10 @@ function errorMessage(error: unknown): string {
             :short-signal-label="chartLabels.shortSignal"
           />
           <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
+          <div v-if="russianLiveChartLoading" class="chart-loader" role="status" aria-live="polite">
+            <span class="chart-loader-spinner"></span>
+            <b>{{ t("status.loadingChart") }}</b>
+          </div>
         </div>
       </div>
       <div class="market-event-feed">

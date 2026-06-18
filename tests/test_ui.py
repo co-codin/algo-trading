@@ -327,7 +327,10 @@ class UiTests(unittest.TestCase):
         self.assertIn('"russian-live": "/moex-live"', app_source)
         self.assertIn('{ mode: "russian-live" as const, label: t("tabs.russianLive") }', app_source)
         self.assertIn("const russianLivePayload = ref<LiveChartPayload | null>(null);", app_source)
-        self.assertIn("async function loadRussianLiveChart()", app_source)
+        self.assertIn(
+            "async function loadRussianLiveChart({ showLoader = false }: ChartLoadOptions = {})",
+            app_source,
+        )
         self.assertIn('params.set("algopack", russianLiveAlgoPackDatasets.value.join(","))', app_source)
         self.assertIn("visibleRussianAlgoPackIndicatorOptions", app_source)
         self.assertIn("isAlgoPackIndicator", app_source)
@@ -587,7 +590,7 @@ class UiTests(unittest.TestCase):
             source,
         )
 
-    def test_live_page_does_not_render_chart_loader(self):
+    def test_live_pages_show_manual_chart_loader_without_polling_loader(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(
             encoding="utf-8"
@@ -599,18 +602,32 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("async function loadLiveChart()", app_source)
-        self.assertIn("void loadLiveChart();", app_source)
+        self.assertIn("type ChartLoadOptions = {", app_source)
+        self.assertIn("showLoader?: boolean;", app_source)
+        self.assertIn("async function loadLiveChart({ showLoader = false }: ChartLoadOptions = {})", app_source)
+        self.assertIn("async function loadRussianLiveChart({ showLoader = false }: ChartLoadOptions = {})", app_source)
+        self.assertIn("const liveChartLoading = ref(false);", app_source)
+        self.assertIn("const russianLiveChartLoading = ref(false);", app_source)
+        self.assertIn("let liveChartLoadingRequestId = 0;", app_source)
+        self.assertIn("let russianLiveChartLoadingRequestId = 0;", app_source)
+        self.assertIn("liveChartLoading.value = true;", app_source)
+        self.assertIn("russianLiveChartLoading.value = true;", app_source)
+        self.assertIn("liveChartLoading.value = false;", app_source)
+        self.assertIn("russianLiveChartLoading.value = false;", app_source)
+        self.assertIn("startLivePolling(true);", app_source)
+        self.assertIn("startRussianLivePolling(true);", app_source)
+        self.assertIn("refreshRussianLiveChart();", app_source)
         self.assertIn("window.setInterval(() => void loadLiveChart(), seconds * 1000)", app_source)
-        self.assertIn("startLivePolling();", app_source)
-        self.assertNotIn("liveChartLoading", app_source)
-        self.assertNotIn("showLoader", app_source)
-        self.assertNotIn("chart-loader", app_source)
-        self.assertNotIn("status.loadingChart", app_source)
-        self.assertNotIn("chart-shell.is-loading", style_source)
-        self.assertNotIn(".chart-loader", style_source)
-        self.assertNotIn("chartLoaderSpin", style_source)
-        self.assertNotIn('"status.loadingChart"', i18n_source)
+        self.assertIn("window.setInterval(() => void loadRussianLiveChart(), seconds * 1000)", app_source)
+        self.assertIn(":class=\"{ 'is-loading': liveChartLoading }\"", app_source)
+        self.assertIn(":class=\"{ 'is-loading': russianLiveChartLoading }\"", app_source)
+        self.assertIn('class="chart-loader"', app_source)
+        self.assertIn(".chart-shell.is-loading", style_source)
+        self.assertIn(".chart-loader", style_source)
+        self.assertIn("chartLoaderSpin", style_source)
+        self.assertIn('"status.loadingChart": "Loading chart"', i18n_source)
+        self.assertIn('"status.loadingChart": "Загрузка графика"', i18n_source)
+        self.assertIn('"status.loadingChart": "正在加载图表"', i18n_source)
 
     def test_live_chart_refresh_preserves_user_zoom(self):
         root = Path(__file__).resolve().parents[1]

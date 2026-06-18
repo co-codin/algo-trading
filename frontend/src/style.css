@@ -1442,6 +1442,46 @@ button:focus {
   min-height: 560px;
 }
 
+.chart-shell.is-loading .chart-stage {
+  cursor: wait;
+}
+
+.chart-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  background: rgba(15, 19, 24, 0.72);
+  color: var(--ink);
+  text-align: center;
+  pointer-events: none;
+}
+
+.chart-loader b {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(19, 23, 34, 0.94);
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.chart-loader-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(209, 212, 220, 0.22);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: chartLoaderSpin 0.8s linear infinite;
+}
+
+@keyframes chartLoaderSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
