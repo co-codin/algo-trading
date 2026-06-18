@@ -14,19 +14,6 @@ from typing import Any, Callable
 from fastapi import BackgroundTasks, Body, Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
-from algo_trading.alerts import (
-    AlertStore,
-    InMemoryAlertStore,
-    PostgresAlertStore,
-    TelegramBotClient,
-    TelegramSender,
-    build_event_signature,
-    build_signal_signature,
-    build_telegram_event_message,
-    build_telegram_signal_message,
-    build_telegram_test_message,
-    public_telegram_alert_settings,
-)
 from algo_trading.auth import (
     AuthStore,
     AuthUser,
@@ -66,11 +53,9 @@ from algo_trading.market_breadth import (
     default_symbols as default_breadth_symbols,
 )
 from algo_trading.market_intelligence import (
-    build_breadth_confirmation_events,
     build_futoi_position_dashboard,
     build_unusual_futoi_events,
     public_futoi_dashboard,
-    public_market_event,
 )
 from algo_trading.market_reports import (
     build_daily_market_report,
@@ -143,10 +128,8 @@ def create_app(
     daily_market_report_refresh_seconds: float | None = None,
     historical_store: HistoricalDataStore | None = None,
     feedback_store: FeedbackStore | None = None,
-    alert_store: AlertStore | None = None,
     live_symbol_store: LiveSymbolStore | None = None,
     workspace_store: WorkspaceStore | None = None,
-    telegram_sender: TelegramSender | None = None,
     job_queue: JobQueue | None = None,
     response_cache: ResponseCache | None = None,
     seed_admin: bool = True,
@@ -168,14 +151,11 @@ def create_app(
         store.seed_admin_user(admin_email(), seed_password)
     feedback = feedback_store or feedback_store_from_env()
     feedback.ensure_schema()
-    alerts = alert_store or alert_store_from_env()
-    alerts.ensure_schema()
     symbol_store = live_symbol_store or live_symbol_store_from_env()
     symbol_store.ensure_schema()
     symbol_store.seed_default_symbols()
     saved_state = workspace_store or workspace_store_from_env()
     saved_state.ensure_schema()
-    telegram = telegram_sender or TelegramBotClient()
     history_store = historical_store or historical_store_from_env()
     history_store.ensure_schema()
     breadth_service = market_breadth_service or MarketBreadthService(store=history_store)
@@ -675,13 +655,11 @@ def create_app(
     def get_live_chart(
         request: Request,
         background_tasks: BackgroundTasks,
-        user: AuthUser = Depends(require_active_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         payload = dict(request.query_params)
         cache_key, cached = read_cached_api_payload(request, "live-chart")
         if cached is not None:
-            maybe_send_telegram_rsi_alert(user, cached)
-            maybe_send_telegram_market_events(user, cached.get("events"))
             return cached
         cache_state: dict[str, bool] = {}
         chart_payload = live_chart_payload(
@@ -695,8 +673,6 @@ def create_app(
             background_tasks.add_task(refresh_live_chart_cache, payload, cache_key)
         else:
             write_cached_api_payload("live-chart", cache_key, chart_payload)
-        maybe_send_telegram_rsi_alert(user, chart_payload)
-        maybe_send_telegram_market_events(user, chart_payload.get("events"))
         return chart_payload
 
     @app.get("/api/quant-strategies")
@@ -730,29 +706,18 @@ def create_app(
     def get_market_breadth(
         request: Request,
         symbols: str = "",
-        user: AuthUser = Depends(require_active_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         requested_symbols = (
             [symbol.strip().upper() for symbol in symbols.split(",") if symbol.strip()]
             if symbols
             else None
         )
-        payload = cached_api_payload(
+        return cached_api_payload(
             request,
             "market-breadth",
             lambda: breadth_service.payload(requested_symbols),
         )
-        breadth_events = build_breadth_confirmation_events(
-            {
-                symbol: history_store.load_breadth_bars(symbol)
-                for symbol in (requested_symbols or default_breadth_symbols())
-            }
-        )
-        maybe_send_telegram_market_events(
-            user,
-            [public_market_event(event) for event in breadth_events],
-        )
-        return payload
 
     @app.get("/api/futoi")
     def get_futoi(
@@ -761,7 +726,7 @@ def create_app(
         ticker: str = "",
         limit: int = 500,
         history_days: int = 365,
-        user: AuthUser = Depends(require_active_user),
+        _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         if limit < 0:
             raise ValueError("limit cannot be negative")
@@ -799,15 +764,11 @@ def create_app(
                 "dashboard": public_futoi_dashboard(dashboard),
             }
 
-        payload = cached_api_payload(
+        return cached_api_payload(
             request,
             "futoi",
             futoi_payload,
         )
-        dashboard = payload.get("dashboard")
-        events = dashboard.get("events") if isinstance(dashboard, dict) else None
-        maybe_send_telegram_market_events(user, events)
-        return payload
 
     @app.get("/api/futoi/instruments")
     def get_futoi_instruments(
@@ -977,45 +938,6 @@ def create_app(
         )
         return {"ok": True, "feedback": public_feedback(created)}
 
-    @app.get("/api/alerts/telegram")
-    def get_telegram_alert_settings(
-        user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        return {
-            "ok": True,
-            "settings": public_telegram_alert_settings(
-                alerts.get_telegram_settings(user.id)
-            ),
-        }
-
-    @app.put("/api/alerts/telegram")
-    def update_telegram_alert_settings(
-        payload: dict[str, Any] | None = Body(default=None),
-        user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        settings_payload = payload or {}
-        settings = alerts.upsert_telegram_settings(
-            user_id=user.id,
-            enabled=bool(settings_payload.get("enabled")),
-            bot_token=optional_text(settings_payload.get("bot_token")),
-            chat_id=optional_text(settings_payload.get("chat_id")),
-        )
-        return {"ok": True, "settings": public_telegram_alert_settings(settings)}
-
-    @app.post("/api/alerts/telegram/test")
-    def test_telegram_alert(
-        user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        settings = alerts.get_telegram_settings(user.id)
-        if not settings.enabled or not settings.bot_token or not settings.chat_id:
-            raise ValueError("telegram alerts are not configured")
-        telegram.send_message(
-            settings.bot_token,
-            settings.chat_id,
-            build_telegram_test_message(user.username),
-        )
-        return {"ok": True}
-
     @app.get("/api/admin/feedback")
     def get_admin_feedback(
         _admin: AuthUser = Depends(require_admin_user),
@@ -1065,70 +987,6 @@ def create_app(
             )
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="not found")
 
-    def maybe_send_telegram_rsi_alert(
-        user: AuthUser,
-        chart_payload: dict[str, Any],
-    ) -> None:
-        settings = alerts.get_telegram_settings(user.id)
-        if not settings.enabled or not settings.bot_token or not settings.chat_id:
-            return
-        signal = chart_payload.get("rsi_alert_signal")
-        if not isinstance(signal, dict):
-            return
-        market = str(chart_payload.get("market") or "")
-        symbol = str(chart_payload.get("symbol") or "")
-        interval = str(chart_payload.get("interval") or "")
-        signature = build_signal_signature(
-            market=market,
-            symbol=symbol,
-            interval=interval,
-            signal=signal,
-        )
-        if alerts.has_signal_delivery(user.id, signature):
-            return
-        try:
-            telegram.send_message(
-                settings.bot_token,
-                settings.chat_id,
-                build_telegram_signal_message(
-                    market=market,
-                    symbol=symbol,
-                    interval=interval,
-                    signal=signal,
-                ),
-            )
-        except Exception:
-            return
-        alerts.record_signal_delivery(user.id, signature)
-
-    def maybe_send_telegram_market_events(
-        user: AuthUser,
-        events: Any,
-    ) -> None:
-        settings = alerts.get_telegram_settings(user.id)
-        if not settings.enabled or not settings.bot_token or not settings.chat_id:
-            return
-        if not isinstance(events, list):
-            return
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-            try:
-                signature = build_event_signature(event)
-            except ValueError:
-                continue
-            if alerts.has_signal_delivery(user.id, signature):
-                continue
-            try:
-                telegram.send_message(
-                    settings.bot_token,
-                    settings.chat_id,
-                    build_telegram_event_message(event),
-                )
-            except Exception:
-                continue
-            alerts.record_signal_delivery(user.id, signature)
-
     return app
 
 
@@ -1144,13 +1002,6 @@ def feedback_store_from_env() -> FeedbackStore:
     if database_url:
         return PostgresFeedbackStore(database_url)
     return InMemoryFeedbackStore()
-
-
-def alert_store_from_env() -> AlertStore:
-    database_url = os.environ.get("DATABASE_URL", "").strip()
-    if database_url:
-        return PostgresAlertStore(database_url)
-    return InMemoryAlertStore()
 
 
 def env_int(name: str, default: int) -> int:

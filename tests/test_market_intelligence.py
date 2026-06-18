@@ -154,7 +154,7 @@ class MarketIntelligenceTests(unittest.TestCase):
         self.assertEqual(events[0].metrics["series_count"], 3)
         self.assertIn("Breadth", events[0].title)
 
-    def test_public_market_event_is_stable_for_api_and_telegram_payloads(self):
+    def test_public_market_event_is_stable_for_api_payloads(self):
         event = build_volume_spike_events(
             [
                 Candle(1, 10.0, 11.0, 9.0, 10.0, 100.0),

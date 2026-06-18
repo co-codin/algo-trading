@@ -10,13 +10,11 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from algo_trading.alerts import InMemoryAlertStore
 from algo_trading.auth import InMemoryAuthStore, utcnow
 from algo_trading.feedback import InMemoryFeedbackStore
 from algo_trading.futoi import FutoiInstrument, FutoiRecord
 from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.live_symbols import InMemoryLiveSymbolStore, LiveSymbol
-from algo_trading.market_breadth import MarketBreadthBar
 from algo_trading.models import Candle
 from algo_trading.web_app import admin_password, create_app
 from algo_trading.workspaces import InMemoryWorkspaceStore
@@ -162,7 +160,7 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("API response cache get failed for market-breadth", content)
         self.assertIn("API response cache set failed for market-breadth", content)
 
-    def test_live_chart_api_uses_short_response_cache_without_skipping_alert_dedupe(self):
+    def test_live_chart_api_uses_short_response_cache(self):
         class FakeResponseCache:
             def __init__(self) -> None:
                 self.values: dict[str, dict[str, Any]] = {}
@@ -180,13 +178,6 @@ class WebAppTests(unittest.TestCase):
             ) -> None:
                 self.values[key] = payload
                 self.set_ttls.append(ttl_seconds)
-
-        class FakeTelegramSender:
-            def __init__(self) -> None:
-                self.messages: list[tuple[str, str, str]] = []
-
-            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
-                self.messages.append((bot_token, chat_id, text))
 
         class FakeMarketClient:
             calls = 0
@@ -210,13 +201,9 @@ class WebAppTests(unittest.TestCase):
                 ][:limit]
 
         auth_store = InMemoryAuthStore()
-        alert_store = InMemoryAlertStore()
-        sender = FakeTelegramSender()
         cache = FakeResponseCache()
         client = self.make_client(
             auth_store=auth_store,
-            alert_store=alert_store,
-            telegram_sender=sender,
             client_factory=FakeMarketClient,
             historical_store=InMemoryHistoricalDataStore(),
             response_cache=cache,
@@ -227,14 +214,6 @@ class WebAppTests(unittest.TestCase):
         )
         user = auth_store.list_users()[0]
         auth_store.set_user_access(user.id, is_active=True, activated_at=utcnow())
-        client.put(
-            "/api/alerts/telegram",
-            json={
-                "enabled": True,
-                "bot_token": "123456:abcdef-secret-token",
-                "chat_id": "987654321",
-            },
-        )
 
         query = (
             "/api/live-chart?symbol=BTCUSDT&interval=5m&limit=5"
@@ -247,74 +226,6 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(FakeMarketClient.calls, 1)
         self.assertEqual(cache.set_ttls, [10])
-        self.assertEqual(len(sender.messages), 1)
-
-    def test_active_user_can_save_and_test_telegram_alert_settings(self):
-        class FakeTelegramSender:
-            def __init__(self) -> None:
-                self.messages: list[tuple[str, str, str]] = []
-
-            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
-                self.messages.append((bot_token, chat_id, text))
-
-        auth_store = InMemoryAuthStore()
-        alert_store = InMemoryAlertStore()
-        sender = FakeTelegramSender()
-        client = self.make_client(
-            auth_store=auth_store,
-            alert_store=alert_store,
-            telegram_sender=sender,
-        )
-        client.post(
-            "/api/auth/register",
-            json={"username": "alice@example.com", "password": "password123"},
-        )
-
-        inactive = client.get("/api/alerts/telegram")
-        self.assertEqual(inactive.status_code, 403)
-
-        alice = auth_store.list_users()[0]
-        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
-
-        missing_config = client.put(
-            "/api/alerts/telegram",
-            json={"enabled": True, "bot_token": "", "chat_id": ""},
-        )
-        self.assertEqual(missing_config.status_code, 400)
-        self.assertEqual(
-            missing_config.json(),
-            {"ok": False, "error": "telegram bot token is required"},
-        )
-
-        saved = client.put(
-            "/api/alerts/telegram",
-            json={
-                "enabled": True,
-                "bot_token": "123456:abcdef-secret-token",
-                "chat_id": "987654321",
-            },
-        )
-
-        self.assertEqual(saved.status_code, 200)
-        settings = saved.json()["settings"]
-        self.assertTrue(settings["enabled"])
-        self.assertTrue(settings["bot_token_configured"])
-        self.assertEqual(settings["bot_token_preview"], "123456:...oken")
-        self.assertEqual(settings["chat_id"], "987654321")
-        self.assertNotIn("abcdef-secret-token", str(settings))
-
-        loaded = client.get("/api/alerts/telegram")
-        self.assertEqual(loaded.status_code, 200)
-        self.assertNotIn("abcdef-secret-token", str(loaded.json()))
-
-        tested = client.post("/api/alerts/telegram/test")
-
-        self.assertEqual(tested.status_code, 200)
-        self.assertEqual(tested.json(), {"ok": True})
-        self.assertEqual(len(sender.messages), 1)
-        self.assertEqual(sender.messages[0][0], "123456:abcdef-secret-token")
-        self.assertEqual(sender.messages[0][1], "987654321")
-        self.assertIn("Test alert", sender.messages[0][2])
 
     def test_active_user_can_load_database_backed_live_symbols(self):
         auth_store = InMemoryAuthStore()
@@ -396,287 +307,6 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("russian_symbols", payload)
         self.assertNotIn("russian_bluechips", payload["symbols"])
         self.assertIn("russian_bluechips", payload["russian_symbols"])
-
-    def test_live_chart_sends_rsi_telegram_alert_once_per_signal(self):
-        class FakeTelegramSender:
-            def __init__(self) -> None:
-                self.messages: list[tuple[str, str, str]] = []
-
-            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
-                self.messages.append((bot_token, chat_id, text))
-
-        class FakeMarketClient:
-            def get_24h_tickers(self) -> list[dict[str, object]]:
-                return []
-
-            def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
-                prices = [10, 9, 8, 7, 8]
-                return [
-                    Candle(
-                        open_time=index,
-                        open=price,
-                        high=price + 1.0,
-                        low=price - 1.0,
-                        close=price,
-                        volume=1.0,
-                    )
-                    for index, price in enumerate(prices)
-                ][:limit]
-
-        auth_store = InMemoryAuthStore()
-        alert_store = InMemoryAlertStore()
-        sender = FakeTelegramSender()
-        client = self.make_client(
-            auth_store=auth_store,
-            alert_store=alert_store,
-            telegram_sender=sender,
-            client_factory=FakeMarketClient,
-            historical_store=InMemoryHistoricalDataStore(),
-        )
-        client.post(
-            "/api/auth/register",
-            json={"username": "alice@example.com", "password": "password123"},
-        )
-        alice = auth_store.list_users()[0]
-        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
-        client.put(
-            "/api/alerts/telegram",
-            json={
-                "enabled": True,
-                "bot_token": "123456:abcdef-secret-token",
-                "chat_id": "987654321",
-            },
-        )
-
-        query = (
-            "/api/live-chart?symbol=BTCUSDT&interval=5m&limit=5"
-            "&strategy=ema-rsi&rsi_period=2&rsi_overbought=100&rsi_oversold=0"
-        )
-        first = client.get(query)
-        second = client.get(query)
-
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 200)
-        self.assertEqual(len(sender.messages), 1)
-        self.assertEqual(sender.messages[0][0], "123456:abcdef-secret-token")
-        self.assertEqual(sender.messages[0][1], "987654321")
-        self.assertIn("RSI alert", sender.messages[0][2])
-        self.assertIn("BTCUSDT", sender.messages[0][2])
-        self.assertIn("rsi_reversal_long", sender.messages[0][2])
-
-    def test_live_chart_sends_market_event_telegram_alerts_once(self):
-        class FakeTelegramSender:
-            def __init__(self) -> None:
-                self.messages: list[tuple[str, str, str]] = []
-
-            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
-                self.messages.append((bot_token, chat_id, text))
-
-        class FakeMarketClient:
-            def get_24h_tickers(self) -> list[dict[str, object]]:
-                return []
-
-            def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
-                volumes = [100.0, 120.0, 80.0, 360.0]
-                return [
-                    Candle(
-                        open_time=index,
-                        open=10.0,
-                        high=11.0,
-                        low=9.0,
-                        close=10.0,
-                        volume=volume,
-                    )
-                    for index, volume in enumerate(volumes)
-                ][:limit]
-
-        auth_store = InMemoryAuthStore()
-        alert_store = InMemoryAlertStore()
-        sender = FakeTelegramSender()
-        client = self.make_client(
-            auth_store=auth_store,
-            alert_store=alert_store,
-            telegram_sender=sender,
-            client_factory=FakeMarketClient,
-            historical_store=InMemoryHistoricalDataStore(),
-        )
-        client.post(
-            "/api/auth/register",
-            json={"username": "alice@example.com", "password": "password123"},
-        )
-        alice = auth_store.list_users()[0]
-        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
-        client.put(
-            "/api/alerts/telegram",
-            json={
-                "enabled": True,
-                "bot_token": "123456:abcdef-secret-token",
-                "chat_id": "987654321",
-            },
-        )
-
-        query = "/api/live-chart?symbol=BTCUSDT&interval=1h&limit=4&strategy="
-        first = client.get(query)
-        second = client.get(query)
-
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 200)
-        self.assertEqual(len(sender.messages), 1)
-        self.assertEqual(sender.messages[0][0], "123456:abcdef-secret-token")
-        self.assertEqual(sender.messages[0][1], "987654321")
-        self.assertIn("Market event: Volume spike on BTCUSDT", sender.messages[0][2])
-        self.assertIn("volume_ratio=3.6", sender.messages[0][2])
-
-    def test_futoi_sends_position_change_telegram_alert_once(self):
-        class FakeTelegramSender:
-            def __init__(self) -> None:
-                self.messages: list[tuple[str, str, str]] = []
-
-            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
-                self.messages.append((bot_token, chat_id, text))
-
-        def futoi_record(trade_date: date, position: float) -> FutoiRecord:
-            return FutoiRecord(
-                trade_date=trade_date,
-                trade_time="18:45:00",
-                ticker="IMOEXF",
-                client_group="FIZ",
-                position=position,
-                position_long=max(position, 0.0),
-                position_short=0.0,
-                position_long_count=1,
-                position_short_count=0,
-            )
-
-        auth_store = InMemoryAuthStore()
-        alert_store = InMemoryAlertStore()
-        history_store = InMemoryHistoricalDataStore()
-        sender = FakeTelegramSender()
-        history_store.upsert_futoi_records(
-            [
-                futoi_record(date(2024, 4, 7), 100.0),
-                futoi_record(date(2024, 4, 8), 180.0),
-            ],
-            source="unit-test",
-        )
-        client = self.make_client(
-            auth_store=auth_store,
-            alert_store=alert_store,
-            historical_store=history_store,
-            telegram_sender=sender,
-        )
-        client.post(
-            "/api/auth/register",
-            json={"username": "alice@example.com", "password": "password123"},
-        )
-        alice = auth_store.list_users()[0]
-        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
-        client.put(
-            "/api/alerts/telegram",
-            json={
-                "enabled": True,
-                "bot_token": "123456:abcdef-secret-token",
-                "chat_id": "987654321",
-            },
-        )
-
-        query = "/api/futoi?date=2024-04-08&ticker=IMOEXF&limit=10&history_days=1"
-        first = client.get(query)
-        second = client.get(query)
-
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 200)
-        self.assertEqual(len(sender.messages), 1)
-        self.assertIn(
-            "Market event: FUTOI positioning changed for IMOEXF",
-            sender.messages[0][2],
-        )
-        self.assertIn("net_change=80.0", sender.messages[0][2])
-
-    def test_market_breadth_sends_confirmation_telegram_alert_once(self):
-        class FakeTelegramSender:
-            def __init__(self) -> None:
-                self.messages: list[tuple[str, str, str]] = []
-
-            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
-                self.messages.append((bot_token, chat_id, text))
-
-        class FakeMarketBreadthService:
-            def payload(self, symbols: list[str] | None = None) -> dict[str, Any]:
-                return {
-                    "ok": True,
-                    "source": "unit-test",
-                    "groups": [],
-                    "series": {},
-                    "put_call_symbol": "$CPC",
-                    "requested_symbols": symbols,
-                }
-
-        auth_store = InMemoryAuthStore()
-        alert_store = InMemoryAlertStore()
-        history_store = InMemoryHistoricalDataStore()
-        sender = FakeTelegramSender()
-        history_store.upsert_breadth_bars(
-            "$S5FD",
-            [
-                MarketBreadthBar(
-                    symbol="$S5FD",
-                    date=date(2024, 4, 8),
-                    open=70.0,
-                    high=70.0,
-                    low=70.0,
-                    close=70.0,
-                    volume=1.0,
-                )
-            ],
-            source="unit-test",
-        )
-        history_store.upsert_breadth_bars(
-            "$MMFI",
-            [
-                MarketBreadthBar(
-                    symbol="$MMFI",
-                    date=date(2024, 4, 8),
-                    open=75.0,
-                    high=75.0,
-                    low=75.0,
-                    close=75.0,
-                    volume=1.0,
-                )
-            ],
-            source="unit-test",
-        )
-        client = self.make_client(
-            auth_store=auth_store,
-            alert_store=alert_store,
-            historical_store=history_store,
-            market_breadth_service=FakeMarketBreadthService(),
-            telegram_sender=sender,
-        )
-        client.post(
-            "/api/auth/register",
-            json={"username": "alice@example.com", "password": "password123"},
-        )
-        alice = auth_store.list_users()[0]
-        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
-        client.put(
-            "/api/alerts/telegram",
-            json={
-                "enabled": True,
-                "bot_token": "123456:abcdef-secret-token",
-                "chat_id": "987654321",
-            },
-        )
-
-        query = "/api/market-breadth?symbols=$S5FD,$MMFI"
-        first = client.get(query)
-        second = client.get(query)
-
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 200)
-        self.assertEqual(len(sender.messages), 1)
-        self.assertIn("Market event: Breadth confirmation", sender.messages[0][2])
-        self.assertIn("average_breadth=72.5", sender.messages[0][2])
 
     def test_unexpected_api_errors_are_written_to_app_log(self):
         def failing_client_factory() -> Any:
@@ -1735,6 +1365,9 @@ class WebAppTests(unittest.TestCase):
             client.post("/api/backtest", json={}),
             client.post("/api/paper", json={}),
             client.post("/api/combination-signals", json={}),
+            client.get("/api/alerts/telegram"),
+            client.put("/api/alerts/telegram", json={}),
+            client.post("/api/alerts/telegram/test"),
             client.get("/api/runs"),
             client.get("/api/run?path=backtests/x"),
         ]

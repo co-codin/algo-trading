@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a MOEX/FUTOI-centered intelligence layer with historical positioning, unusual activity, chart events, Telegram alert events, Russian daily reports, and persisted user watchlists/workspaces.
+**Goal:** Build a MOEX/FUTOI-centered intelligence layer with historical positioning, unusual activity, chart events, browser-visible strategy signals, Russian daily reports, and persisted user watchlists/workspaces.
 
 **Architecture:** Add a pure backend intelligence module that derives reusable events from candles, FUTOI, AlgoPack, and breadth data. Persist user workspaces/watchlists through a dedicated store, expose active-user APIs, and keep existing chart pages as the primary UI surfaces.
 
-**Tech Stack:** Python/FastAPI, existing historical Postgres/in-memory stores, existing Telegram alert store, Vue 3/TypeScript/Vite frontend, pytest/unittest.
+**Tech Stack:** Python/FastAPI, existing historical Postgres/in-memory stores, Vue 3/TypeScript/Vite frontend, pytest/unittest.
 
 ---
 
@@ -87,36 +87,32 @@ pytest tests/test_web_app.py::WebAppTests::test_active_user_can_read_futoi_dashb
 
 Expected: PASS.
 
-### Task 3: Generic Telegram Alert Engine
+### Task 3: Retired Telegram Alert Engine
 
-**Files:**
-- Modify: `algo_trading/alerts.py`
-- Modify: `algo_trading/web_app.py`
-- Test: `tests/test_alerts.py`
-- Test: `tests/test_web_app.py`
+Telegram delivery has been retired from this project. Do not recreate `algo_trading/alerts.py`, `tests/test_alerts.py`, or `/api/alerts/telegram` routes from this historical plan. Strategy and market events remain available through chart/API payloads and browser-side notifications.
 
-- [ ] **Step 1: Write failing alert tests**
+- [x] **Step 1: Remove server-side Telegram alert surface**
 
-Add tests for generic event signatures and messages for `rsi_reversal`, `futoi_change`, `volume_spike`, and `breadth_confirmation`.
+Delete the server-side Telegram alert store, delivery helpers, and tests.
 
 ```bash
-pytest tests/test_alerts.py::AlertTests::test_market_event_message_contains_event_context -q
+pytest tests/test_web_app.py::WebAppTests::test_removed_workflow_apis_return_404 -q
 ```
 
-Expected: FAIL because the generic message builder does not exist.
+Expected: PASS.
 
-- [ ] **Step 2: Generalize signatures/messages**
+- [x] **Step 2: Preserve chart/API event payloads**
 
-Add `build_event_signature()` and `build_telegram_event_message()`. Keep `build_signal_signature()` and `build_telegram_signal_message()` as compatibility wrappers for RSI.
+Keep `rsi_alert_signal` and market `events` in chart/API payloads for browser-side handling.
 
-- [ ] **Step 3: Send chart events**
+- [x] **Step 3: Update frontend copy and tests**
 
-In `/api/live-chart`, send eligible chart events through Telegram after RSI dedupe. Keep active-user and configured-token requirements.
+Ensure frontend copy no longer advertises Telegram delivery and tests assert the Telegram alert UI/API is absent.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 ```bash
-pytest tests/test_alerts.py tests/test_web_app.py::WebAppTests::test_live_chart_sends_market_event_telegram_alerts_once -q
+pytest tests/test_web_app.py::WebAppTests::test_removed_workflow_apis_return_404 tests/test_ui.py -k telegram -q
 ```
 
 Expected: PASS.
