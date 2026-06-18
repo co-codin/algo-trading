@@ -99,6 +99,11 @@ type FutoiChartLabels = {
   short: string;
   openInterest: string;
 };
+type LandingInfoSection = {
+  title: MessageKey;
+  summary: MessageKey;
+  items: MessageKey[];
+};
 type LiveWorkspace = {
   id: string;
   name: string;
@@ -199,6 +204,44 @@ const landingFeatureKeys: MessageKey[] = [
   "landing.feature.live",
   "landing.feature.moex",
   "landing.feature.breadth",
+];
+const landingInfoSections: LandingInfoSection[] = [
+  {
+    title: "landing.info.coverage.title",
+    summary: "landing.info.coverage.summary",
+    items: [
+      "landing.info.coverage.global",
+      "landing.info.coverage.hk",
+      "landing.info.coverage.moex",
+    ],
+  },
+  {
+    title: "landing.info.pipeline.title",
+    summary: "landing.info.pipeline.summary",
+    items: [
+      "landing.info.pipeline.postgres",
+      "landing.info.pipeline.history",
+      "landing.info.pipeline.futoi",
+    ],
+  },
+  {
+    title: "landing.info.signals.title",
+    summary: "landing.info.signals.summary",
+    items: [
+      "landing.info.signals.rsi",
+      "landing.info.signals.megaalerts",
+      "landing.info.signals.quant",
+    ],
+  },
+  {
+    title: "landing.info.access.title",
+    summary: "landing.info.access.summary",
+    items: [
+      "landing.info.access.trial",
+      "landing.info.access.feedback",
+      "landing.info.access.admin",
+    ],
+  },
 ];
 
 const routeModes: Record<string, Mode> = {
@@ -2438,6 +2481,33 @@ function errorMessage(error: unknown): string {
       <div class="landing-feature-grid">
         <article v-for="feature in landingFeatureKeys" :key="feature" class="landing-feature-card">
           <span>{{ t(feature) }}</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="landing-info-band" :aria-label="t('landing.info.heading')">
+      <div class="landing-info-header">
+        <div>
+          <p>{{ t("landing.info.eyebrow") }}</p>
+          <h2>{{ t("landing.info.heading") }}</h2>
+        </div>
+        <span>{{ t("landing.info.caption") }}</span>
+      </div>
+      <div class="landing-info-grid">
+        <article
+          v-for="section in landingInfoSections"
+          :key="section.title"
+          class="landing-info-panel"
+        >
+          <header>
+            <h3>{{ t(section.title) }}</h3>
+            <p>{{ t(section.summary) }}</p>
+          </header>
+          <ul class="landing-info-list">
+            <li v-for="item in section.items" :key="item">
+              {{ t(item) }}
+            </li>
+          </ul>
         </article>
       </div>
     </section>
