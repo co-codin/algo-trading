@@ -425,7 +425,6 @@ const russianLiveInterval = ref("1h");
 const russianLiveLimit = ref<string | number>(180);
 const russianLiveVisibleIndicators = ref<string[]>([
   ...defaultLiveIndicators,
-  "algopack-alerts",
 ]);
 const russianLiveStatus = ref(t("status.ready"));
 const russianLiveStatusType = ref<StatusType>("");

@@ -331,6 +331,11 @@ class UiTests(unittest.TestCase):
         self.assertIn('params.set("algopack", russianLiveAlgoPackDatasets.value.join(","))', app_source)
         self.assertIn("visibleRussianAlgoPackIndicatorOptions", app_source)
         self.assertIn("isAlgoPackIndicator", app_source)
+        default_indicator_block = app_source.split(
+            "const russianLiveVisibleIndicators = ref<string[]>([", 1
+        )[1].split("]);", 1)[0]
+        self.assertNotIn('"algopack-alerts"', default_indicator_block)
+        self.assertIn('{ value: "algopack-alerts", dataset: "alerts"', config_source)
         self.assertIn("activeMode === 'russian-live'", app_source)
         self.assertIn("russianLivePayload.candles", app_source)
         self.assertNotIn('{ value: "russian_bluechips", label: t("options.moexBluechips") }', app_source)
