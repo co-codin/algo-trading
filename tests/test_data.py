@@ -495,7 +495,7 @@ class DataTests(unittest.TestCase):
                 }
             )
 
-        candles = MoexSharesMarketDataClient(opener=opener).get_klines("sber", "5m", 2)
+        candles = MoexSharesMarketDataClient(opener=opener, api_key="").get_klines("sber", "5m", 2)
 
         self.assertEqual(len(candles), 2)
         self.assertEqual(candles[0].open, 300.0)
@@ -523,7 +523,7 @@ class DataTests(unittest.TestCase):
                 }
             )
 
-        candles = MoexSharesMarketDataClient(opener=opener).get_klines("SBER", "1m", 2)
+        candles = MoexSharesMarketDataClient(opener=opener, api_key="").get_klines("SBER", "1m", 2)
 
         query = parse_qs(urlparse(requests[0]).query)
         self.assertEqual(query["iss.reverse"], ["true"])
@@ -549,7 +549,7 @@ class DataTests(unittest.TestCase):
                 }
             )
 
-        candles = MoexSharesMarketDataClient(opener=opener).get_klines("IMOEX", "5m", 1)
+        candles = MoexSharesMarketDataClient(opener=opener, api_key="").get_klines("IMOEX", "5m", 1)
 
         self.assertEqual(len(candles), 1)
         self.assertIn("/engines/stock/markets/index/boards/SNDX/securities/IMOEX/candles.json", requests[0])
@@ -569,7 +569,7 @@ class DataTests(unittest.TestCase):
                 }
             )
 
-        candles = MoexSharesMarketDataClient(opener=opener).get_klines("RIM6", "5m", 1)
+        candles = MoexSharesMarketDataClient(opener=opener, api_key="").get_klines("RIM6", "5m", 1)
 
         self.assertEqual(len(candles), 1)
         self.assertIn("/engines/futures/markets/forts/boards/RFUD/securities/RIM6/candles.json", requests[0])
@@ -589,7 +589,7 @@ class DataTests(unittest.TestCase):
                 }
             )
 
-        MoexSharesMarketDataClient(opener=opener).get_klines("RSI", "5m", 1)
+        MoexSharesMarketDataClient(opener=opener, api_key="").get_klines("RSI", "5m", 1)
 
         self.assertIn("/securities/RIM6/candles.json", requests[0])
 
@@ -656,7 +656,7 @@ class DataTests(unittest.TestCase):
         start_time = int(datetime(2025, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
         end_time = int(datetime(2026, 6, 16, tzinfo=timezone.utc).timestamp() * 1000)
 
-        candles = MoexSharesMarketDataClient(opener=opener).get_historical_klines(
+        candles = MoexSharesMarketDataClient(opener=opener, api_key="").get_historical_klines(
             "TATN",
             "1d",
             start_time,
@@ -706,7 +706,7 @@ class DataTests(unittest.TestCase):
                 }
             )
 
-        client = MoexSharesMarketDataClient(opener=opener)
+        client = MoexSharesMarketDataClient(opener=opener, api_key="")
 
         client.get_klines("SBER", "1w", 1)
         client.get_klines("SBER", "1M", 1)

@@ -26,7 +26,7 @@ services:
   algo-trading:
     build:
       context: .
-    image: binance-algo-trading:local
+    image: algo-trading:local
     user: "${UID:-1000}:${GID:-1000}"
     depends_on:
       postgres:
@@ -47,7 +47,6 @@ services:
       RQ_QUEUE: maintenance
       API_RESPONSE_CACHE_ENABLED: "1"
       API_CACHE_TTL_SYMBOLS_SECONDS: "30"
-      API_CACHE_TTL_LIVE_SYMBOLS_SECONDS: "300"
       API_CACHE_TTL_LIVE_CHART_SECONDS: "10"
       API_CACHE_TTL_MARKET_BREADTH_SECONDS: "300"
       API_CACHE_TTL_FUTOI_SECONDS: "60"
@@ -63,7 +62,7 @@ services:
       MOEX_FUTOI_REFRESH_SECONDS: "86400"
       MOEX_FUTOI_PRUNE_SECONDS: "604800"
       ADMIN_EMAIL: ${ADMIN_EMAIL:-cuiyeqing960904@gmail.com}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Vladimir960904}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       MOEX_API_KEY: ${MOEX_API_KEY:-}
       MOEXALGO_API_KEY: ${MOEXALGO_API_KEY:-}
       MOEX_FUTOI_API_KEY: ${MOEX_FUTOI_API_KEY:-}
@@ -71,7 +70,7 @@ services:
   worker:
     build:
       context: .
-    image: binance-algo-trading:local
+    image: algo-trading:local
     command: python -m algo_trading.worker
     user: "${UID:-1000}:${GID:-1000}"
     depends_on:
@@ -97,7 +96,7 @@ services:
       MOEX_FUTOI_REFRESH_SECONDS: "86400"
       MOEX_FUTOI_PRUNE_SECONDS: "604800"
       ADMIN_EMAIL: ${ADMIN_EMAIL:-cuiyeqing960904@gmail.com}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Vladimir960904}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       MOEX_API_KEY: ${MOEX_API_KEY:-}
       MOEXALGO_API_KEY: ${MOEXALGO_API_KEY:-}
       MOEX_FUTOI_API_KEY: ${MOEX_FUTOI_API_KEY:-}

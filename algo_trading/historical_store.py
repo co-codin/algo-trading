@@ -85,10 +85,19 @@ class HistoricalDataStore(Protocol):
         source: str = "",
     ) -> int: ...
 
+    def replace_futoi_instruments(
+        self,
+        instruments: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int: ...
+
     def load_futoi_records(
         self,
         *,
         trading_date: date | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         ticker: str | None = None,
         limit: int | None = None,
     ) -> list[Any]: ...
@@ -96,6 +105,24 @@ class HistoricalDataStore(Protocol):
     def list_futoi_instruments(self) -> list[Any]: ...
 
     def prune_futoi_records(self, cutoff_date: date) -> int: ...
+
+    def upsert_algopack_records(
+        self,
+        records: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int: ...
+
+    def load_algopack_records(
+        self,
+        *,
+        dataset: str | None = None,
+        market: str | None = None,
+        ticker: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int | None = None,
+    ) -> list[Any]: ...
 
 
 class InMemoryHistoricalDataStore:
@@ -111,6 +138,7 @@ class InMemoryHistoricalDataStore:
         self._breadth_updated_at: dict[str, datetime] = {}
         self._futoi_records: dict[tuple[date, str, str, str], Any] = {}
         self._futoi_instruments: dict[str, Any] = {}
+        self._algopack_records: dict[tuple[str, str, str, date, str, str], Any] = {}
 
     def ensure_schema(self) -> None:
         return None
@@ -254,10 +282,24 @@ class InMemoryHistoricalDataStore:
             self._futoi_instruments[normalized.ticker] = normalized
         return len(set(self._futoi_instruments) - before)
 
+    def replace_futoi_instruments(
+        self,
+        instruments: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int:
+        self._futoi_instruments = {}
+        for instrument in instruments:
+            normalized = normalize_futoi_instrument(instrument, updated_at=self._utcnow())
+            self._futoi_instruments[normalized.ticker] = normalized
+        return len(self._futoi_instruments)
+
     def load_futoi_records(
         self,
         *,
         trading_date: date | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         ticker: str | None = None,
         limit: int | None = None,
     ) -> list[Any]:
@@ -266,6 +308,8 @@ class InMemoryHistoricalDataStore:
             record
             for record in self._futoi_records.values()
             if (trading_date is None or record.trade_date == trading_date)
+            and (start_date is None or record.trade_date >= start_date)
+            and (end_date is None or record.trade_date <= end_date)
             and (normalized_ticker is None or normalize_symbol(record.ticker) == normalized_ticker)
         ]
         records = sorted(records, key=futoi_record_key)
@@ -288,6 +332,46 @@ class InMemoryHistoricalDataStore:
         for key in old_keys:
             self._futoi_records.pop(key, None)
         return len(old_keys)
+
+    def upsert_algopack_records(
+        self,
+        records: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int:
+        before = set(self._algopack_records)
+        for record in records:
+            normalized_record = normalize_algopack_record(record)
+            self._algopack_records[algopack_record_key(normalized_record)] = normalized_record
+        return len(set(self._algopack_records) - before)
+
+    def load_algopack_records(
+        self,
+        *,
+        dataset: str | None = None,
+        market: str | None = None,
+        ticker: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int | None = None,
+    ) -> list[Any]:
+        records = sorted(self._algopack_records.values(), key=algopack_record_key)
+        if dataset:
+            normalized_dataset = str(dataset).strip().lower()
+            records = [record for record in records if record.dataset == normalized_dataset]
+        if market:
+            normalized_market = str(market).strip().lower()
+            records = [record for record in records if record.market == normalized_market]
+        if ticker:
+            normalized_ticker = normalize_symbol(ticker)
+            records = [record for record in records if record.ticker == normalized_ticker]
+        if start_date is not None:
+            records = [record for record in records if record.trade_date >= start_date]
+        if end_date is not None:
+            records = [record for record in records if record.trade_date <= end_date]
+        if limit is not None and limit > 0:
+            records = records[-limit:]
+        return list(records)
 
     def _utcnow(self) -> datetime:
         return self._now().astimezone(timezone.utc) + self._time_offset
@@ -424,6 +508,28 @@ class PostgresHistoricalDataStore:
                     """
                     CREATE INDEX IF NOT EXISTS moex_futoi_instruments_gross_idx
                     ON moex_futoi_instruments (gross_position DESC, ticker)
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS moex_algopack_records (
+                        dataset TEXT NOT NULL,
+                        market TEXT NOT NULL,
+                        ticker TEXT NOT NULL,
+                        trade_date DATE NOT NULL,
+                        trade_time TEXT NOT NULL,
+                        record_key TEXT NOT NULL DEFAULT '',
+                        metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        source TEXT NOT NULL DEFAULT '',
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        PRIMARY KEY (dataset, market, ticker, trade_date, trade_time, record_key)
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS moex_algopack_records_ticker_dataset_date_idx
+                    ON moex_algopack_records (ticker, dataset, trade_date DESC, trade_time DESC)
                     """
                 )
 
@@ -842,10 +948,67 @@ class PostgresHistoricalDataStore:
                 )
         return len(normalized_instruments)
 
+    def replace_futoi_instruments(
+        self,
+        instruments: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int:
+        normalized_instruments = [
+            normalize_futoi_instrument(instrument)
+            for instrument in instruments
+        ]
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM moex_futoi_instruments")
+                cursor.executemany(
+                    """
+                    INSERT INTO moex_futoi_instruments (
+                        ticker,
+                        last_trade_date,
+                        last_trade_time,
+                        system_time,
+                        trade_session_date,
+                        client_groups,
+                        net_position,
+                        gross_position,
+                        long_position,
+                        short_position,
+                        long_count,
+                        short_count,
+                        row_count,
+                        source
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            instrument.ticker,
+                            instrument.last_trade_date,
+                            instrument.last_trade_time,
+                            instrument.system_time,
+                            instrument.trade_session_date,
+                            ",".join(instrument.client_groups),
+                            instrument.net_position,
+                            instrument.gross_position,
+                            instrument.long_position,
+                            instrument.short_position,
+                            instrument.long_count,
+                            instrument.short_count,
+                            instrument.row_count,
+                            source,
+                        )
+                        for instrument in normalized_instruments
+                    ],
+                )
+        return len(normalized_instruments)
+
     def load_futoi_records(
         self,
         *,
         trading_date: date | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         ticker: str | None = None,
         limit: int | None = None,
     ) -> list[Any]:
@@ -856,6 +1019,12 @@ class PostgresHistoricalDataStore:
         if trading_date is not None:
             filters.append("trade_date = %s")
             params.append(trading_date)
+        if start_date is not None:
+            filters.append("trade_date >= %s")
+            params.append(start_date)
+        if end_date is not None:
+            filters.append("trade_date <= %s")
+            params.append(end_date)
         if ticker:
             filters.append("ticker = %s")
             params.append(normalize_symbol(ticker))
@@ -963,6 +1132,110 @@ class PostgresHistoricalDataStore:
                 )
                 return int(cursor.rowcount)
 
+    def upsert_algopack_records(
+        self,
+        records: Sequence[Any],
+        *,
+        source: str = "",
+    ) -> int:
+        from psycopg.types.json import Jsonb
+
+        normalized_records = {
+            algopack_record_key(normalize_algopack_record(record)): normalize_algopack_record(record)
+            for record in records
+        }
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    INSERT INTO moex_algopack_records (
+                        dataset,
+                        market,
+                        ticker,
+                        trade_date,
+                        trade_time,
+                        record_key,
+                        metrics,
+                        source
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (dataset, market, ticker, trade_date, trade_time, record_key) DO UPDATE
+                    SET metrics = EXCLUDED.metrics,
+                        source = EXCLUDED.source,
+                        updated_at = now()
+                    """,
+                    [
+                        (
+                            record.dataset,
+                            record.market,
+                            record.ticker,
+                            record.trade_date,
+                            record.trade_time,
+                            algopack_record_key(record)[-1],
+                            Jsonb(record.metrics),
+                            source,
+                        )
+                        for record in normalized_records.values()
+                    ],
+                )
+        return len(normalized_records)
+
+    def load_algopack_records(
+        self,
+        *,
+        dataset: str | None = None,
+        market: str | None = None,
+        ticker: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int | None = None,
+    ) -> list[Any]:
+        from algo_trading.algopack import AlgoPackRecord
+
+        filters: list[str] = []
+        params: list[Any] = []
+        if dataset:
+            filters.append("dataset = %s")
+            params.append(str(dataset).strip().lower())
+        if market:
+            filters.append("market = %s")
+            params.append(str(market).strip().lower())
+        if ticker:
+            filters.append("ticker = %s")
+            params.append(normalize_symbol(ticker))
+        if start_date is not None:
+            filters.append("trade_date >= %s")
+            params.append(start_date)
+        if end_date is not None:
+            filters.append("trade_date <= %s")
+            params.append(end_date)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        query = f"""
+            SELECT dataset, market, ticker, trade_date, trade_time, record_key, metrics
+            FROM moex_algopack_records
+            {where_clause}
+            ORDER BY trade_date DESC, trade_time DESC, dataset, ticker
+        """
+        if limit is not None and limit > 0:
+            query += " LIMIT %s"
+            params.append(limit)
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+        return [
+            AlgoPackRecord(
+                dataset=str(row[0]),
+                market=str(row[1]),
+                ticker=str(row[2]),
+                trade_date=row[3],
+                trade_time=str(row[4]),
+                record_key=str(row[5]),
+                metrics=dict(row[6] or {}),
+            )
+            for row in reversed(rows)
+        ]
+
     def _connect(self) -> Any:
         import psycopg
 
@@ -1028,4 +1301,42 @@ def normalize_futoi_instrument(
         short_count=int(instrument.short_count),
         row_count=int(instrument.row_count),
         updated_at=updated_at or instrument.updated_at,
+    )
+
+
+def algopack_record_key(record: Any) -> tuple[str, str, str, date, str, str]:
+    from algo_trading.algopack import algopack_record_key as normalized_key
+
+    return normalized_key(record)
+
+
+def normalize_algopack_record(record: Any) -> Any:
+    from algo_trading.algopack import (
+        AlgoPackRecord,
+        normalize_algopack_dataset,
+        normalize_algopack_market,
+    )
+
+    normalized_market = normalize_algopack_market(record.market, record.ticker)
+    normalized_dataset = normalize_algopack_dataset(record.dataset, normalized_market)
+    metrics = dict(record.metrics)
+    record_key = str(getattr(record, "record_key", "") or "")
+    if not record_key and normalized_dataset == "alerts":
+        record_key = "|".join(
+            str(item)
+            for item in (
+                metrics.get("alert_type"),
+                metrics.get("threshold"),
+                metrics.get("value"),
+            )
+            if item is not None
+        )
+    return AlgoPackRecord(
+        dataset=normalized_dataset,
+        market=normalized_market,
+        ticker=normalize_symbol(record.ticker),
+        trade_date=record.trade_date,
+        trade_time=str(record.trade_time),
+        metrics=metrics,
+        record_key=record_key,
     )

@@ -77,14 +77,12 @@ from algo_trading.ui import (
 )
 
 ADMIN_EMAIL = "cuiyeqing960904@gmail.com"
-ADMIN_PASSWORD = "Vladimir960904"
 EXPIRY_CHECK_SECONDS = 60 * 60
 HISTORICAL_CSV_REFRESH_SECONDS = 60 * 60
 HISTORICAL_CSV_PRUNE_SECONDS = 24 * 60 * 60
 MOEX_FUTOI_REFRESH_SECONDS = 24 * 60 * 60
 MOEX_FUTOI_PRUNE_SECONDS = FUTOI_PRUNE_SECONDS
 API_CACHE_TTL_SYMBOLS_SECONDS = 30
-API_CACHE_TTL_LIVE_SYMBOLS_SECONDS = 300
 API_CACHE_TTL_LIVE_CHART_SECONDS = 10
 API_CACHE_TTL_QUANT_STRATEGIES_SECONDS = 30
 API_CACHE_TTL_MARKET_BREADTH_SECONDS = 300
@@ -134,7 +132,14 @@ def create_app(
     store = auth_store or auth_store_from_env()
     store.ensure_schema()
     if seed_admin:
-        store.seed_admin_user(admin_email(), admin_seed_password or admin_password())
+        seed_password = (
+            admin_seed_password
+            if admin_seed_password is not None
+            else admin_password()
+        )
+        if not seed_password.strip():
+            raise ValueError("ADMIN_PASSWORD must be set to seed admin user")
+        store.seed_admin_user(admin_email(), seed_password)
     feedback = feedback_store or feedback_store_from_env()
     feedback.ensure_schema()
     alerts = alert_store or alert_store_from_env()
@@ -187,10 +192,6 @@ def create_app(
     )
     api_cache_ttls = {
         "symbols": env_int("API_CACHE_TTL_SYMBOLS_SECONDS", API_CACHE_TTL_SYMBOLS_SECONDS),
-        "live-symbols": env_int(
-            "API_CACHE_TTL_LIVE_SYMBOLS_SECONDS",
-            API_CACHE_TTL_LIVE_SYMBOLS_SECONDS,
-        ),
         "live-chart": env_int(
             "API_CACHE_TTL_LIVE_CHART_SECONDS",
             API_CACHE_TTL_LIVE_CHART_SECONDS,
@@ -240,7 +241,7 @@ def create_app(
             )
         return user
 
-    def require_admin_user(user: AuthUser = Depends(require_user)) -> AuthUser:
+    def require_admin_user(user: AuthUser = Depends(require_active_user)) -> AuthUser:
         if not user.is_admin:
             raise HTTPException(
                 status_code=HTTPStatus.FORBIDDEN,
@@ -369,6 +370,7 @@ def create_app(
         try:
             cached = api_cache.get_json(key)
         except Exception:
+            error_logger.warning("API response cache get failed for %s", namespace, exc_info=True)
             cached = None
         if cached is not None:
             return cached
@@ -376,6 +378,7 @@ def create_app(
         try:
             api_cache.set_json(key, payload, ttl_seconds=ttl_seconds)
         except Exception:
+            error_logger.warning("API response cache set failed for %s", namespace, exc_info=True)
             pass
         return payload
 
@@ -390,6 +393,7 @@ def create_app(
         try:
             return key, api_cache.get_json(key)
         except Exception:
+            error_logger.warning("API response cache get failed for %s", namespace, exc_info=True)
             return key, None
 
     def write_cached_api_payload(
@@ -403,6 +407,7 @@ def create_app(
         try:
             api_cache.set_json(key, payload, ttl_seconds=ttl_seconds)
         except Exception:
+            error_logger.warning("API response cache set failed for %s", namespace, exc_info=True)
             pass
 
     @asynccontextmanager
@@ -606,14 +611,9 @@ def create_app(
 
     @app.get("/api/live-symbols")
     def get_live_symbols(
-        request: Request,
         _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
-        return cached_api_payload(
-            request,
-            "live-symbols",
-            lambda: live_symbols_payload(symbol_store),
-        )
+        return live_symbols_payload(symbol_store)
 
     @app.get("/api/strategies")
     def get_strategies(_user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:
@@ -639,7 +639,7 @@ def create_app(
             cache_state=cache_state,
         )
         if cache_state.get("cache_stale"):
-            background_tasks.add_task(refresh_live_chart_cache, payload)
+            background_tasks.add_task(refresh_live_chart_cache, payload, cache_key)
         else:
             write_cached_api_payload("live-chart", cache_key, chart_payload)
         maybe_send_telegram_rsi_alert(user, chart_payload)
@@ -661,13 +661,14 @@ def create_app(
             ),
         )
 
-    def refresh_live_chart_cache(payload: dict[str, Any]) -> None:
+    def refresh_live_chart_cache(payload: dict[str, Any], cache_key: str) -> None:
         try:
-            live_chart_payload(
+            refreshed_payload = live_chart_payload(
                 payload,
                 _live_client_for_handler(payload, client_factory),
                 historical_store=history_store,
             )
+            write_cached_api_payload("live-chart", cache_key, refreshed_payload)
         except Exception:
             error_logger.warning("Live chart stale-cache refresh failed", exc_info=True)
 
@@ -694,25 +695,44 @@ def create_app(
         date: str = "",
         ticker: str = "",
         limit: int = 500,
+        history_days: int = 365,
         _user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         if limit < 0:
             raise ValueError("limit cannot be negative")
+        if history_days < 0:
+            raise ValueError("history_days cannot be negative")
         selected_date = parse_futoi_date(date)
+        selected_ticker = ticker.strip().upper() or None
+
+        def futoi_payload() -> dict[str, Any]:
+            records = futoi.load_records(
+                trading_date=selected_date,
+                ticker=selected_ticker,
+                limit=min(limit, 5000) if limit else None,
+            )
+            chart_records = (
+                futoi.load_ticker_history(
+                    selected_ticker,
+                    end_date=selected_date,
+                    days=min(history_days or 365, 730),
+                )
+                if selected_ticker
+                else records
+            )
+            return {
+                "ok": True,
+                "records": [public_futoi_record(record) for record in records],
+                "chart_records": [
+                    public_futoi_record(record)
+                    for record in chart_records
+                ],
+            }
+
         return cached_api_payload(
             request,
             "futoi",
-            lambda: {
-                "ok": True,
-                "records": [
-                    public_futoi_record(record)
-                    for record in futoi.load_records(
-                        trading_date=selected_date,
-                        ticker=ticker.strip().upper() or None,
-                        limit=min(limit, 5000) if limit else None,
-                    )
-                ],
-            },
+            futoi_payload,
         )
 
     @app.get("/api/futoi/instruments")
@@ -906,7 +926,10 @@ def admin_email() -> str:
 
 
 def admin_password() -> str:
-    return os.environ.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
+    value = os.environ.get("ADMIN_PASSWORD")
+    if value is None or not value.strip():
+        raise ValueError("ADMIN_PASSWORD must be set to seed admin user")
+    return value
 
 
 def set_session_cookie(response: Response, token: str) -> None:

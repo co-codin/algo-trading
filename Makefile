@@ -1,6 +1,6 @@
 PYTHON ?= python3
 NPM ?= npm
-IMAGE ?= binance-algo-trading:local
+IMAGE ?= algo-trading:local
 PORT ?= 8765
 SMOKE_PORT ?= 8766
 RUNS_DIR ?= $(CURDIR)/runs
@@ -57,16 +57,18 @@ docker-build:
 
 docker-run: docker-build
 	mkdir -p "$(RUNS_DIR)" "$(HISTORICAL_DATA_DIR)" "$(LOGS_DIR)"
-	docker run --rm -it --user "$$(id -u):$$(id -g)" -p 127.0.0.1:$(PORT):8765 -v "$(RUNS_DIR):/app/runs" -v "$(HISTORICAL_DATA_DIR):/app/historical_data" -v "$(LOGS_DIR):/app/logs" -e APP_LOG_DIR=/app/logs $(IMAGE)
+	env_file_args=$$(test -f .env && printf '%s' '--env-file .env'); \
+	docker run --rm -it --user "$$(id -u):$$(id -g)" -p 127.0.0.1:$(PORT):8765 -v "$(RUNS_DIR):/app/runs" -v "$(HISTORICAL_DATA_DIR):/app/historical_data" -v "$(LOGS_DIR):/app/logs" $$env_file_args -e APP_LOG_DIR=/app/logs $(IMAGE)
 
 docker-smoke: docker-build
 	mkdir -p "$(RUNS_DIR)" "$(HISTORICAL_DATA_DIR)" "$(LOGS_DIR)"
-	@container=$$(docker run -d --user "$$(id -u):$$(id -g)" -p 127.0.0.1:$(SMOKE_PORT):8765 -v "$(RUNS_DIR):/app/runs" -v "$(HISTORICAL_DATA_DIR):/app/historical_data" -v "$(LOGS_DIR):/app/logs" -e APP_LOG_DIR=/app/logs $(IMAGE)); \
+	@smoke_password=$$($(PYTHON) -c 'import secrets; print(secrets.token_urlsafe(24))'); \
+	container=$$(docker run -d --user "$$(id -u):$$(id -g)" -p 127.0.0.1:$(SMOKE_PORT):8765 -v "$(RUNS_DIR):/app/runs" -v "$(HISTORICAL_DATA_DIR):/app/historical_data" -v "$(LOGS_DIR):/app/logs" -e APP_LOG_DIR=/app/logs -e ADMIN_PASSWORD="$$smoke_password" $(IMAGE)); \
 	cookie_jar=$$(mktemp); \
 		trap 'rm -f "$$cookie_jar"; docker rm -f $$container >/dev/null' EXIT; \
 		for attempt in 1 2 3 4 5 6 7 8 9 10; do \
 			if curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/api/auth/me" >/dev/null 2>&1; then \
-				curl -fsS -c "$$cookie_jar" -H 'Content-Type: application/json' -d '{"username":"cuiyeqing960904@gmail.com","password":"Vladimir960904"}' "http://127.0.0.1:$(SMOKE_PORT)/api/auth/login" >/dev/null; \
+				curl -fsS -c "$$cookie_jar" -H 'Content-Type: application/json' -d "{\"username\":\"cuiyeqing960904@gmail.com\",\"password\":\"$$smoke_password\"}" "http://127.0.0.1:$(SMOKE_PORT)/api/auth/login" >/dev/null; \
 				curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/live" >/dev/null; \
 				curl -fsS "http://127.0.0.1:$(SMOKE_PORT)/breadth" >/dev/null; \
 				curl -fsS -b "$$cookie_jar" "http://127.0.0.1:$(SMOKE_PORT)/api/strategies" >/dev/null; \

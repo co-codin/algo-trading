@@ -135,7 +135,6 @@ class InMemoryAuthStore:
             activated_at=existing.user.activated_at or utcnow(),
             free_trial_end_at=None,
         )
-        existing.password_hash = hash_password(password)
         return existing.user
 
     def authenticate_user(self, username: str, password: str) -> AuthUser:
@@ -436,8 +435,7 @@ class PostgresAuthStore:
                     )
                     VALUES (%s, %s, true, true, now())
                     ON CONFLICT (username) DO UPDATE
-                    SET password_hash = EXCLUDED.password_hash,
-                        is_active = true,
+                    SET is_active = true,
                         is_admin = true,
                         activated_at = COALESCE(users.activated_at, now()),
                         free_trial_end_at = NULL

@@ -8,9 +8,11 @@ from urllib.parse import parse_qs, urlparse
 from algo_trading.futoi import (
     FutoiClient,
     FutoiCsvHistory,
+    FutoiInstrument,
     FutoiRecord,
     FutoiRefreshService,
     MissingFutoiApiKey,
+    futoi_instruments_from_records,
 )
 from algo_trading.data import TransientMarketDataError
 from algo_trading.historical_store import InMemoryHistoricalDataStore
@@ -283,6 +285,91 @@ class FutoiTests(unittest.TestCase):
             ["IMOEXF", "IMOEXF", "SBERF"],
         )
 
+    def test_refresh_all_updates_daily_history_and_latest_instruments(self):
+        class FakeFutoiClient:
+            def __init__(self) -> None:
+                self.daily_dates: list[date] = []
+                self.latest_calls = 0
+
+            def fetch_daily(self, trading_date):
+                self.daily_dates.append(trading_date)
+                return [_record_for_date(trading_date, position=10.0)]
+
+            def fetch_latest(self):
+                self.latest_calls += 1
+                return [_record_for_date(date(2024, 4, 9), position=25.0)]
+
+        store = InMemoryHistoricalDataStore()
+        client = FakeFutoiClient()
+        service = FutoiRefreshService(store=store, client=client, csv_history=None)
+
+        summary = service.refresh_all(trading_date=date(2024, 4, 8))
+
+        self.assertEqual(client.daily_dates, [date(2024, 4, 8)])
+        self.assertEqual(client.latest_calls, 1)
+        self.assertEqual(summary["requested"], 2)
+        self.assertEqual(summary["records"], 2)
+        self.assertEqual(summary["instruments"], 1)
+        self.assertEqual(
+            [record.trade_date for record in store.load_futoi_records(ticker="IMOEXF")],
+            [date(2024, 4, 8), date(2024, 4, 9)],
+        )
+        self.assertEqual(store.list_futoi_instruments()[0].last_trade_date, date(2024, 4, 9))
+
+    def test_instrument_summary_uses_only_latest_snapshot_for_ticker(self):
+        instruments = futoi_instruments_from_records(
+            [
+                _record_for_date(date(2024, 4, 8), position=10.0),
+                _record_for_date(date(2024, 4, 9), position=20.0),
+            ]
+        )
+
+        self.assertEqual(len(instruments), 1)
+        self.assertEqual(instruments[0].last_trade_date, date(2024, 4, 9))
+        self.assertEqual(instruments[0].net_position, 20.0)
+        self.assertEqual(instruments[0].gross_position, 20.0)
+        self.assertEqual(instruments[0].row_count, 1)
+
+    def test_load_ticker_history_backfills_one_year_to_store(self):
+        class FakeFutoiClient:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, date | None, date | None]] = []
+
+            def fetch_ticker(self, ticker, *, start_date=None, end_date=None):
+                self.calls.append((ticker, start_date, end_date))
+                return [
+                    _record_for_date(date(2023, 6, 17), position=5.0),
+                    _record_for_date(date(2023, 6, 18), position=10.0),
+                    _record_for_date(date(2024, 6, 17), position=20.0),
+                ]
+
+        store = InMemoryHistoricalDataStore()
+        store.upsert_futoi_records(
+            [_record_for_date(date(2024, 6, 17), position=20.0)],
+            source="unit-test",
+        )
+        client = FakeFutoiClient()
+        service = FutoiRefreshService(store=store, client=client, csv_history=None)
+
+        records = service.load_ticker_history(
+            "imoexf",
+            end_date=date(2024, 6, 17),
+            days=365,
+        )
+
+        self.assertEqual(
+            client.calls,
+            [("IMOEXF", date(2023, 6, 18), date(2024, 6, 17))],
+        )
+        self.assertEqual(
+            [record.trade_date for record in records],
+            [date(2023, 6, 18), date(2024, 6, 17)],
+        )
+        self.assertEqual(
+            [record.trade_date for record in store.load_futoi_records(ticker="IMOEXF")],
+            [date(2023, 6, 17), date(2023, 6, 18), date(2024, 6, 17)],
+        )
+
     def test_refresh_service_writes_deduped_csv_history(self):
         class FakeFutoiClient:
             def __init__(self) -> None:
@@ -339,6 +426,13 @@ class FutoiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             store = InMemoryHistoricalDataStore()
             store.upsert_futoi_records([old_record, cutoff_record], source="unit-test")
+            store.upsert_futoi_instruments(
+                [
+                    FutoiInstrument(ticker="IMOEXF", last_trade_date=date(2024, 6, 16), row_count=1),
+                    FutoiInstrument(ticker="SBERF", last_trade_date=date(2024, 6, 17), row_count=1),
+                ],
+                source="unit-test",
+            )
             csv_history = FutoiCsvHistory(Path(tempdir) / "futoi.csv")
             csv_history.upsert_records([old_record, cutoff_record])
             service = FutoiRefreshService(
@@ -363,6 +457,11 @@ class FutoiTests(unittest.TestCase):
                 [record.trade_date for record in csv_history.load_records()],
                 [date(2024, 6, 17)],
             )
+            self.assertEqual(
+                [instrument.ticker for instrument in store.list_futoi_instruments()],
+                ["IMOEXF"],
+            )
+            self.assertEqual(store.list_futoi_instruments()[0].last_trade_date, date(2024, 6, 17))
 
     def test_refresh_service_skips_when_api_key_is_missing(self):
         class FakeFutoiClient:

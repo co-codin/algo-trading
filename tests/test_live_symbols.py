@@ -15,6 +15,7 @@ class LiveSymbolTests(unittest.TestCase):
 
         payload = live_symbols_payload(store)
         symbols = payload["symbols"]
+        russian_symbols = payload["russian_symbols"]
 
         self.assertEqual(symbols["crypto_spot"][0], {"value": "BTCUSDT", "label": "BTCUSDT"})
         self.assertEqual(symbols["crypto_spot"][1], {"value": "ETHUSDT", "label": "ETHUSDT"})
@@ -42,13 +43,16 @@ class LiveSymbolTests(unittest.TestCase):
             {"value": "DIA", "label": "DIA · Dow Jones ETF"},
             symbols["cme_futures"],
         )
+        self.assertNotIn("russian_bluechips", symbols)
+        self.assertNotIn("russian_indices_futures", symbols)
+        self.assertIn("russian_bluechips", russian_symbols)
         self.assertIn(
             {"value": "IMOEX", "label": "IMOEX · MOEX Russia Index"},
-            symbols["russian_indices_futures"],
+            russian_symbols["russian_indices_futures"],
         )
         self.assertIn(
             {"value": "RIM6", "label": "RIM6 · RTS Index Futures"},
-            symbols["russian_indices_futures"],
+            russian_symbols["russian_indices_futures"],
         )
 
     def test_store_keeps_database_symbols_alongside_seed_defaults(self):

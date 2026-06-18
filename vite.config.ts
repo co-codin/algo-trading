@@ -7,6 +7,15 @@ export default defineConfig({
   build: {
     outDir: "../algo_trading/web/dist",
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("lightweight-charts")) {
+            return "charting";
+          }
+        },
+      },
+    },
   },
   server: {
     proxy: {

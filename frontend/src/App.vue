@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { requestJson, toQuery } from "./api";
-import FutoiPositionChart from "./components/FutoiPositionChart.vue";
-import TradingViewChart from "./components/TradingViewChart.vue";
 import {
   LIVE_WORKSPACE_STORAGE_KEY,
+  algopackIndicatorOptions,
   defaultLiveIndicators,
   liveCandleOptions,
   liveIntervalOptions,
@@ -54,6 +53,9 @@ import type {
   StrategyInfo,
   StrategyPayload,
 } from "./types";
+
+const FutoiPositionChart = defineAsyncComponent(() => import("./components/FutoiPositionChart.vue"));
+const TradingViewChart = defineAsyncComponent(() => import("./components/TradingViewChart.vue"));
 
 type StatusType = "" | "busy" | "error";
 type SignalDisplayMode = "consensus" | "individual";
@@ -161,10 +163,51 @@ const russianLiveSymbolLabels: Record<string, string> = {
   RIZ6: "RIZ6 · Фьючерс на индекс РТС",
 };
 
+const russianLiveMarkets = new Set([
+  "russian_bluechips",
+  "russian_indices_futures",
+]);
+
+const landingTickerTape = [
+  { symbol: "BTCUSDT", value: "68,420", tone: "long" },
+  { symbol: "SPY", value: "542.18", tone: "long" },
+  { symbol: "QQQ", value: "461.03", tone: "short" },
+  { symbol: "SBER", value: "318.42", tone: "long" },
+  { symbol: "FUTOI", value: "1Y", tone: "neutral" },
+];
+const landingCandles = [
+  { tone: "long", top: "41%", height: "22%" },
+  { tone: "short", top: "35%", height: "18%" },
+  { tone: "long", top: "31%", height: "34%" },
+  { tone: "long", top: "27%", height: "38%" },
+  { tone: "short", top: "33%", height: "25%" },
+  { tone: "long", top: "22%", height: "45%" },
+  { tone: "short", top: "26%", height: "29%" },
+  { tone: "long", top: "18%", height: "52%" },
+  { tone: "long", top: "15%", height: "48%" },
+  { tone: "short", top: "23%", height: "31%" },
+  { tone: "long", top: "16%", height: "46%" },
+  { tone: "long", top: "12%", height: "55%" },
+];
+const landingOrderRows = [
+  { label: "RSI", value: "63.8", tone: "long" },
+  { label: "EMA", value: "Bull", tone: "long" },
+  { label: "Breadth", value: "58%", tone: "neutral" },
+  { label: "FUTOI", value: "+12k", tone: "long" },
+];
+const landingFeatureKeys: MessageKey[] = [
+  "landing.feature.live",
+  "landing.feature.moex",
+  "landing.feature.breadth",
+];
+
 const routeModes: Record<string, Mode> = {
   "/": "live",
+  "/markets": "live",
   "/live": "live",
   "/chart": "live",
+  "/moex-live": "russian-live",
+  "/russian-live": "russian-live",
   "/breadth": "breadth",
   "/quant": "quant",
   "/futoi": "futoi",
@@ -174,7 +217,8 @@ const routeModes: Record<string, Mode> = {
 };
 
 const modeRoutes: Record<Mode, string> = {
-  live: "/live",
+  live: "/markets",
+  "russian-live": "/moex-live",
   breadth: "/breadth",
   quant: "/quant",
   futoi: "/futoi",
@@ -277,8 +321,10 @@ const livePayload = ref<LiveChartPayload | null>(null);
 const quantPayload = ref<QuantStrategiesPayload | null>(null);
 const quantStrategyIdeas = ref<QuantStrategyIdea[]>([]);
 const liveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});
+const russianLiveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});
 const breadthPayload = ref<MarketBreadthPayload | null>(null);
 const futoiRecords = ref<FutoiRecord[]>([]);
+const futoiChartRecords = ref<FutoiRecord[]>([]);
 const futoiInstruments = ref<FutoiInstrument[]>([]);
 const futoiInstrumentSearch = ref("");
 const selectedFutoiTicker = ref("");
@@ -293,13 +339,26 @@ const futoiStatusType = ref<StatusType>("");
 const liveMarket = ref("crypto_spot");
 const liveSymbol = ref("BTCUSDT");
 const liveSymbolSearch = ref("");
-const liveInterval = ref("5m");
+const liveInterval = ref("1h");
 const liveLimit = ref<string | number>(180);
+const russianLivePayload = ref<LiveChartPayload | null>(null);
+const russianLiveMarket = ref("russian_bluechips");
+const russianLiveSymbol = ref("SBER");
+const russianLiveSymbolSearch = ref("");
+const russianLiveInterval = ref("1h");
+const russianLiveLimit = ref<string | number>(180);
+const russianLiveVisibleIndicators = ref<string[]>([
+  ...defaultLiveIndicators,
+  "algopack-alerts",
+]);
+const russianLiveStatus = ref(t("status.ready"));
+const russianLiveStatusType = ref<StatusType>("");
 const liveRefresh = ref("10");
 const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
 const liveConsensusMinConfirmations = ref(5);
 const liveMaxSignals = ref(80);
 const liveSelectedStrategies = ref<string[]>(["ema-rsi"]);
+const russianLiveSelectedStrategies = ref<string[]>([]);
 const liveStrategySearch = ref("");
 const liveStrategyMenu = ref<HTMLDetailsElement | null>(null);
 const accountMenu = ref<HTMLDetailsElement | null>(null);
@@ -317,9 +376,12 @@ const futoiForm = reactive({
 });
 let liveTimer = 0;
 let liveChartRequestId = 0;
+let russianLiveChartRequestId = 0;
 let isApplyingLiveSettingsFromUrl = false;
+let isApplyingRussianLiveSettingsFromUrl = false;
 
 const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
+const isRussianLocale = computed(() => locale.value === "ru");
 const isAdminUser = computed(() =>
   authUser.value?.is_admin === true,
 );
@@ -328,13 +390,14 @@ const canManageFreeTrial = computed(
 );
 const featureTabs = computed(() => [
   { mode: "live" as const, label: t("tabs.live") },
+  ...(isRussianLocale.value ? [{ mode: "russian-live" as const, label: t("tabs.russianLive") }] : []),
   { mode: "breadth" as const, label: t("tabs.breadth") },
   { mode: "quant" as const, label: t("tabs.quant") },
-  { mode: "futoi" as const, label: t("tabs.futoi") },
+  ...(isRussianLocale.value ? [{ mode: "futoi" as const, label: t("tabs.futoi") }] : []),
 ]);
 const accountMenuItems = computed(() => [
   { mode: "profile" as const, label: t("tabs.profile") },
-  { mode: "feedback" as const, label: t("tabs.feedback") },
+  ...(canUseFeatures.value ? [{ mode: "feedback" as const, label: t("tabs.feedback") }] : []),
 ]);
 const tabs = computed(() => [
   ...(canUseFeatures.value ? featureTabs.value : []),
@@ -358,8 +421,16 @@ const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "commodities", label: t("options.commodities") },
   { value: "mag7_stocks", label: t("options.mag7Stocks") },
   { value: "hong_kong_stocks", label: t("options.hongKongStocks") },
-  { value: "russian_bluechips", label: t("options.moexBluechips") },
-  { value: "russian_indices_futures", label: t("options.moexIndicesFutures") },
+]);
+const russianLiveMarketOptions = computed<SelectOption[]>(() => [
+  {
+    value: "russian_bluechips",
+    label: t("options.moexBluechips"),
+  },
+  {
+    value: "russian_indices_futures",
+    label: t("options.moexIndicesFutures"),
+  },
 ]);
 const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
   { value: "consensus", label: t("options.consensusSignals") },
@@ -377,6 +448,31 @@ const popularIndicatorOptions = computed<SelectOption[]>(() => [
   { value: "atr", label: t("indicators.atr") },
   { value: "stoch-rsi", label: t("indicators.stochRsi") },
 ]);
+const visibleRussianAlgoPackIndicatorOptions = computed<SelectOption[]>(() =>
+  algopackIndicatorOptions
+    .filter((option) => {
+      if (option.dataset === "orderstats" && russianLiveMarket.value === "russian_indices_futures") {
+        return false;
+      }
+      if (["IMOEX", "RTSI"].includes(russianLiveSymbol.value.toUpperCase())) {
+        return option.dataset === "alerts";
+      }
+      return true;
+    })
+    .map((option) => ({
+      value: option.value,
+      label: t(option.labelKey),
+    })),
+);
+const russianLiveIndicatorOptions = computed<SelectOption[]>(() => [
+  ...popularIndicatorOptions.value,
+  ...visibleRussianAlgoPackIndicatorOptions.value,
+]);
+const russianLiveAlgoPackDatasets = computed(() =>
+  algopackIndicatorOptions
+    .filter((option) => russianLiveVisibleIndicators.value.includes(option.value))
+    .map((option) => option.dataset),
+);
 const liveStrategyOptions = computed<StrategyOption[]>(() =>
   strategies.value.map((strategy) => ({
     ...strategy,
@@ -439,6 +535,9 @@ const filteredLiveStrategyGroups = computed<StrategyGroup[]>(() => {
 const activeLiveSymbolOptions = computed(
   () => (liveSymbolsByMarket.value[liveMarket.value] ?? []).map(localizedLiveSymbolOption),
 );
+const activeRussianLiveSymbolOptions = computed(
+  () => (russianLiveSymbolsByMarket.value[russianLiveMarket.value] ?? []).map(localizedLiveSymbolOption),
+);
 const filteredLiveSymbolOptions = computed(() => {
   const query = liveSymbolSearch.value;
   if (!query) {
@@ -446,7 +545,15 @@ const filteredLiveSymbolOptions = computed(() => {
   }
   return activeLiveSymbolOptions.value.filter((option) => optionMatchesSearch(option, query));
 });
+const filteredRussianLiveSymbolOptions = computed(() => {
+  const query = russianLiveSymbolSearch.value;
+  if (!query) {
+    return activeRussianLiveSymbolOptions.value;
+  }
+  return activeRussianLiveSymbolOptions.value.filter((option) => optionMatchesSearch(option, query));
+});
 const hasLiveSymbolSearch = computed(() => normalizeSearchText(liveSymbolSearch.value).length > 0);
+const hasRussianLiveSymbolSearch = computed(() => normalizeSearchText(russianLiveSymbolSearch.value).length > 0);
 const selectedLiveStrategyNames = computed(() => {
   const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
   const selectedNames = liveSelectedStrategies.value.filter((name) => availableNames.has(name));
@@ -456,15 +563,31 @@ const selectedLiveStrategyNames = computed(() => {
   const fallback = strategies.value[0]?.name ?? "ema-rsi";
   return [fallback];
 });
+const selectedRussianLiveStrategyNames = computed(() => {
+  const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
+  return russianLiveSelectedStrategies.value.filter((name) => availableNames.has(name));
+});
 const allLiveStrategiesSelected = computed(
   () =>
     strategies.value.length > 0 &&
     selectedLiveStrategyNames.value.length === strategies.value.length,
 );
+const allRussianLiveStrategiesSelected = computed(
+  () =>
+    strategies.value.length > 0 &&
+    selectedRussianLiveStrategyNames.value.length === strategies.value.length,
+);
 const liveStrategyRequest = computed(() =>
   allLiveStrategiesSelected.value ? "all" : selectedLiveStrategyNames.value.join(","),
 );
+const russianLiveStrategyRequest = computed(() => {
+  if (!selectedRussianLiveStrategyNames.value.length) {
+    return "";
+  }
+  return allRussianLiveStrategiesSelected.value ? "all" : selectedRussianLiveStrategyNames.value.join(",");
+});
 const isMultiStrategyLive = computed(() => selectedLiveStrategyNames.value.length > 1);
+const isMultiStrategyRussianLive = computed(() => selectedRussianLiveStrategyNames.value.length > 1);
 const liveChartResetKey = computed(() =>
   [liveMarket.value, liveSymbol.value, liveInterval.value, liveLimit.value].join(":"),
 );
@@ -478,11 +601,44 @@ const activeLiveStrategyLabel = computed(() => {
   }
   return `${selectedNames.length} ${t("labels.strategiesSelected")}`;
 });
+const activeRussianLiveStrategyLabel = computed(() => {
+  if (!selectedRussianLiveStrategyNames.value.length) {
+    return t("options.noStrategy");
+  }
+  if (allRussianLiveStrategiesSelected.value) {
+    return t("options.allStrategies");
+  }
+  const selectedNames = selectedRussianLiveStrategyNames.value;
+  if (selectedNames.length === 1) {
+    return strategyTitle(selectedNames[0]);
+  }
+  return `${selectedNames.length} ${t("labels.strategiesSelected")}`;
+});
 const selectedLiveStrategyPreview = computed(() => {
   if (allLiveStrategiesSelected.value) {
     return `${strategies.value.length} ${t("labels.strategiesSelected")}`;
   }
   const selectedNames = selectedLiveStrategyNames.value;
+  if (selectedNames.length === 1) {
+    return (
+      liveStrategyOptions.value.find((strategy) => strategy.name === selectedNames[0])?.description ??
+      strategyTitle(selectedNames[0])
+    );
+  }
+  const titles = selectedNames.map((name) => strategyTitle(name));
+  if (titles.length <= 3) {
+    return titles.join(", ");
+  }
+  return `${titles.slice(0, 3).join(", ")} +${titles.length - 3}`;
+});
+const selectedRussianLiveStrategyPreview = computed(() => {
+  if (!selectedRussianLiveStrategyNames.value.length) {
+    return t("labels.noStrategyHint");
+  }
+  if (allRussianLiveStrategiesSelected.value) {
+    return `${strategies.value.length} ${t("labels.strategiesSelected")}`;
+  }
+  const selectedNames = selectedRussianLiveStrategyNames.value;
   if (selectedNames.length === 1) {
     return (
       liveStrategyOptions.value.find((strategy) => strategy.name === selectedNames[0])?.description ??
@@ -514,8 +670,7 @@ const liveDataHealth = computed<LiveDataHealth>(() => {
     };
   }
   if (
-    liveMarket.value === "russian_bluechips" ||
-    liveMarket.value === "russian_indices_futures"
+    isRussianLiveMarket(liveMarket.value)
   ) {
     return {
       label: t("health.exchange"),
@@ -535,6 +690,17 @@ const visibleLiveIndicators = computed<IndicatorDefinition[]>(() => {
     selectedIndicators.has(indicator.id),
   );
 });
+const russianLiveChartResetKey = computed(() =>
+  [russianLiveMarket.value, russianLiveSymbol.value, russianLiveInterval.value, russianLiveLimit.value].join(":"),
+);
+const visibleRussianLiveIndicators = computed<IndicatorDefinition[]>(() => {
+  const selectedIndicators = new Set(russianLiveVisibleIndicators.value);
+  return (russianLivePayload.value?.indicators ?? []).filter((indicator) =>
+    selectedIndicators.has(indicator.id),
+  );
+});
+const russianLiveCandleCount = computed(() => russianLivePayload.value?.candles.length ?? 0);
+const russianLiveSignalCount = computed(() => russianLivePayload.value?.signals.length ?? 0);
 const breadthGroups = computed<MarketBreadthGroup[]>(() => breadthPayload.value?.groups ?? []);
 const breadthGroupSummaries = computed<BreadthGroupSummary[]>(() =>
   breadthGroups.value.map((group) => summarizeBreadthGroup(group)),
@@ -572,7 +738,7 @@ const selectedFutoiInstrument = computed(() =>
   futoiInstruments.value.find((instrument) => instrument.ticker === selectedFutoiTicker.value) ??
   null,
 );
-const futoiChartPoints = computed<FutoiChartPoint[]>(() => buildFutoiChartPoints(futoiRecords.value));
+const futoiChartPoints = computed<FutoiChartPoint[]>(() => buildFutoiChartPoints(futoiChartRecords.value));
 const futoiChartLabels = computed<FutoiChartLabels>(() => ({
   aria: t("chart.futoiAria"),
   empty: t("empty.noFutoi"),
@@ -622,6 +788,9 @@ const chartLabels = computed(() => ({
 const consensusSignals = computed(() =>
   groupSignalsByConsensus(livePayload.value?.signals ?? [], liveConsensusMinConfirmations.value),
 );
+const russianLiveConsensusSignals = computed(() =>
+  groupSignalsByConsensus(russianLivePayload.value?.signals ?? [], liveConsensusMinConfirmations.value),
+);
 const displayedSignals = computed(() => {
   const rawSignals = livePayload.value?.signals ?? [];
   if (!isMultiStrategyLive.value || liveSignalDisplayMode.value === "individual") {
@@ -630,6 +799,15 @@ const displayedSignals = computed(() => {
       : rawSignals;
   }
   return limitRecentSignals(consensusSignals.value, liveMaxSignals.value);
+});
+const displayedRussianLiveSignals = computed(() => {
+  const rawSignals = russianLivePayload.value?.signals ?? [];
+  if (!isMultiStrategyRussianLive.value || liveSignalDisplayMode.value === "individual") {
+    return isMultiStrategyRussianLive.value
+      ? limitRecentSignals(rawSignals, liveMaxSignals.value)
+      : rawSignals;
+  }
+  return limitRecentSignals(russianLiveConsensusSignals.value, liveMaxSignals.value);
 });
 const sortedQuantStrategyIdeas = computed(() =>
   [...quantStrategyIdeas.value].sort((left, right) => Math.abs(right.score) - Math.abs(left.score)),
@@ -643,8 +821,14 @@ watch(liveMarket, () => {
   ensureLiveSymbolForMarket(liveMarket.value);
 });
 
+watch(russianLiveMarket, () => {
+  russianLiveSymbolSearch.value = "";
+  ensureRussianLiveSymbolForMarket(russianLiveMarket.value);
+});
+
 watch(strategies, () => {
   liveSelectedStrategies.value = selectedLiveStrategyNames.value;
+  russianLiveSelectedStrategies.value = selectedRussianLiveStrategyNames.value;
 });
 
 watch(liveStrategyRequest, (strategyValue) => {
@@ -660,9 +844,25 @@ watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], ()
   }
 });
 
+watch(
+  [russianLiveMarket, russianLiveSymbol, russianLiveInterval, russianLiveLimit, russianLiveStrategyRequest, russianLiveAlgoPackDatasets],
+  () => {
+    if (activeMode.value === "russian-live") {
+      void loadRussianLiveChart();
+    }
+  },
+  { deep: true },
+);
+
 watch([liveMarket, liveSymbol, liveVisibleIndicators, liveStrategyRequest], () => {
   if (activeMode.value === "live" && !isApplyingLiveSettingsFromUrl) {
     syncLiveUrl();
+  }
+}, { deep: true });
+
+watch([russianLiveMarket, russianLiveSymbol, russianLiveInterval, russianLiveLimit, russianLiveVisibleIndicators, russianLiveStrategyRequest], () => {
+  if (activeMode.value === "russian-live" && !isApplyingRussianLiveSettingsFromUrl) {
+    syncRussianLiveUrl();
   }
 }, { deep: true });
 
@@ -673,6 +873,9 @@ watch(displayedSignals, () => {
 watch(locale, () => {
   if (!liveStatusType.value) {
     liveStatus.value = t("status.ready");
+  }
+  if (!russianLiveStatusType.value) {
+    russianLiveStatus.value = t("status.ready");
   }
   if (!breadthStatusType.value) {
     breadthStatus.value = t("status.ready");
@@ -695,6 +898,7 @@ watch(locale, () => {
   if (!authStatusType.value && authStatus.value) {
     authStatus.value = t("auth.ready");
   }
+  enforceLocaleAvailability();
 });
 
 onMounted(async () => {
@@ -722,6 +926,9 @@ function handlePopState() {
   if (nextMode === "live") {
     applyLiveSettingsFromLocation();
   }
+  if (nextMode === "russian-live") {
+    applyRussianLiveSettingsFromLocation();
+  }
   setMode(nextMode, false);
 }
 
@@ -730,7 +937,11 @@ function modeFromLocation(): Mode {
 }
 
 function isFeatureMode(mode: Mode): boolean {
-  return mode === "live" || mode === "breadth" || mode === "quant" || mode === "futoi" || mode === "feedback";
+  return mode === "live" || mode === "russian-live" || mode === "breadth" || mode === "quant" || mode === "futoi" || mode === "feedback";
+}
+
+function isRussianLiveMarket(market: string): boolean {
+  return russianLiveMarkets.has(market);
 }
 
 function permittedMode(mode: Mode): Mode {
@@ -739,6 +950,12 @@ function permittedMode(mode: Mode): Mode {
   }
   if (isFeatureMode(mode) && !canUseFeatures.value) {
     return "profile";
+  }
+  if (mode === "futoi" && !isRussianLocale.value) {
+    return "live";
+  }
+  if (mode === "russian-live" && !isRussianLocale.value) {
+    return "live";
   }
   return mode;
 }
@@ -750,13 +967,20 @@ function setMode(mode: Mode, updateUrl = true) {
   if (nextMode !== "live") {
     resetLiveStrategies();
   }
-  const nextUrl = nextMode === "live" ? liveUrlPath() : modeRoutes[nextMode];
+  const nextUrl = nextMode === "live"
+    ? liveUrlPath()
+    : nextMode === "russian-live"
+      ? russianLiveUrlPath()
+      : modeRoutes[nextMode];
   const currentUrl = `${window.location.pathname}${window.location.search}`;
   if (updateUrl && currentUrl !== nextUrl) {
     window.history.pushState({ mode: nextMode }, "", nextUrl);
   }
   if (nextMode === "live") {
     startLivePolling();
+  }
+  if (nextMode === "russian-live") {
+    void loadRussianLiveChart();
   }
   if (nextMode === "breadth") {
     void loadMarketBreadth();
@@ -787,6 +1011,11 @@ function selectAccountMode(mode: Mode) {
 function setLiveStatus(message: string, type: StatusType = "") {
   liveStatus.value = message;
   liveStatusType.value = type;
+}
+
+function setRussianLiveStatus(message: string, type: StatusType = "") {
+  russianLiveStatus.value = message;
+  russianLiveStatusType.value = type;
 }
 
 function setBreadthStatus(message: string, type: StatusType = "") {
@@ -838,9 +1067,12 @@ async function bootstrapAuthenticatedApp() {
     await loadStrategies();
   } else {
     liveSymbolsByMarket.value = {};
+    russianLiveSymbolsByMarket.value = {};
     strategies.value = [];
   }
   applyLiveSettingsFromLocation();
+  applyRussianLiveSettingsFromLocation();
+  enforceLocaleAvailability();
   setMode(modeFromLocation(), false);
 }
 
@@ -895,6 +1127,68 @@ function liveUrlPath() {
   return `${modeRoutes.live}?${params.toString()}`;
 }
 
+function applyRussianLiveSettingsFromLocation() {
+  if (modeFromLocation() !== "russian-live") {
+    return;
+  }
+  const params = new URLSearchParams(window.location.search);
+  isApplyingRussianLiveSettingsFromUrl = true;
+  try {
+    const market = params.get("market");
+    if (market && russianLiveSymbolsByMarket.value[market]) {
+      russianLiveMarket.value = market;
+    }
+    const symbolOptions = activeRussianLiveSymbolOptions.value;
+    const symbol = (params.get("symbol") ?? "").trim().toUpperCase();
+    const matchedSymbol = symbolOptions.find(
+      (option) => String(option.value).toUpperCase() === symbol,
+    );
+    if (matchedSymbol) {
+      russianLiveSymbol.value = String(matchedSymbol.value);
+    } else {
+      ensureRussianLiveSymbolForMarket(russianLiveMarket.value);
+    }
+    const interval = params.get("interval");
+    if (interval && liveIntervalOptions.some((option) => String(option.value) === interval)) {
+      russianLiveInterval.value = interval;
+    }
+    const limit = params.get("limit");
+    const matchedLimit = liveCandleOptions.find((option) => String(option.value) === limit);
+    if (matchedLimit) {
+      russianLiveLimit.value = matchedLimit.value;
+    }
+    if (params.has("indicators")) {
+      russianLiveVisibleIndicators.value = parseRussianLiveIndicators(params.get("indicators"));
+    }
+    if (params.has("strategy")) {
+      russianLiveSelectedStrategies.value = parseLiveStrategyRequest(params.get("strategy"), true);
+    }
+  } finally {
+    queueMicrotask(() => {
+      isApplyingRussianLiveSettingsFromUrl = false;
+    });
+  }
+}
+
+function syncRussianLiveUrl() {
+  const nextUrl = russianLiveUrlPath();
+  const currentUrl = `${window.location.pathname}${window.location.search}`;
+  if (currentUrl !== nextUrl) {
+    window.history.replaceState({ mode: "russian-live" }, "", nextUrl);
+  }
+}
+
+function russianLiveUrlPath() {
+  const params = new URLSearchParams();
+  params.set("market", russianLiveMarket.value);
+  params.set("symbol", russianLiveSymbol.value);
+  params.set("interval", String(russianLiveInterval.value));
+  params.set("limit", String(russianLiveLimit.value));
+  params.set("indicators", russianLiveVisibleIndicators.value.join(","));
+  params.set("strategy", russianLiveStrategyRequest.value);
+  return `${modeRoutes["russian-live"]}?${params.toString()}`;
+}
+
 function parseLiveIndicators(value: string | null) {
   if (!value) {
     return [];
@@ -912,10 +1206,27 @@ function parseLiveIndicators(value: string | null) {
   ];
 }
 
-function parseLiveStrategyRequest(value: string | null): string[] {
+function parseRussianLiveIndicators(value: string | null) {
+  if (!value) {
+    return [];
+  }
+  const availableIndicators = new Set(
+    russianLiveIndicatorOptions.value.map((option) => String(option.value)),
+  );
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((indicator) => indicator.trim().toLowerCase())
+        .filter((indicator) => availableIndicators.has(indicator)),
+    ),
+  ];
+}
+
+function parseLiveStrategyRequest(value: string | null, allowEmpty = false): string[] {
   const fallback = strategies.value[0]?.name ?? "ema-rsi";
   if (!value) {
-    return [fallback];
+    return allowEmpty ? [] : [fallback];
   }
 
   const availableByName = new Map(
@@ -935,7 +1246,7 @@ function parseLiveStrategyRequest(value: string | null): string[] {
         .filter((strategyName): strategyName is string => Boolean(strategyName)),
     ),
   ];
-  return requestedNames.length ? requestedNames : [fallback];
+  return requestedNames.length ? requestedNames : allowEmpty ? [] : [fallback];
 }
 
 function loadLiveWorkspaces() {
@@ -980,8 +1291,10 @@ function saveLiveWorkspace() {
 }
 
 function applyLiveWorkspace(workspace: LiveWorkspace) {
-  liveMarket.value = workspace.market;
-  const symbolOptions = liveSymbolsByMarket.value[workspace.market] ?? [];
+  liveMarket.value = liveSymbolsByMarket.value[workspace.market]
+    ? workspace.market
+    : String(liveMarketOptions.value[0]?.value ?? "crypto_spot");
+  const symbolOptions = liveSymbolsByMarket.value[liveMarket.value] ?? [];
   const symbolExists = symbolOptions.some(
     (option) => String(option.value) === workspace.symbol,
   );
@@ -1007,6 +1320,26 @@ function ensureLiveSymbolForMarket(market: string) {
   }
   if (!symbolOptions.some((option) => String(option.value) === liveSymbol.value)) {
     liveSymbol.value = String(symbolOptions[0].value);
+  }
+}
+
+function ensureRussianLiveSymbolForMarket(market: string) {
+  const symbolOptions = russianLiveSymbolsByMarket.value[market] ?? [];
+  if (!symbolOptions.length) {
+    return;
+  }
+  if (!symbolOptions.some((option) => String(option.value) === russianLiveSymbol.value)) {
+    russianLiveSymbol.value = String(symbolOptions[0].value);
+  }
+}
+
+function enforceLocaleAvailability() {
+  if (!isRussianLocale.value && isRussianLiveMarket(liveMarket.value)) {
+    liveMarket.value = String(liveMarketOptions.value[0]?.value ?? "crypto_spot");
+    ensureLiveSymbolForMarket(liveMarket.value);
+  }
+  if (!isRussianLocale.value && (activeMode.value === "futoi" || activeMode.value === "russian-live")) {
+    setMode("live");
   }
 }
 
@@ -1116,11 +1449,15 @@ async function loadProfile() {
 async function loadLiveSymbols() {
   if (!canUseFeatures.value) {
     liveSymbolsByMarket.value = {};
+    russianLiveSymbolsByMarket.value = {};
     return;
   }
   const payload = await requestJson<LiveSymbolsPayload>("/api/live-symbols");
   liveSymbolsByMarket.value = payload.symbols;
+  russianLiveSymbolsByMarket.value = payload.russian_symbols;
+  enforceLocaleAvailability();
   ensureLiveSymbolForMarket(liveMarket.value);
+  ensureRussianLiveSymbolForMarket(russianLiveMarket.value);
 }
 
 async function loadAdminUsers() {
@@ -1339,10 +1676,12 @@ async function logout() {
   authUser.value = null;
   stopLivePolling();
   livePayload.value = null;
+  russianLivePayload.value = null;
   quantPayload.value = null;
   quantStrategyIdeas.value = [];
   breadthPayload.value = null;
   futoiRecords.value = [];
+  futoiChartRecords.value = [];
   futoiInstruments.value = [];
   selectedFutoiTicker.value = "";
   adminUsers.value = [];
@@ -1394,6 +1733,38 @@ async function loadLiveChart() {
     livePayload.value = null;
     liveDataUpdatedAt.value = null;
     setLiveStatus(errorMessage(error), "error");
+  }
+}
+
+async function loadRussianLiveChart() {
+  const requestId = ++russianLiveChartRequestId;
+  if (!canUseFeatures.value) {
+    setRussianLiveStatus(t("auth.inactive"), "error");
+    return;
+  }
+  setRussianLiveStatus(t("status.ready"), "busy");
+  try {
+    const params = new URLSearchParams(toQuery({
+      ...settings,
+      market: russianLiveMarket.value,
+      symbol: russianLiveSymbol.value,
+      interval: russianLiveInterval.value,
+      limit: russianLiveLimit.value,
+    }));
+    params.set("strategy", russianLiveStrategyRequest.value);
+    params.set("algopack", russianLiveAlgoPackDatasets.value.join(","));
+    const chartPayload = await requestJson<LiveChartPayload>(`/api/live-chart?${params.toString()}`);
+    if (requestId !== russianLiveChartRequestId) {
+      return;
+    }
+    russianLivePayload.value = chartPayload;
+    setRussianLiveStatus(`${t("status.updated")} ${new Date().toLocaleTimeString()}`);
+  } catch (error) {
+    if (requestId !== russianLiveChartRequestId) {
+      return;
+    }
+    russianLivePayload.value = null;
+    setRussianLiveStatus(errorMessage(error), "error");
   }
 }
 
@@ -1463,6 +1834,38 @@ function resetLiveStrategies() {
   liveSelectedStrategies.value = [strategies.value[0]?.name ?? "ema-rsi"];
 }
 
+function toggleRussianLiveStrategy(strategyName: string) {
+  if (russianLiveSelectedStrategies.value.includes(strategyName)) {
+    russianLiveSelectedStrategies.value = russianLiveSelectedStrategies.value.filter((name) => name !== strategyName);
+    return;
+  }
+  russianLiveSelectedStrategies.value = [...russianLiveSelectedStrategies.value, strategyName];
+  if (russianLiveSelectedStrategies.value.length > 1) {
+    liveSignalDisplayMode.value = "consensus";
+  }
+}
+
+function setRussianLiveStrategies(strategyNames: string[]) {
+  const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
+  russianLiveSelectedStrategies.value = strategyNames.filter((strategyName) => availableNames.has(strategyName));
+  if (russianLiveSelectedStrategies.value.length > 1) {
+    liveSignalDisplayMode.value = "consensus";
+  }
+}
+
+function selectRussianLiveStrategyGroup(strategyNames: string[]) {
+  setRussianLiveStrategies(strategyNames);
+}
+
+function selectAllRussianLiveStrategies() {
+  setRussianLiveStrategies(strategies.value.map((strategy) => strategy.name));
+  closeLiveStrategyMenu();
+}
+
+function clearRussianLiveStrategies() {
+  russianLiveSelectedStrategies.value = [];
+}
+
 function localizedLiveSymbolOption(option: SelectOption): SelectOption {
   if (locale.value === "ru") {
     const russianLabel = russianLiveSymbolLabels[String(option.value).toUpperCase()];
@@ -1478,12 +1881,29 @@ function selectLiveSymbol(value: string | number) {
   liveSymbolSearch.value = "";
 }
 
+function selectRussianLiveSymbol(value: string | number) {
+  russianLiveSymbol.value = String(value);
+  russianLiveSymbolSearch.value = "";
+}
+
 function toggleLiveIndicator(indicatorId: string) {
   if (liveVisibleIndicators.value.includes(indicatorId)) {
     liveVisibleIndicators.value = liveVisibleIndicators.value.filter((id) => id !== indicatorId);
     return;
   }
   liveVisibleIndicators.value = [...liveVisibleIndicators.value, indicatorId];
+}
+
+function toggleRussianLiveIndicator(indicatorId: string) {
+  if (russianLiveVisibleIndicators.value.includes(indicatorId)) {
+    russianLiveVisibleIndicators.value = russianLiveVisibleIndicators.value.filter((id) => id !== indicatorId);
+    return;
+  }
+  russianLiveVisibleIndicators.value = [...russianLiveVisibleIndicators.value, indicatorId];
+}
+
+function isAlgoPackIndicator(indicatorId: string): boolean {
+  return indicatorId.startsWith("algopack-");
 }
 
 function startLivePolling() {
@@ -1506,6 +1926,10 @@ function refreshLiveChart() {
     return;
   }
   void loadLiveChart();
+}
+
+function refreshRussianLiveChart() {
+  void loadRussianLiveChart();
 }
 
 async function loadMarketBreadth() {
@@ -1548,6 +1972,7 @@ async function loadFutoiInstruments(): Promise<boolean> {
     futoiForm.ticker = selectedFutoiTicker.value;
     if (!payload.instruments.length) {
       futoiRecords.value = [];
+      futoiChartRecords.value = [];
       setFutoiStatus(`${t("status.updated")} 0`);
       return false;
     }
@@ -1556,6 +1981,7 @@ async function loadFutoiInstruments(): Promise<boolean> {
     futoiInstruments.value = [];
     selectedFutoiTicker.value = "";
     futoiRecords.value = [];
+    futoiChartRecords.value = [];
     setFutoiStatus(errorMessage(error), "error");
     return false;
   }
@@ -1578,12 +2004,15 @@ async function loadFutoi() {
   if (futoiForm.limit) {
     params.set("limit", futoiForm.limit);
   }
+  params.set("history_days", "365");
   try {
     const payload = await requestJson<FutoiPayload>(`/api/futoi?${params.toString()}`);
     futoiRecords.value = payload.records;
+    futoiChartRecords.value = payload.chart_records;
     setFutoiStatus(`${t("status.updated")} ${payload.records.length}`);
   } catch (error) {
     futoiRecords.value = [];
+    futoiChartRecords.value = [];
     setFutoiStatus(errorMessage(error), "error");
   }
 }
@@ -1678,6 +2107,26 @@ function quantIdeaActionLabel(action: QuantStrategyIdea["action"]): string {
   return t(`strategyActions.${action}` as MessageKey);
 }
 
+function quantIdeaGroupLabel(group: string): string {
+  const key = `quant.groups.${group}` as MessageKey;
+  return localizedOrFallback(key, group);
+}
+
+function quantIdeaTitle(idea: QuantStrategyIdea): string {
+  const key = `quant.ideas.${idea.id}.title` as MessageKey;
+  return localizedOrFallback(key, idea.title);
+}
+
+function quantIdeaMetricLabel(metric: string): string {
+  const key = `quant.metrics.${metric}` as MessageKey;
+  return localizedOrFallback(key, metric);
+}
+
+function quantIdeaReasonLabel(idea: QuantStrategyIdea, reason: string): string {
+  const localized = localizedQuantReason(idea, reason);
+  return localized ?? reason;
+}
+
 function quantIdeaConfidenceLabel(confidence: QuantStrategyIdea["confidence"]): string {
   return t(`confidence.${confidence}` as MessageKey);
 }
@@ -1690,6 +2139,116 @@ function quantIdeaScoreStyle(score: number): Record<string, string> {
 
 function quantIdeaToneClass(idea: QuantStrategyIdea): string {
   return `is-${idea.action}`;
+}
+
+function localizedQuantReason(idea: QuantStrategyIdea, reason: string): string | null {
+  if (idea.id === "time-series-momentum") {
+    if (reason === "Need at least two candles for momentum.") {
+      return localizedOrFallback("quant.reasons.time-series-momentum.need-data", reason);
+    }
+    let match = reason.match(/^Price is up ([\d.]+)% over the last (\d+) candles\.$/);
+    if (match) {
+      return translateTemplate("quant.reasons.time-series-momentum.up", reason, {
+        value: match[1],
+        candles: match[2],
+      });
+    }
+    match = reason.match(/^Price is down ([\d.]+)% over the last (\d+) candles\.$/);
+    if (match) {
+      return translateTemplate("quant.reasons.time-series-momentum.down", reason, {
+        value: match[1],
+        candles: match[2],
+      });
+    }
+    match = reason.match(/^Momentum is flat at (-?[\d.]+)% over the last (\d+) candles\.$/);
+    if (match) {
+      return translateTemplate("quant.reasons.time-series-momentum.flat", reason, {
+        value: match[1],
+        candles: match[2],
+      });
+    }
+  }
+
+  if (idea.id === "rsi-mean-reversion") {
+    if (reason === "Need at least 15 candles for RSI.") {
+      return localizedOrFallback("quant.reasons.rsi-mean-reversion.need-data", reason);
+    }
+    const match = reason.match(/^RSI is (oversold|overbought|neutral) at ([\d.]+)\.$/);
+    if (match) {
+      return translateTemplate(`quant.reasons.rsi-mean-reversion.${match[1]}` as MessageKey, reason, {
+        value: match[2],
+      });
+    }
+  }
+
+  if (idea.id === "volatility-breakout") {
+    if (reason === "Need more than 20 candles for breakout levels.") {
+      return localizedOrFallback("quant.reasons.volatility-breakout.need-data", reason);
+    }
+    let match = reason.match(/^Close is ([\d.]+)% above the previous (\d+)-candle high\.$/);
+    if (match) {
+      return translateTemplate("quant.reasons.volatility-breakout.above", reason, {
+        value: match[1],
+        period: match[2],
+      });
+    }
+    match = reason.match(/^Close is ([\d.]+)% below the previous (\d+)-candle low\.$/);
+    if (match) {
+      return translateTemplate("quant.reasons.volatility-breakout.below", reason, {
+        value: match[1],
+        period: match[2],
+      });
+    }
+    match = reason.match(/^Close remains inside the previous (\d+)-candle range\.$/);
+    if (match) {
+      return translateTemplate("quant.reasons.volatility-breakout.inside", reason, {
+        period: match[1],
+      });
+    }
+  }
+
+  if (idea.id === "breadth-confirmation") {
+    if (reason === "No breadth series are available.") {
+      return localizedOrFallback("quant.reasons.breadth-confirmation.no-data", reason);
+    }
+    const match = reason.match(/^Average breadth is (constructive|weak|mixed) at ([\d.]+)%\.$/);
+    if (match) {
+      return translateTemplate(`quant.reasons.breadth-confirmation.${match[1]}` as MessageKey, reason, {
+        value: match[2],
+      });
+    }
+  }
+
+  if (idea.id === "futoi-positioning") {
+    if (reason === "No FUTOI records are available for this symbol.") {
+      return localizedOrFallback("quant.reasons.futoi-positioning.no-data", reason);
+    }
+    const match = reason.match(/^Latest FUTOI net positioning is (positive|negative|balanced) for (.+)\.$/);
+    if (match) {
+      return translateTemplate(`quant.reasons.futoi-positioning.${match[1]}` as MessageKey, reason, {
+        symbol: match[2],
+      });
+    }
+  }
+
+  return null;
+}
+
+function localizedOrFallback(key: MessageKey, fallback: string): string {
+  const localized = translate(locale.value, key);
+  return localized === key ? fallback : localized;
+}
+
+function translateTemplate(
+  key: MessageKey,
+  fallback: string,
+  params: Record<string, string>,
+): string {
+  let template = localizedOrFallback(key, fallback);
+  for (const [name, value] of Object.entries(params)) {
+    template = template.replaceAll(`{${name}}`, value);
+  }
+  return template;
 }
 
 function latestBreadthDate(symbol: string): string {
@@ -1750,13 +2309,62 @@ function errorMessage(error: unknown): string {
     </div>
   </section>
 
-  <section v-else-if="!authUser" class="auth-shell">
-    <form class="auth-card" @submit.prevent="submitAuth">
-      <div class="auth-card-heading">
-        <div>
-          <h1>{{ t("auth.title") }}</h1>
-          <p>{{ t("auth.subtitle") }}</p>
+  <section v-else-if="!authUser" class="landing-shell">
+    <div class="landing-market-scene" aria-hidden="true">
+      <div class="landing-tape">
+        <span
+          v-for="item in landingTickerTape"
+          :key="item.symbol"
+          class="landing-ticker"
+          :class="`is-${item.tone}`"
+        >
+          <b>{{ item.symbol }}</b>
+          <em>{{ item.value }}</em>
+        </span>
+      </div>
+      <div class="landing-chart-visual">
+        <span
+          v-for="(candle, index) in landingCandles"
+          :key="index"
+          class="landing-candle"
+          :class="`is-${candle.tone}`"
+          :style="{ '--candle-top': candle.top, '--candle-height': candle.height }"
+        ></span>
+      </div>
+      <div class="landing-order-panel">
+        <div
+          v-for="row in landingOrderRows"
+          :key="row.label"
+          :class="`is-${row.tone}`"
+        >
+          <span>{{ row.label }}</span>
+          <b>{{ row.value }}</b>
         </div>
+      </div>
+    </div>
+
+    <header class="landing-header">
+      <button class="landing-brand" type="button" @click="authMode = 'login'">
+        <span>AT</span>
+        <b>{{ t("app.title") }}</b>
+      </button>
+      <div class="landing-header-actions">
+        <button
+          type="button"
+          class="secondary landing-auth-action"
+          :class="{ 'is-active': authMode === 'login' }"
+          @click="authMode = 'login'"
+        >
+          {{ t("auth.login") }}
+        </button>
+        <button
+          type="button"
+          class="primary landing-auth-action"
+          :class="{ 'is-active': authMode === 'register' }"
+          @click="authMode = 'register'"
+        >
+          {{ t("auth.register") }}
+        </button>
         <div class="language-switcher" :aria-label="t('aria.language')">
           <button
             v-for="item in SUPPORTED_LOCALES"
@@ -1771,22 +2379,25 @@ function errorMessage(error: unknown): string {
           </button>
         </div>
       </div>
-      <div class="auth-tabs">
-        <button
-          type="button"
-          :class="{ 'is-active': authMode === 'login' }"
-          @click="authMode = 'login'"
-        >
-          {{ t("auth.login") }}
-        </button>
-        <button
-          type="button"
-          :class="{ 'is-active': authMode === 'register' }"
-          @click="authMode = 'register'"
-        >
-          {{ t("auth.register") }}
-        </button>
-      </div>
+    </header>
+
+    <main class="landing-content">
+      <section class="landing-hero" aria-labelledby="landing-title">
+        <p class="landing-kicker">{{ t("landing.kicker") }}</p>
+        <h1 id="landing-title">{{ t("landing.title") }}</h1>
+        <p>{{ t("landing.subtitle") }}</p>
+        <div class="landing-feature-grid">
+          <span v-for="feature in landingFeatureKeys" :key="feature">{{ t(feature) }}</span>
+        </div>
+      </section>
+
+      <form class="auth-card landing-auth-card" @submit.prevent="submitAuth">
+        <div class="auth-card-heading">
+          <div>
+            <h2>{{ authMode === "login" ? t("auth.login") : t("auth.register") }}</h2>
+            <p>{{ authMode === "login" ? t("landing.loginHint") : t("landing.registerHint") }}</p>
+          </div>
+        </div>
       <label>
         <span>{{ t("auth.username") }}</span>
         <input v-model.trim="authForm.username" autocomplete="username" required minlength="3">
@@ -1795,7 +2406,7 @@ function errorMessage(error: unknown): string {
         <span>{{ t("auth.password") }}</span>
         <input
           v-model="authForm.password"
-          autocomplete="current-password"
+          :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'"
           required
           minlength="8"
           type="password"
@@ -1815,6 +2426,7 @@ function errorMessage(error: unknown): string {
         {{ authStatus }}
       </div>
     </form>
+    </main>
   </section>
 
   <template v-else>
@@ -2169,6 +2781,247 @@ function errorMessage(error: unknown): string {
       </div>
     </section>
 
+    <section v-else-if="activeMode === 'russian-live'" class="panel live-panel russian-live-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("pages.russianLive") }}</h2>
+          <p>{{ t("pages.russianLiveSubtitle") }}</p>
+        </div>
+        <div class="status" :class="russianLiveStatusType ? `is-${russianLiveStatusType}` : ''">
+          {{ russianLiveStatus }}
+        </div>
+      </div>
+      <div class="live-market-strip">
+        <div class="ticker-pill">
+          <span>{{ t("labels.market") }}</span>
+          <b>{{ russianLivePayload?.symbol ?? russianLiveSymbol }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>{{ t("labels.interval") }}</span>
+          <b>{{ russianLivePayload?.interval ?? russianLiveInterval }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>{{ t("labels.candles") }}</span>
+          <b>{{ formatNumber(russianLiveCandleCount) }}</b>
+        </div>
+        <div class="ticker-pill">
+          <span>{{ t("labels.signals") }}</span>
+          <b>{{ formatNumber(russianLiveSignalCount) }}</b>
+        </div>
+      </div>
+      <div class="live-controls">
+        <div class="live-control-section market-controls">
+          <label>
+            <span>{{ t("labels.market") }}</span>
+            <select v-model="russianLiveMarket">
+              <option
+                v-for="option in russianLiveMarketOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label class="symbol-picker">
+            <span>{{ t("labels.symbol") }}</span>
+            <input
+              v-model.trim="russianLiveSymbolSearch"
+              autocomplete="off"
+              type="search"
+              :placeholder="t('labels.symbolSearch')"
+            >
+            <div
+              v-if="hasRussianLiveSymbolSearch"
+              class="symbol-results"
+              role="listbox"
+              :aria-label="t('labels.symbolSearch')"
+            >
+              <button
+                v-for="option in filteredRussianLiveSymbolOptions"
+                :key="`russian-symbol-search-${option.value}`"
+                class="symbol-result"
+                :class="{ 'is-active': String(option.value) === russianLiveSymbol }"
+                type="button"
+                @click="selectRussianLiveSymbol(option.value)"
+              >
+                <b>{{ option.value }}</b>
+                <small v-if="String(option.label) !== String(option.value)">
+                  {{ option.label }}
+                </small>
+              </button>
+              <div v-if="!filteredRussianLiveSymbolOptions.length" class="symbol-result-empty">
+                {{ t("empty.noMatchingSymbols") }}
+              </div>
+            </div>
+            <select v-model="russianLiveSymbol" @change="russianLiveSymbolSearch = ''">
+              <option
+                v-for="option in activeRussianLiveSymbolOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>{{ t("labels.interval") }}</span>
+            <select v-model="russianLiveInterval">
+              <option
+                v-for="option in liveIntervalOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>{{ t("labels.candles") }}</span>
+            <select v-model="russianLiveLimit">
+              <option
+                v-for="option in liveCandleOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <button class="primary" type="button" @click="refreshRussianLiveChart">
+            {{ t("actions.refreshChart") }}
+          </button>
+        </div>
+        <div class="live-control-section signal-controls">
+          <div class="strategy-picker live-strategy-field">
+            <strong class="strategy-picker-label">{{ t("labels.strategy") }}</strong>
+            <details ref="liveStrategyMenu" class="strategy-menu" :aria-label="t('labels.strategyPickerHint')">
+              <summary class="strategy-summary">
+                <span>
+                  <b>{{ activeRussianLiveStrategyLabel }}</b>
+                  <small>{{ selectedRussianLiveStrategyPreview }}</small>
+                </span>
+              </summary>
+              <div class="strategy-menu-body">
+                <input
+                  v-model.trim="liveStrategySearch"
+                  class="strategy-search"
+                  autocomplete="off"
+                  type="search"
+                  :placeholder="t('labels.strategySearch')"
+                >
+                <div class="strategy-actions">
+                  <button class="secondary" type="button" @click="selectAllRussianLiveStrategies">
+                    {{ t("actions.selectAll") }}
+                  </button>
+                  <button class="secondary" type="button" @click="clearRussianLiveStrategies">
+                    {{ t("actions.clear") }}
+                  </button>
+                </div>
+                <section
+                  v-for="group in filteredLiveStrategyGroups"
+                  :key="group.id"
+                  class="strategy-group"
+                >
+                  <div class="strategy-group-heading">
+                    <strong>{{ group.label }}</strong>
+                    <button
+                      class="secondary"
+                      type="button"
+                      @click="selectRussianLiveStrategyGroup(group.strategyNames)"
+                    >
+                      {{ t("actions.selectAll") }}
+                    </button>
+                  </div>
+                  <label
+                    v-for="strategy in group.strategies"
+                    :key="strategy.name"
+                    class="strategy-row"
+                    :class="{ 'is-active': russianLiveSelectedStrategies.includes(strategy.name) }"
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="russianLiveSelectedStrategies.includes(strategy.name)"
+                      @change="toggleRussianLiveStrategy(strategy.name)"
+                    >
+                    <span class="strategy-row-copy">
+                      <b>{{ strategyTitle(strategy.name) }}</b>
+                      <small>{{ strategy.description }}</small>
+                    </span>
+                  </label>
+                </section>
+              </div>
+            </details>
+          </div>
+          <label v-if="isMultiStrategyRussianLive">
+            <span>{{ t("labels.signalView") }}</span>
+            <select v-model="liveSignalDisplayMode">
+              <option
+                v-for="option in liveSignalDisplayOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label v-if="isMultiStrategyRussianLive && liveSignalDisplayMode === 'consensus'">
+            <span>{{ t("labels.minConfirmations") }}</span>
+            <input v-model.number="liveConsensusMinConfirmations" type="number" min="1" max="20">
+          </label>
+          <label v-if="isMultiStrategyRussianLive">
+            <span>{{ t("labels.maxMarkers") }}</span>
+            <input v-model.number="liveMaxSignals" type="number" min="10" max="500">
+          </label>
+          <label class="toggle-row">
+            <input v-model="showSignals" type="checkbox">
+            <span>{{ t("labels.strategyMarkers") }}</span>
+          </label>
+        </div>
+      </div>
+      <div class="indicator-picker">
+        <span>{{ t("labels.indicators") }}</span>
+        <label
+          v-for="option in russianLiveIndicatorOptions"
+          :key="option.value"
+          class="check-chip"
+          :class="{
+            'is-active': russianLiveVisibleIndicators.includes(String(option.value)),
+            'is-algopack': isAlgoPackIndicator(String(option.value))
+          }"
+        >
+          <input
+            type="checkbox"
+            :checked="russianLiveVisibleIndicators.includes(String(option.value))"
+            @change="toggleRussianLiveIndicator(String(option.value))"
+          >
+          <span>{{ option.label }}</span>
+        </label>
+      </div>
+      <div class="chart-shell">
+        <div class="chart-legend">
+          <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
+          <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
+          <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">{{ t("chart.tradingView") }}</a>
+        </div>
+        <div class="chart-stage">
+          <TradingViewChart
+            v-if="russianLivePayload"
+            :candles="russianLivePayload.candles"
+            :signals="displayedRussianLiveSignals"
+            :indicators="visibleRussianLiveIndicators"
+            :show-signals="showSignals"
+            :reset-key="russianLiveChartResetKey"
+            :aria-label="chartLabels.aria"
+            :empty-label="chartLabels.empty"
+            :long-signal-label="chartLabels.longSignal"
+            :short-signal-label="chartLabels.shortSignal"
+          />
+          <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
+        </div>
+      </div>
+    </section>
+
     <section v-else-if='activeMode === "breadth"' class="panel breadth-panel">
       <div class="panel-heading">
         <div>
@@ -2420,8 +3273,8 @@ function errorMessage(error: unknown): string {
         >
           <header>
             <div>
-              <span>{{ idea.group }}</span>
-              <h3>{{ idea.title }}</h3>
+              <span>{{ quantIdeaGroupLabel(idea.group) }}</span>
+              <h3>{{ quantIdeaTitle(idea) }}</h3>
             </div>
             <strong>{{ quantIdeaActionLabel(idea.action) }}</strong>
           </header>
@@ -2438,12 +3291,12 @@ function errorMessage(error: unknown): string {
               v-for="(value, key) in idea.metrics"
               :key="`${idea.id}-${key}`"
             >
-              <dt>{{ key }}</dt>
+              <dt>{{ quantIdeaMetricLabel(String(key)) }}</dt>
               <dd>{{ formatNumber(value) }}</dd>
             </div>
           </dl>
           <ul>
-            <li v-for="reason in idea.reasons" :key="reason">{{ reason }}</li>
+            <li v-for="reason in idea.reasons" :key="reason">{{ quantIdeaReasonLabel(idea, reason) }}</li>
           </ul>
         </article>
       </div>

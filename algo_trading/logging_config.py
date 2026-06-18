@@ -42,7 +42,7 @@ def configure_error_logging(
             encoding="utf-8",
             delay=True,
         )
-        handler.setLevel(logging.ERROR)
+        handler.setLevel(logging.WARNING)
         handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
         )

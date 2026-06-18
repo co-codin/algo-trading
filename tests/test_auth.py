@@ -117,12 +117,12 @@ class AuthTests(unittest.TestCase):
         self.assertIsNone(updated.middle_name)
         self.assertEqual(store.list_users()[0], updated)
 
-    def test_memory_store_seeds_default_admin_with_password(self):
+    def test_memory_store_seeds_admin_with_configured_password(self):
         store = InMemoryAuthStore()
 
         seeded = store.seed_admin_user(
             "cuiyeqing960904@gmail.com",
-            "Vladimir960904",
+            "admin-test-password-123",
         )
 
         self.assertTrue(seeded.is_admin)
@@ -130,28 +130,31 @@ class AuthTests(unittest.TestCase):
         self.assertIsNotNone(seeded.activated_at)
         authenticated = store.authenticate_user(
             "cuiyeqing960904@gmail.com",
-            "Vladimir960904",
+            "admin-test-password-123",
         )
         self.assertEqual(authenticated.id, seeded.id)
         self.assertTrue(authenticated.is_admin)
 
-    def test_memory_store_promotes_existing_seed_admin_and_resets_password(self):
+    def test_memory_store_promotes_existing_seed_admin_without_resetting_password(self):
         store = InMemoryAuthStore()
         user = store.register_user("cuiyeqing960904@gmail.com", "oldpassword")
 
         seeded = store.seed_admin_user(
             "cuiyeqing960904@gmail.com",
-            "Vladimir960904",
+            "admin-test-password-123",
         )
 
         self.assertEqual(seeded.id, user.id)
         self.assertTrue(seeded.is_admin)
-        with self.assertRaisesRegex(ValueError, "invalid username or password"):
-            store.authenticate_user("cuiyeqing960904@gmail.com", "oldpassword")
         self.assertEqual(
-            store.authenticate_user("cuiyeqing960904@gmail.com", "Vladimir960904"),
+            store.authenticate_user("cuiyeqing960904@gmail.com", "oldpassword"),
             seeded,
         )
+        with self.assertRaisesRegex(ValueError, "invalid username or password"):
+            store.authenticate_user(
+                "cuiyeqing960904@gmail.com",
+                "admin-test-password-123",
+            )
 
     def test_memory_store_validates_usernames_and_passwords(self):
         store = InMemoryAuthStore()

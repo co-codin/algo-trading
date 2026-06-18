@@ -1,10 +1,12 @@
 import logging
+import os
 import tempfile
 import time
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -15,7 +17,7 @@ from algo_trading.futoi import FutoiInstrument, FutoiRecord
 from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.live_symbols import InMemoryLiveSymbolStore, LiveSymbol
 from algo_trading.models import Candle
-from algo_trading.web_app import create_app
+from algo_trading.web_app import admin_password, create_app
 
 
 class WebAppTests(unittest.TestCase):
@@ -37,6 +39,11 @@ class WebAppTests(unittest.TestCase):
             **overrides,
         )
         return TestClient(app)
+
+    def test_admin_password_has_no_runtime_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "ADMIN_PASSWORD must be set"):
+                admin_password()
 
     def test_market_breadth_api_uses_response_cache_after_first_success(self):
         class FakeResponseCache:
@@ -101,6 +108,57 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(service.calls, 1)
         self.assertEqual(len(cache.set_calls), 1)
         self.assertEqual(cache.set_calls[0][1], 300)
+
+    def test_api_response_cache_failures_are_logged_and_nonfatal(self):
+        class FailingResponseCache:
+            def get_json(self, key: str) -> dict[str, Any] | None:
+                raise RuntimeError(f"redis get failed for {key}")
+
+            def set_json(
+                self,
+                key: str,
+                payload: dict[str, Any],
+                *,
+                ttl_seconds: int,
+            ) -> None:
+                raise RuntimeError(f"redis set failed for {key}")
+
+        class FakeMarketBreadthService:
+            def payload(self, symbols: list[str] | None = None) -> dict[str, Any]:
+                return {
+                    "ok": True,
+                    "source": "Barchart",
+                    "groups": [],
+                    "series": {},
+                    "put_call_symbol": "$CPC",
+                    "requested_symbols": symbols,
+                }
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            log_dir = Path(tempdir) / "logs"
+            auth_store = InMemoryAuthStore()
+            client = self.make_client(
+                auth_store=auth_store,
+                market_breadth_service=FakeMarketBreadthService(),
+                response_cache=FailingResponseCache(),
+                log_dir=log_dir,
+            )
+            client.post(
+                "/api/auth/register",
+                json={"username": "alice@example.com", "password": "password123"},
+            )
+            auth_store.set_user_access(
+                auth_store.list_users()[0].id,
+                is_active=True,
+                activated_at=utcnow(),
+            )
+
+            response = client.get("/api/market-breadth?symbols=$S5FD")
+            content = (log_dir / "app.log").read_text(encoding="utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("API response cache get failed for market-breadth", content)
+        self.assertIn("API response cache set failed for market-breadth", content)
 
     def test_live_chart_api_uses_short_response_cache_without_skipping_alert_dedupe(self):
         class FakeResponseCache:
@@ -283,14 +341,59 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/api/live-symbols")
 
         self.assertEqual(response.status_code, 200)
-        symbols = response.json()["symbols"]
+        payload = response.json()
+        symbols = payload["symbols"]
+        russian_symbols = payload["russian_symbols"]
         self.assertIn({"value": "BTCUSDT", "label": "BTCUSDT"}, symbols["crypto_spot"])
         self.assertIn({"value": "DOGEUSDT", "label": "DOGEUSDT"}, symbols["crypto_spot"])
         self.assertIn({"value": "SPY", "label": "SPY · S&P 500 ETF"}, symbols["cme_futures"])
+        self.assertNotIn("russian_bluechips", symbols)
+        self.assertNotIn("russian_indices_futures", symbols)
         self.assertIn(
             {"value": "IMOEX", "label": "IMOEX · MOEX Russia Index"},
-            symbols["russian_indices_futures"],
+            russian_symbols["russian_indices_futures"],
         )
+
+    def test_live_symbols_ignore_stale_response_cache_shape(self):
+        class StaleResponseCache:
+            def get_json(self, key: str) -> dict[str, Any] | None:
+                return {
+                    "ok": True,
+                    "symbols": {
+                        "crypto_spot": [{"value": "BTCUSDT", "label": "BTCUSDT"}],
+                        "russian_bluechips": [{"value": "SBER", "label": "SBER · Sberbank"}],
+                    },
+                }
+
+            def set_json(
+                self,
+                key: str,
+                payload: dict[str, Any],
+                *,
+                ttl_seconds: int,
+            ) -> None:
+                raise AssertionError("live symbols should not be written to response cache")
+
+        auth_store = InMemoryAuthStore()
+        client = self.make_client(
+            auth_store=auth_store,
+            live_symbol_store=InMemoryLiveSymbolStore(),
+            response_cache=StaleResponseCache(),
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        alice = auth_store.list_users()[0]
+        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
+
+        response = client.get("/api/live-symbols")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("russian_symbols", payload)
+        self.assertNotIn("russian_bluechips", payload["symbols"])
+        self.assertIn("russian_bluechips", payload["russian_symbols"])
 
     def test_live_chart_sends_rsi_telegram_alert_once_per_signal(self):
         class FakeTelegramSender:
@@ -622,6 +725,54 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(active.json()["records"][0]["client_group"], "YUR")
         self.assertEqual(active.json()["records"][0]["trade_date"], "2024-04-08")
 
+    def test_active_user_can_read_one_year_futoi_chart_history_from_db(self):
+        auth_store = InMemoryAuthStore()
+        history_store = InMemoryHistoricalDataStore()
+
+        def futoi_record(trade_date: date, position: float) -> FutoiRecord:
+            return FutoiRecord(
+                trade_date=trade_date,
+                trade_time="18:45:00",
+                ticker="IMOEXF",
+                client_group="YUR",
+                position=position,
+                position_long=max(position, 0.0),
+                position_short=min(position, 0.0),
+                position_long_count=1,
+                position_short_count=1,
+            )
+
+        history_store.upsert_futoi_records(
+            [
+                futoi_record(date(2023, 6, 17), 5.0),
+                futoi_record(date(2023, 6, 18), 10.0),
+                futoi_record(date(2024, 6, 17), 20.0),
+            ],
+            source="unit-test",
+        )
+        client = self.make_client(auth_store=auth_store, historical_store=history_store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        user = auth_store.list_users()[0]
+        auth_store.set_user_access(user.id, is_active=True, activated_at=utcnow())
+
+        response = client.get(
+            "/api/futoi?date=2024-06-17&ticker=IMOEXF&limit=1&history_days=365"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [record["trade_date"] for record in payload["records"]],
+            ["2024-06-17"],
+        )
+        self.assertEqual(
+            [record["trade_date"] for record in payload["chart_records"]],
+            ["2023-06-18", "2024-06-17"],
+        )
+
     def test_active_user_can_read_futoi_instruments(self):
         auth_store = InMemoryAuthStore()
         history_store = InMemoryHistoricalDataStore()
@@ -688,7 +839,11 @@ class WebAppTests(unittest.TestCase):
 
     def test_platform_admin_can_toggle_free_trial_for_new_registrations(self):
         store = InMemoryAuthStore()
-        client = self.make_client(auth_store=store, seed_admin=True)
+        client = self.make_client(
+            auth_store=store,
+            seed_admin=True,
+            admin_seed_password="admin-test-password-123",
+        )
         store.seed_admin_user("other-admin@example.com", "password123")
 
         client.post(
@@ -710,7 +865,7 @@ class WebAppTests(unittest.TestCase):
             "/api/auth/login",
             json={
                 "username": "cuiyeqing960904@gmail.com",
-                "password": "Vladimir960904",
+                "password": "admin-test-password-123",
             },
         )
 
@@ -828,10 +983,10 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(forbidden.json(), {"ok": False, "error": "admin required"})
 
         client.post("/api/auth/logout")
-        store.seed_admin_user("admin@example.com", "Vladimir960904")
+        store.seed_admin_user("admin@example.com", "admin-test-password-123")
         client.post(
             "/api/auth/login",
-            json={"username": "admin@example.com", "password": "Vladimir960904"},
+            json={"username": "admin@example.com", "password": "admin-test-password-123"},
         )
 
         listed = client.get("/api/admin/feedback")
@@ -981,6 +1136,82 @@ class WebAppTests(unittest.TestCase):
             [1000, 2000, 3000, 3001],
         )
 
+    def test_live_chart_stale_background_refresh_writes_response_cache(self):
+        class FakeResponseCache:
+            def __init__(self) -> None:
+                self.values: dict[str, dict[str, Any]] = {}
+
+            def get_json(self, key: str) -> dict[str, Any] | None:
+                return self.values.get(key)
+
+            def set_json(
+                self,
+                key: str,
+                payload: dict[str, Any],
+                *,
+                ttl_seconds: int,
+            ) -> None:
+                self.values[key] = payload | {"cached_ttl": ttl_seconds}
+
+        class FakeMarketClient:
+            def get_24h_tickers(self) -> list[dict[str, object]]:
+                return []
+
+            def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+                return [
+                    Candle(
+                        open_time=3000 + index,
+                        open=price,
+                        high=price + 1.0,
+                        low=price - 1.0,
+                        close=price,
+                        volume=1.0,
+                    )
+                    for index, price in enumerate([13, 14])
+                ][:limit]
+
+        auth_store = InMemoryAuthStore()
+        historical_store = InMemoryHistoricalDataStore()
+        historical_store.upsert_candles(
+            "crypto_spot",
+            "BTCUSDT",
+            "5m",
+            [
+                Candle(1000, 11, 12, 10, 11, 1),
+                Candle(2000, 12, 13, 11, 12, 1),
+            ],
+            source="seed",
+        )
+        cache = FakeResponseCache()
+        client = self.make_client(
+            auth_store=auth_store,
+            client_factory=FakeMarketClient,
+            historical_store=historical_store,
+            response_cache=cache,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice", "password": "password123"},
+        )
+        auth_store.set_user_access(
+            auth_store.list_users()[0].id,
+            is_active=True,
+            activated_at=utcnow(),
+        )
+
+        response = client.get(
+            "/api/live-chart?market=crypto_spot&symbol=BTCUSDT&interval=5m"
+            "&limit=2&fast_ema=1&slow_ema=2&rsi_period=2"
+            "&rsi_overbought=100&rsi_oversold=0"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["time"] for item in response.json()["candles"]], [1000, 2000])
+        self.assertEqual(len(cache.values), 1)
+        cached_payload = next(iter(cache.values.values()))
+        self.assertEqual([item["time"] for item in cached_payload["candles"]], [3000, 3001])
+        self.assertEqual(cached_payload["cached_ttl"], 10)
+
     def test_login_and_logout_manage_session_access(self):
         client = self.make_client()
         client.post(
@@ -1101,14 +1332,17 @@ class WebAppTests(unittest.TestCase):
 
         self.assertTrue(all(response.status_code == 404 for response in requests))
 
-    def test_seeded_admin_can_login_with_default_password_and_access_admin_api(self):
-        client = self.make_client(seed_admin=True)
+    def test_seeded_admin_can_login_with_configured_password_and_access_admin_api(self):
+        client = self.make_client(
+            seed_admin=True,
+            admin_seed_password="admin-test-password-123",
+        )
 
         login = client.post(
             "/api/auth/login",
             json={
                 "username": "cuiyeqing960904@gmail.com",
-                "password": "Vladimir960904",
+                "password": "admin-test-password-123",
             },
         )
 
@@ -1120,6 +1354,36 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["users"][0]["username"], "cuiyeqing960904@gmail.com")
 
+    def test_inactive_admin_session_cannot_access_admin_api(self):
+        store = InMemoryAuthStore()
+        client = self.make_client(
+            auth_store=store,
+            seed_admin=True,
+            admin_seed_password="admin-test-password-123",
+        )
+        login = client.post(
+            "/api/auth/login",
+            json={
+                "username": "cuiyeqing960904@gmail.com",
+                "password": "admin-test-password-123",
+            },
+        )
+        admin_user = store.list_users()[0]
+        store.set_user_access(admin_user.id, is_active=False)
+
+        self.assertEqual(login.status_code, 200)
+        for method, path, payload in (
+            ("get", "/api/admin/users", None),
+            ("get", "/api/admin/settings/free-trial", None),
+            ("put", "/api/admin/settings/free-trial", {"is_free_trial_enabled": True}),
+            ("get", "/api/admin/feedback", None),
+        ):
+            with self.subTest(path=path):
+                caller = getattr(client, method)
+                response = caller(path, json=payload) if payload is not None else caller(path)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json(), {"ok": False, "error": "account inactive"})
+
     def test_admin_users_requires_admin_flag_and_lists_all_users(self):
         store = InMemoryAuthStore()
         client = self.make_client(auth_store=store)
@@ -1130,13 +1394,22 @@ class WebAppTests(unittest.TestCase):
 
         forbidden = client.get("/api/admin/users")
         self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(forbidden.json(), {"ok": False, "error": "account inactive"})
+
+        registered_user = store.list_users()[0]
+        store.set_user_access(registered_user.id, is_active=True, activated_at=utcnow())
+
+        forbidden = client.get("/api/admin/users")
+        self.assertEqual(forbidden.status_code, 403)
         self.assertEqual(forbidden.json(), {"ok": False, "error": "admin required"})
 
+        store.set_user_access(registered_user.id, is_active=False)
+
         client.post("/api/auth/logout")
-        store.seed_admin_user("admin@example.com", "Vladimir960904")
+        store.seed_admin_user("admin@example.com", "admin-test-password-123")
         client.post(
             "/api/auth/login",
-            json={"username": "admin@example.com", "password": "Vladimir960904"},
+            json={"username": "admin@example.com", "password": "admin-test-password-123"},
         )
         response = client.get("/api/admin/users")
 
@@ -1160,10 +1433,10 @@ class WebAppTests(unittest.TestCase):
         )
         alice = store.list_users()[0]
         client.post("/api/auth/logout")
-        store.seed_admin_user("admin@example.com", "Vladimir960904")
+        store.seed_admin_user("admin@example.com", "admin-test-password-123")
         client.post(
             "/api/auth/login",
-            json={"username": "admin@example.com", "password": "Vladimir960904"},
+            json={"username": "admin@example.com", "password": "admin-test-password-123"},
         )
 
         response = client.patch(
@@ -1197,10 +1470,10 @@ class WebAppTests(unittest.TestCase):
         )
         alice = store.list_users()[0]
         client.post("/api/auth/logout")
-        store.seed_admin_user("admin@example.com", "Vladimir960904")
+        store.seed_admin_user("admin@example.com", "admin-test-password-123")
         client.post(
             "/api/auth/login",
-            json={"username": "admin@example.com", "password": "Vladimir960904"},
+            json={"username": "admin@example.com", "password": "admin-test-password-123"},
         )
         expires_at = (utcnow() + timedelta(days=30)).replace(microsecond=0)
 

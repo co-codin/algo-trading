@@ -40,6 +40,13 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8765/api/auth/me", dockerfile)
         self.assertNotIn("http://127.0.0.1:8765/api/runs", dockerfile)
 
+    def test_vite_splits_charting_dependencies_from_main_bundle(self):
+        vite_config = (ROOT / "vite.config.ts").read_text(encoding="utf-8")
+
+        self.assertIn("manualChunks", vite_config)
+        self.assertIn('id.includes("lightweight-charts")', vite_config)
+        self.assertIn('return "charting";', vite_config)
+
     def test_compose_adds_postgres_and_database_url(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
@@ -79,6 +86,8 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("MOEX_API_KEY=", env_example)
         self.assertIn("MOEX_FUTOI_API_KEY=", env_example)
         self.assertIn("ADMIN_EMAIL=", env_example)
+        self.assertIn("ADMIN_PASSWORD=", env_example)
+        self.assertNotIn("Vladimir960904", env_example)
         self.assertIn("# REDIS_URL=redis://localhost:6379/0", env_example)
         self.assertIn("API_RESPONSE_CACHE_ENABLED=0", env_example)
         self.assertIn("API_CACHE_TTL_MARKET_BREADTH_SECONDS=300", env_example)
@@ -106,6 +115,8 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn('MOEX_FUTOI_RETENTION_DAYS: "730"', compose)
         self.assertIn('MOEX_FUTOI_REFRESH_SECONDS: "86400"', compose)
         self.assertIn('MOEX_FUTOI_PRUNE_SECONDS: "604800"', compose)
+        self.assertIn("ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}", compose)
+        self.assertNotIn("Vladimir960904", compose)
         self.assertIn('MARKET_BREADTH_RETENTION_DAYS: "365"', compose)
         self.assertIn("HISTORICAL_DATA_DIR ?= $(CURDIR)/historical_data", makefile)
         self.assertIn('"$(HISTORICAL_DATA_DIR)"', makefile)
@@ -127,8 +138,10 @@ class InfrastructureTests(unittest.TestCase):
 
         self.assertIn("/api/auth/login", makefile)
         self.assertIn("cuiyeqing960904@gmail.com", makefile)
+        self.assertIn("smoke_password=", makefile)
         self.assertIn('-c "$$cookie_jar"', makefile)
         self.assertIn('-b "$$cookie_jar"', makefile)
         self.assertIn("/api/strategies", makefile)
         self.assertIn("/breadth", makefile)
         self.assertNotIn("/lab", makefile)
+        self.assertNotIn("Vladimir960904", makefile)

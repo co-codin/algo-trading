@@ -186,6 +186,8 @@ MOEX_INDEX_FUTURE_SYMBOLS = (
     ("RIZ6", "RIZ6 · RTS Index Futures"),
 )
 
+RUSSIAN_LIVE_MARKETS = frozenset({"russian_bluechips", "russian_indices_futures"})
+
 
 def default_live_symbols() -> list[LiveSymbol]:
     symbols: list[LiveSymbol] = []
@@ -350,14 +352,16 @@ def live_symbol_from_row(row: Sequence[object]) -> LiveSymbol:
 
 def live_symbols_payload(store: LiveSymbolStore) -> dict[str, object]:
     grouped: dict[str, list[dict[str, str]]] = {}
+    russian_grouped: dict[str, list[dict[str, str]]] = {}
     for symbol in store.list_symbols():
-        grouped.setdefault(symbol.market, []).append(
+        target_group = russian_grouped if symbol.market in RUSSIAN_LIVE_MARKETS else grouped
+        target_group.setdefault(symbol.market, []).append(
             {
                 "value": symbol.symbol,
                 "label": symbol.label,
             }
         )
-    return {"ok": True, "symbols": grouped}
+    return {"ok": True, "symbols": grouped, "russian_symbols": russian_grouped}
 
 
 def live_symbol_store_from_env() -> LiveSymbolStore:

@@ -305,6 +305,9 @@ function paneIndexForIndicator(indicator: IndicatorDefinition): number {
   if (indicator.pane === "price") {
     return 0;
   }
+  if (indicator.pane === "volume") {
+    return 1;
+  }
   if (indicator.id === "volume") {
     return 1;
   }

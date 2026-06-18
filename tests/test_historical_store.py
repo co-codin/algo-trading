@@ -7,6 +7,7 @@ from algo_trading.historical_store import (
     InMemoryHistoricalDataStore,
     PostgresHistoricalDataStore,
 )
+from algo_trading.algopack import AlgoPackRecord
 from algo_trading.futoi import FutoiRecord
 from algo_trading.market_breadth import MarketBreadthBar
 from algo_trading.models import Candle
@@ -133,6 +134,30 @@ class HistoricalStoreTests(unittest.TestCase):
             ["IMOEXF", "SBERF"],
         )
 
+    def test_memory_store_upserts_and_loads_algopack_records(self):
+        store = InMemoryHistoricalDataStore()
+        original = _algopack_record("tradestats", date(2024, 4, 8), "10:05:00", "SBER", {"vol": 100})
+        replacement = _algopack_record("tradestats", date(2024, 4, 8), "10:05:00", "SBER", {"vol": 120})
+        other_dataset = _algopack_record("obstats", date(2024, 4, 8), "10:05:00", "SBER", {"spread_bbo": 0.2})
+        other_symbol = _algopack_record("tradestats", date(2024, 4, 8), "10:05:00", "GAZP", {"vol": 90})
+
+        inserted = store.upsert_algopack_records(
+            [original, replacement, other_dataset, other_symbol],
+            source="unit-test",
+        )
+
+        self.assertEqual(inserted, 3)
+        loaded = store.load_algopack_records(
+            dataset="tradestats",
+            market="russian_bluechips",
+            ticker="sber",
+        )
+        self.assertEqual([record.metrics["vol"] for record in loaded], [120])
+        self.assertEqual(
+            sorted(record.dataset for record in store.load_algopack_records(ticker="SBER")),
+            ["obstats", "tradestats"],
+        )
+
     def test_memory_store_prunes_futoi_records_older_than_cutoff(self):
         store = InMemoryHistoricalDataStore()
         store.upsert_futoi_records(
@@ -191,6 +216,23 @@ def _futoi_record(
         position_short=0.0,
         position_long_count=1,
         position_short_count=0,
+    )
+
+
+def _algopack_record(
+    dataset: str,
+    trade_date: date,
+    trade_time: str,
+    ticker: str,
+    metrics: dict[str, object],
+) -> AlgoPackRecord:
+    return AlgoPackRecord(
+        dataset=dataset,
+        market="russian_bluechips",
+        ticker=ticker,
+        trade_date=trade_date,
+        trade_time=trade_time,
+        metrics=metrics,
     )
 
 

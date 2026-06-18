@@ -1,4 +1,4 @@
-export type Mode = "live" | "breadth" | "quant" | "futoi" | "feedback" | "profile" | "admin";
+export type Mode = "live" | "russian-live" | "breadth" | "quant" | "futoi" | "feedback" | "profile" | "admin";
 
 export type AuthUser = {
   id: number;
@@ -157,7 +157,7 @@ export type LiveChartPayload = {
   data_source: string;
   symbol: string;
   interval: string;
-  strategy: string;
+  strategy: string | null;
   candles: Candle[];
   signals: Marker[];
   rsi_alert_signal: Marker | null;
@@ -167,6 +167,7 @@ export type LiveChartPayload = {
 export type LiveSymbolsPayload = {
   ok: true;
   symbols: Record<string, Array<{ value: string; label: string }>>;
+  russian_symbols: Record<string, Array<{ value: string; label: string }>>;
 };
 
 export type MarketBreadthItem = {
@@ -246,6 +247,7 @@ export type FutoiInstrument = {
 export type FutoiPayload = {
   ok: true;
   records: FutoiRecord[];
+  chart_records: FutoiRecord[];
 };
 
 export type FutoiInstrumentsPayload = {

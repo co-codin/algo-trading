@@ -339,8 +339,17 @@ class FutoiRefreshService:
             "skipped": 0,
         }
 
-    def refresh_all(self) -> dict[str, int]:
-        return self.refresh_instruments()
+    def refresh_all(self, trading_date: date | None = None) -> dict[str, int]:
+        daily = self.refresh_daily(trading_date)
+        instruments = self.refresh_instruments()
+        return {
+            "requested": daily.get("requested", 0) + instruments.get("requested", 0),
+            "refreshed": daily.get("refreshed", 0) + instruments.get("refreshed", 0),
+            "records": daily.get("records", 0) + instruments.get("records", 0),
+            "instruments": instruments.get("instruments", 0),
+            "failed": daily.get("failed", 0) + instruments.get("failed", 0),
+            "skipped": daily.get("skipped", 0) + instruments.get("skipped", 0),
+        }
 
     def refresh_instruments(self) -> dict[str, int]:
         try:
@@ -386,6 +395,7 @@ class FutoiRefreshService:
                 if self._csv_history is not None
                 else 0
             )
+            self._replace_instruments_from_records(self._store.load_futoi_records(limit=None))
         except Exception:
             return {
                 "retention_days": self._retention_days,
@@ -420,12 +430,71 @@ class FutoiRefreshService:
             limit=limit,
         )
 
+    def load_ticker_history(
+        self,
+        ticker: str,
+        *,
+        end_date: date | None = None,
+        days: int = 365,
+    ) -> list[FutoiRecord]:
+        normalized_ticker = ticker.strip().upper()
+        if not normalized_ticker:
+            return []
+        if days <= 0:
+            raise ValueError("days must be positive")
+        selected_end = (
+            end_date
+            or self._latest_stored_trade_date(normalized_ticker)
+            or self._now().astimezone(timezone.utc).date()
+        )
+        selected_start = selected_end - timedelta(days=days)
+        records = self._store.load_futoi_records(
+            ticker=normalized_ticker,
+            start_date=selected_start,
+            end_date=selected_end,
+            limit=None,
+        )
+        if self._needs_ticker_history_backfill(records, selected_start):
+            try:
+                fetched_records = self._client.fetch_ticker(
+                    normalized_ticker,
+                    start_date=selected_start,
+                    end_date=selected_end,
+                )
+            except (MissingFutoiApiKey, Exception):
+                fetched_records = []
+            if fetched_records:
+                self._persist_records(fetched_records)
+                records = self._store.load_futoi_records(
+                    ticker=normalized_ticker,
+                    start_date=selected_start,
+                    end_date=selected_end,
+                    limit=None,
+                )
+        return records
+
     def list_instruments(self) -> list[FutoiInstrument]:
         instruments = self._store.list_futoi_instruments()
         if instruments:
             return instruments
         records = self.load_records(limit=None)
         return futoi_instruments_from_records(records)
+
+    def _latest_stored_trade_date(self, ticker: str) -> date | None:
+        records = self._store.load_futoi_records(ticker=ticker, limit=1)
+        if not records:
+            return None
+        return max(record.trade_date for record in records)
+
+    def _needs_ticker_history_backfill(
+        self,
+        records: Sequence[FutoiRecord],
+        start_date: date,
+    ) -> bool:
+        if not records:
+            return True
+        earliest_trade_date = min(record.trade_date for record in records)
+        return earliest_trade_date > start_date + timedelta(days=7)
 
     def _persist_records(self, records: Sequence[FutoiRecord]) -> None:
         self._store.upsert_futoi_records(records, source=FUTOI_SOURCE)
@@ -435,6 +504,14 @@ class FutoiRefreshService:
     def _persist_instruments(self, records: Sequence[FutoiRecord]) -> None:
         instruments = futoi_instruments_from_records(records)
         if instruments:
+            self._store.upsert_futoi_instruments(instruments, source=FUTOI_SOURCE)
+
+    def _replace_instruments_from_records(self, records: Sequence[FutoiRecord]) -> None:
+        instruments = futoi_instruments_from_records(records)
+        replace_instruments = getattr(self._store, "replace_futoi_instruments", None)
+        if callable(replace_instruments):
+            replace_instruments(instruments, source=FUTOI_SOURCE)
+        elif instruments:
             self._store.upsert_futoi_instruments(instruments, source=FUTOI_SOURCE)
 
     def _retention_cutoff_date(self) -> date:
@@ -513,20 +590,27 @@ def _futoi_instrument_from_group(
     records: Sequence[FutoiRecord],
 ) -> FutoiInstrument:
     latest = max(records, key=lambda record: (record.trade_date, record.trade_time))
+    latest_records = [
+        record
+        for record in records
+        if record.trade_date == latest.trade_date and record.trade_time == latest.trade_time
+    ]
     return FutoiInstrument(
         ticker=ticker,
         last_trade_date=latest.trade_date,
         last_trade_time=latest.trade_time,
         system_time=latest.system_time,
         trade_session_date=latest.trade_session_date,
-        client_groups=tuple(sorted({record.client_group.strip().upper() for record in records})),
-        net_position=sum(record.position for record in records),
-        gross_position=sum(abs(record.position) for record in records),
-        long_position=sum(record.position_long for record in records),
-        short_position=sum(abs(record.position_short) for record in records),
-        long_count=sum(record.position_long_count for record in records),
-        short_count=sum(record.position_short_count for record in records),
-        row_count=len(records),
+        client_groups=tuple(
+            sorted({record.client_group.strip().upper() for record in latest_records})
+        ),
+        net_position=sum(record.position for record in latest_records),
+        gross_position=sum(abs(record.position) for record in latest_records),
+        long_position=sum(record.position_long for record in latest_records),
+        short_position=sum(abs(record.position_short) for record in latest_records),
+        long_count=sum(record.position_long_count for record in latest_records),
+        short_count=sum(record.position_short_count for record in latest_records),
+        row_count=len(latest_records),
     )
 
 
