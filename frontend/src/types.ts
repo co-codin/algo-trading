@@ -1,4 +1,4 @@
-export type Mode = "live" | "russian-live" | "breadth" | "quant" | "futoi" | "feedback" | "profile" | "admin";
+export type Mode = "landing" | "live" | "russian-live" | "breadth" | "quant" | "futoi" | "feedback" | "profile" | "admin";
 
 export type AuthUser = {
   id: number;

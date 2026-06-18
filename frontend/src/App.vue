@@ -202,7 +202,7 @@ const landingFeatureKeys: MessageKey[] = [
 ];
 
 const routeModes: Record<string, Mode> = {
-  "/": "live",
+  "/": "landing",
   "/markets": "live",
   "/live": "live",
   "/chart": "live",
@@ -217,6 +217,7 @@ const routeModes: Record<string, Mode> = {
 };
 
 const modeRoutes: Record<Mode, string> = {
+  landing: "/",
   live: "/markets",
   "russian-live": "/moex-live",
   breadth: "/breadth",
@@ -277,6 +278,7 @@ const locale = ref<Locale>(normalizeLocale(window.localStorage.getItem(LOCALE_ST
 const authChecked = ref(false);
 const authUser = ref<AuthUser | null>(null);
 const authMode = ref<"login" | "register">("login");
+const showLandingAuthForm = ref(false);
 const authForm = reactive({
   username: "",
   password: "",
@@ -313,6 +315,11 @@ function t(key: MessageKey): string {
 function setLocale(nextLocale: Locale) {
   locale.value = nextLocale;
   localStorage.setItem(LOCALE_STORAGE_KEY, nextLocale);
+}
+
+function openLandingAuth(mode: "login" | "register") {
+  authMode.value = mode;
+  showLandingAuthForm.value = true;
 }
 
 const activeMode = ref<Mode>(modeFromLocation());
@@ -933,7 +940,7 @@ function handlePopState() {
 }
 
 function modeFromLocation(): Mode {
-  return routeModes[window.location.pathname] ?? "live";
+  return routeModes[window.location.pathname] ?? "landing";
 }
 
 function isFeatureMode(mode: Mode): boolean {
@@ -945,6 +952,9 @@ function isRussianLiveMarket(market: string): boolean {
 }
 
 function permittedMode(mode: Mode): Mode {
+  if (mode === "landing") {
+    return "landing";
+  }
   if (mode === "admin" && !isAdminUser.value) {
     return "profile";
   }
@@ -1642,6 +1652,7 @@ async function submitAuth() {
     });
     authUser.value = payload.user;
     authForm.password = "";
+    showLandingAuthForm.value = false;
     authStatus.value = t("auth.ready");
     authStatusType.value = "";
     await bootstrapAuthenticatedApp();
@@ -2299,7 +2310,7 @@ function errorMessage(error: unknown): string {
 </script>
 
 <template>
-  <section v-if="!authChecked" class="auth-shell">
+  <section v-if="!authChecked && activeMode !== 'landing'" class="auth-shell">
     <div class="auth-card">
       <div>
         <h1>{{ t("auth.title") }}</h1>
@@ -2309,61 +2320,74 @@ function errorMessage(error: unknown): string {
     </div>
   </section>
 
-  <section v-else-if="!authUser" class="landing-shell">
-    <div class="landing-market-scene" aria-hidden="true">
-      <div class="landing-tape">
-        <span
-          v-for="item in landingTickerTape"
-          :key="item.symbol"
-          class="landing-ticker"
-          :class="`is-${item.tone}`"
-        >
-          <b>{{ item.symbol }}</b>
-          <em>{{ item.value }}</em>
-        </span>
-      </div>
-      <div class="landing-chart-visual">
-        <span
-          v-for="(candle, index) in landingCandles"
-          :key="index"
-          class="landing-candle"
-          :class="`is-${candle.tone}`"
-          :style="{ '--candle-top': candle.top, '--candle-height': candle.height }"
-        ></span>
-      </div>
-      <div class="landing-order-panel">
-        <div
-          v-for="row in landingOrderRows"
-          :key="row.label"
-          :class="`is-${row.tone}`"
-        >
-          <span>{{ row.label }}</span>
-          <b>{{ row.value }}</b>
+  <section v-else-if="!authUser || activeMode === 'landing'" class="landing-shell">
+    <div class="landing-visual" aria-hidden="true">
+      <div class="landing-terminal-preview">
+        <div class="landing-terminal-topbar">
+          <span
+            v-for="item in landingTickerTape"
+            :key="item.symbol"
+            class="landing-ticker"
+            :class="`is-${item.tone}`"
+          >
+            <b>{{ item.symbol }}</b>
+            <em>{{ item.value }}</em>
+          </span>
+        </div>
+        <div class="landing-terminal-body">
+          <div class="landing-terminal-chart">
+            <span
+              v-for="(candle, index) in landingCandles"
+              :key="index"
+              class="landing-candle"
+              :class="`is-${candle.tone}`"
+              :style="{ '--candle-top': candle.top, '--candle-height': candle.height }"
+            ></span>
+          </div>
+          <div class="landing-terminal-side">
+            <div
+              v-for="row in landingOrderRows"
+              :key="row.label"
+              :class="`is-${row.tone}`"
+            >
+              <span>{{ row.label }}</span>
+              <b>{{ row.value }}</b>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-
     <header class="landing-header">
-      <button class="landing-brand" type="button" @click="authMode = 'login'">
+      <button class="landing-brand" type="button" @click="setMode('landing')">
         <span>AT</span>
         <b>{{ t("app.title") }}</b>
       </button>
       <div class="landing-header-actions">
+        <template v-if="!authUser">
+          <button
+            type="button"
+            class="secondary landing-auth-action"
+            :class="{ 'is-active': authMode === 'login' }"
+            @click="openLandingAuth('login')"
+          >
+            {{ t("auth.login") }}
+          </button>
+          <button
+            type="button"
+            class="primary landing-auth-action"
+            :class="{ 'is-active': authMode === 'register' }"
+            @click="openLandingAuth('register')"
+          >
+            {{ t("auth.register") }}
+          </button>
+        </template>
         <button
-          type="button"
-          class="secondary landing-auth-action"
-          :class="{ 'is-active': authMode === 'login' }"
-          @click="authMode = 'login'"
-        >
-          {{ t("auth.login") }}
-        </button>
-        <button
+          v-else
           type="button"
           class="primary landing-auth-action"
-          :class="{ 'is-active': authMode === 'register' }"
-          @click="authMode = 'register'"
+          @click="setMode('live')"
         >
-          {{ t("auth.register") }}
+          {{ t("actions.openDashboard") }}
         </button>
         <div class="language-switcher" :aria-label="t('aria.language')">
           <button
@@ -2384,13 +2408,41 @@ function errorMessage(error: unknown): string {
     <main class="landing-content">
       <section class="landing-hero" aria-labelledby="landing-title">
         <p class="landing-kicker">{{ t("landing.kicker") }}</p>
-        <h1 id="landing-title">{{ t("landing.title") }}</h1>
-        <p>{{ t("landing.subtitle") }}</p>
-        <div class="landing-feature-grid">
-          <span v-for="feature in landingFeatureKeys" :key="feature">{{ t(feature) }}</span>
+        <h1 id="landing-title">{{ t("app.title") }}</h1>
+        <p class="landing-title-line">{{ t("landing.title") }}</p>
+        <p class="landing-subtitle">{{ t("landing.subtitle") }}</p>
+        <dl class="landing-metrics">
+          <div>
+            <dt>{{ t("landing.metric.markets") }}</dt>
+            <dd>{{ t("landing.metric.marketsValue") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("landing.metric.data") }}</dt>
+            <dd>{{ t("landing.metric.dataValue") }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("landing.metric.signals") }}</dt>
+            <dd>{{ t("landing.metric.signalsValue") }}</dd>
+          </div>
+        </dl>
+        <div v-if="authUser" class="landing-session-inline">
+          <span>{{ t("landing.sessionTitle") }}</span>
+          <button class="primary" type="button" @click="setMode('live')">
+            {{ t("actions.openDashboard") }}
+          </button>
         </div>
       </section>
+    </main>
 
+    <section class="landing-feature-band" :aria-label="t('landing.title')">
+      <div class="landing-feature-grid">
+        <article v-for="feature in landingFeatureKeys" :key="feature" class="landing-feature-card">
+          <span>{{ t(feature) }}</span>
+        </article>
+      </div>
+    </section>
+
+    <div v-if="!authUser && showLandingAuthForm" class="landing-auth-overlay">
       <form class="auth-card landing-auth-card" @submit.prevent="submitAuth">
         <div class="auth-card-heading">
           <div>
@@ -2398,35 +2450,38 @@ function errorMessage(error: unknown): string {
             <p>{{ authMode === "login" ? t("landing.loginHint") : t("landing.registerHint") }}</p>
           </div>
         </div>
-      <label>
-        <span>{{ t("auth.username") }}</span>
-        <input v-model.trim="authForm.username" autocomplete="username" required minlength="3">
-      </label>
-      <label>
-        <span>{{ t("auth.password") }}</span>
-        <input
-          v-model="authForm.password"
-          :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'"
-          required
-          minlength="8"
-          type="password"
+        <label>
+          <span>{{ t("auth.username") }}</span>
+          <input v-model.trim="authForm.username" autocomplete="username" required minlength="3">
+        </label>
+        <label>
+          <span>{{ t("auth.password") }}</span>
+          <input
+            v-model="authForm.password"
+            :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'"
+            required
+            minlength="8"
+            type="password"
+          >
+        </label>
+        <button class="primary" type="submit">
+          {{ authMode === "login" ? t("auth.submitLogin") : t("auth.submitRegister") }}
+        </button>
+        <button
+          class="auth-link"
+          type="button"
+          @click="authMode = authMode === 'login' ? 'register' : 'login'"
         >
-      </label>
-      <button class="primary" type="submit">
-        {{ authMode === "login" ? t("auth.submitLogin") : t("auth.submitRegister") }}
-      </button>
-      <button
-        class="auth-link"
-        type="button"
-        @click="authMode = authMode === 'login' ? 'register' : 'login'"
-      >
-        {{ authMode === "login" ? t("auth.switchToRegister") : t("auth.switchToLogin") }}
-      </button>
-      <div v-if="authStatus" class="status auth-status" :class="authStatusType ? `is-${authStatusType}` : ''">
-        {{ authStatus }}
-      </div>
-    </form>
-    </main>
+          {{ authMode === "login" ? t("auth.switchToRegister") : t("auth.switchToLogin") }}
+        </button>
+        <div v-if="authStatus" class="status auth-status" :class="authStatusType ? `is-${authStatusType}` : ''">
+          {{ authStatus }}
+        </div>
+        <button class="auth-link" type="button" @click="showLandingAuthForm = false">
+          {{ t("actions.backToLanding") }}
+        </button>
+      </form>
+    </div>
   </section>
 
   <template v-else>
