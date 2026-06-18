@@ -328,6 +328,148 @@
   padding: 0;
 }
 
+.watchlist-panel {
+  display: grid;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  background: #10141c;
+  padding: 12px 14px;
+}
+
+.watchlist-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(170px, 1fr) minmax(220px, 1.6fr) max-content;
+  gap: 8px;
+  align-items: end;
+}
+
+.watchlist-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.watchlist-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 10px;
+}
+
+.watchlist-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.watchlist-card span,
+.market-event-feed header span,
+.report-header span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.watchlist-card strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.watchlist-card p {
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watchlist-symbols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.market-event-feed {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1px;
+  border-top: 1px solid var(--line);
+  background: var(--line);
+}
+
+.market-event-feed header {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  background: #10141c;
+  padding: 10px 14px;
+}
+
+.market-event-feed h3,
+.market-event-card h4,
+.market-event-card p,
+.market-event-card dl,
+.report-header h3,
+.report-header p,
+.report-section h4,
+.report-section ul {
+  margin: 0;
+}
+
+.market-event-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  background: var(--panel);
+  padding: 12px;
+}
+
+.market-event-card.is-medium,
+.market-event-card.is-warning {
+  border-left: 3px solid var(--warning);
+}
+
+.market-event-card.is-high,
+.market-event-card.is-critical {
+  border-left: 3px solid var(--short);
+}
+
+.market-event-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.market-event-card h4 {
+  font-size: 15px;
+}
+
+.market-event-card p {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.market-event-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.market-event-card dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.market-event-card dd {
+  margin: 1px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .alert-controls {
   display: flex;
   align-items: center;
@@ -353,6 +495,63 @@
   white-space: nowrap;
 }
 
+.futoi-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+.futoi-event-feed {
+  border-top: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.report-panel {
+  gap: 0;
+}
+
+.report-layout {
+  display: grid;
+  gap: 1px;
+  background: var(--line);
+}
+
+.report-header,
+.report-section {
+  display: grid;
+  gap: 8px;
+  background: var(--panel);
+  padding: 14px;
+}
+
+.report-header h3 {
+  font-size: 20px;
+}
+
+.report-section ul {
+  display: grid;
+  gap: 7px;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.report-layout textarea {
+  width: 100%;
+  min-height: 260px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: #10141c;
+  color: var(--ink);
+  padding: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 @media (max-width: 1320px) {
   .workspace-controls {
     grid-template-columns: minmax(180px, 1fr) repeat(3, max-content);
@@ -365,7 +564,9 @@
 
 @media (max-width: 720px) {
   .health-strip,
-  .workspace-controls {
+  .workspace-controls,
+  .watchlist-form,
+  .futoi-dashboard-grid {
     grid-template-columns: 1fr;
   }
 }

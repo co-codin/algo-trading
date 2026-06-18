@@ -1,4 +1,4 @@
-export type Mode = "landing" | "live" | "russian-live" | "breadth" | "quant" | "futoi" | "feedback" | "profile" | "admin";
+export type Mode = "landing" | "live" | "russian-live" | "breadth" | "quant" | "futoi" | "reports" | "feedback" | "profile" | "admin";
 
 export type AuthUser = {
   id: number;
@@ -151,6 +151,20 @@ export type IndicatorDefinition = {
   series: IndicatorSeries[];
 };
 
+export type MarketEvent = {
+  id: string;
+  type: string;
+  market: string;
+  symbol: string;
+  title: string;
+  description: string;
+  details: string;
+  severity: "low" | "medium" | "high" | "info" | "warning" | "critical";
+  time: number | string | null;
+  source: string;
+  metrics: Record<string, string | number | null>;
+};
+
 export type LiveChartPayload = {
   ok: true;
   market: string;
@@ -162,6 +176,7 @@ export type LiveChartPayload = {
   signals: Marker[];
   rsi_alert_signal: Marker | null;
   indicators: IndicatorDefinition[];
+  events: MarketEvent[];
 };
 
 export type LiveSymbolsPayload = {
@@ -244,13 +259,85 @@ export type FutoiInstrument = {
   updated_at: string | null;
 };
 
+export type FutoiSnapshot = {
+  ticker: string;
+  trade_date: string;
+  trade_time: string;
+  net_position: number;
+  gross_position: number;
+  long_position: number;
+  short_position: number;
+  row_count: number;
+};
+
+export type FutoiDashboard = {
+  ticker: string;
+  summary: Record<string, string | number | null>;
+  snapshots: FutoiSnapshot[];
+  events: MarketEvent[];
+  latest: FutoiSnapshot[];
+  unusual_events: MarketEvent[];
+  instrument_count: number;
+  snapshot_count: number;
+};
+
 export type FutoiPayload = {
   ok: true;
   records: FutoiRecord[];
   chart_records: FutoiRecord[];
+  dashboard: FutoiDashboard;
 };
 
 export type FutoiInstrumentsPayload = {
   ok: true;
   instruments: FutoiInstrument[];
+};
+
+export type DailyMarketReportSection = {
+  title: string;
+  lines: string[];
+};
+
+export type DailyMarketReport = {
+  title: string;
+  date: string;
+  language: "ru";
+  sections: DailyMarketReportSection[];
+  triggered_symbols: string[];
+  text: string;
+  generated_at: string;
+};
+
+export type DailyMarketReportPayload = {
+  ok: true;
+  report: DailyMarketReport;
+};
+
+export type SavedWorkspace = {
+  id: string;
+  name: string;
+  market: string;
+  symbol: string;
+  settings: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SavedWorkspacesPayload = {
+  ok: true;
+  workspaces: SavedWorkspace[];
+};
+
+export type SavedWatchlist = {
+  id: string;
+  name: string;
+  market: string;
+  symbols: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type SavedWatchlistsPayload = {
+  ok: true;
+  watchlists: SavedWatchlist[];
 };

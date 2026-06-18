@@ -209,6 +209,43 @@ class UiTests(unittest.TestCase):
         self.assertIn(".health-badge", style_source)
         self.assertIn(".alert-controls", style_source)
 
+    def test_frontend_exposes_market_intelligence_reports_and_persisted_lists(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        types_source = (root / "frontend" / "src" / "types.ts").read_text(encoding="utf-8")
+        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
+        style_source = (root / "frontend" / "src" / "styles" / "live.css").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("export type MarketEvent", types_source)
+        self.assertIn("events: MarketEvent[];", types_source)
+        self.assertIn("export type FutoiDashboard", types_source)
+        self.assertIn("dashboard: FutoiDashboard;", types_source)
+        self.assertIn("export type DailyMarketReportPayload", types_source)
+        self.assertIn("export type SavedWorkspacesPayload", types_source)
+        self.assertIn("export type SavedWatchlistsPayload", types_source)
+
+        self.assertIn('"reports" | "feedback"', types_source)
+        self.assertIn('requestJson<SavedWorkspacesPayload>("/api/workspaces")', app_source)
+        self.assertIn('requestJson<SavedWatchlistsPayload>("/api/watchlists")', app_source)
+        self.assertIn('requestJson<DailyMarketReportPayload>(`/api/reports/daily?${params.toString()}`)', app_source)
+        self.assertIn('class="market-event-feed"', app_source)
+        self.assertIn('class="watchlist-panel"', app_source)
+        self.assertIn('class="report-panel"', app_source)
+        self.assertIn('class="futoi-dashboard-grid"', app_source)
+
+        self.assertIn('"tabs.reports": "Daily report"', i18n_source)
+        self.assertIn('"tabs.reports": "Ежедневный отчет"', i18n_source)
+        self.assertIn('"tabs.reports": "每日报告"', i18n_source)
+        self.assertIn('"labels.watchlists": "Watchlists"', i18n_source)
+        self.assertIn('"labels.futoiDashboard": "FUTOI dashboard"', i18n_source)
+
+        self.assertIn(".market-event-feed", style_source)
+        self.assertIn(".watchlist-panel", style_source)
+        self.assertIn(".report-panel", style_source)
+        self.assertIn(".futoi-dashboard-grid", style_source)
+
     def test_frontend_exposes_quant_strategy_tab(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
@@ -635,7 +672,7 @@ class UiTests(unittest.TestCase):
         )
 
         self.assertIn(
-            'export type Mode = "landing" | "live" | "russian-live" | "breadth" | "quant" | "futoi" | "feedback" | "profile" | "admin";',
+            'export type Mode = "landing" | "live" | "russian-live" | "breadth" | "quant" | "futoi" | "reports" | "feedback" | "profile" | "admin";',
             types_source,
         )
         self.assertIn('"/": "landing"', source)
@@ -648,6 +685,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('"/moex-live": "russian-live"', source)
         self.assertIn('"/russian-live": "russian-live"', source)
         self.assertIn('"/futoi": "futoi"', source)
+        self.assertIn('"/reports": "reports"', source)
         self.assertIn('"/feedback": "feedback"', source)
         self.assertIn('"/profile": "profile"', source)
         self.assertIn('"/admin": "admin"', source)
@@ -659,6 +697,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('{ mode: "quant" as const, label: t("tabs.quant") }', source)
         self.assertIn('const isRussianLocale = computed(() => locale.value === "ru");', source)
         self.assertIn('...(isRussianLocale.value ? [{ mode: "futoi" as const, label: t("tabs.futoi") }] : []),', source)
+        self.assertIn('{ mode: "reports" as const, label: t("tabs.reports") }', source)
         self.assertIn('const accountMenuItems = computed', source)
         self.assertIn('{ mode: "profile" as const, label: t("tabs.profile") }', source)
         self.assertIn('...(canUseFeatures.value ? [{ mode: "feedback" as const, label: t("tabs.feedback") }] : []),', source)
@@ -1696,6 +1735,30 @@ class UiTests(unittest.TestCase):
         self.assertIsNone(payload["rsi_alert_signal"])
         self.assertIn("indicators", payload)
 
+    def test_live_chart_payload_adds_volume_spike_events(self):
+        client = FakeClient()
+        client.candles = [
+            Candle(index, 10.0, 11.0, 9.0, 10.0, volume)
+            for index, volume in enumerate([100.0, 120.0, 80.0, 360.0])
+        ]
+
+        payload = live_chart_payload(
+            {
+                "symbol": "BTCUSDT",
+                "interval": "1h",
+                "limit": 4,
+                "strategy": "",
+            },
+            client=client,
+        )
+
+        volume_events = [
+            event for event in payload["events"] if event["type"] == "volume_spike"
+        ]
+        self.assertEqual(len(volume_events), 1)
+        self.assertEqual(volume_events[0]["symbol"], "BTCUSDT")
+        self.assertEqual(volume_events[0]["metrics"]["volume_ratio"], 3.6)
+
     def test_live_chart_payload_exposes_latest_rsi_alert_signal(self):
         client = FakeClient()
         client.candles = [
@@ -1872,6 +1935,10 @@ class UiTests(unittest.TestCase):
             algopack_indicators["algopack-alerts"]["series"][0]["points"][0],
             {"time": first_time, "value": 2.0},
         )
+        event_types = {event["type"] for event in payload["events"]}
+        self.assertIn("mega_alert", event_types)
+        self.assertNotIn("order_stats", event_types)
+        self.assertNotIn("open_interest_stats", event_types)
 
     def test_live_chart_payload_uses_selected_strategy_for_markers(self):
         client = FakeClient()

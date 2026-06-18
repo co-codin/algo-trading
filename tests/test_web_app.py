@@ -16,8 +16,10 @@ from algo_trading.feedback import InMemoryFeedbackStore
 from algo_trading.futoi import FutoiInstrument, FutoiRecord
 from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.live_symbols import InMemoryLiveSymbolStore, LiveSymbol
+from algo_trading.market_breadth import MarketBreadthBar
 from algo_trading.models import Candle
 from algo_trading.web_app import admin_password, create_app
+from algo_trading.workspaces import InMemoryWorkspaceStore
 
 
 class WebAppTests(unittest.TestCase):
@@ -462,6 +464,220 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("BTCUSDT", sender.messages[0][2])
         self.assertIn("rsi_reversal_long", sender.messages[0][2])
 
+    def test_live_chart_sends_market_event_telegram_alerts_once(self):
+        class FakeTelegramSender:
+            def __init__(self) -> None:
+                self.messages: list[tuple[str, str, str]] = []
+
+            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
+                self.messages.append((bot_token, chat_id, text))
+
+        class FakeMarketClient:
+            def get_24h_tickers(self) -> list[dict[str, object]]:
+                return []
+
+            def get_klines(self, symbol: str, interval: str, limit: int) -> list[Candle]:
+                volumes = [100.0, 120.0, 80.0, 360.0]
+                return [
+                    Candle(
+                        open_time=index,
+                        open=10.0,
+                        high=11.0,
+                        low=9.0,
+                        close=10.0,
+                        volume=volume,
+                    )
+                    for index, volume in enumerate(volumes)
+                ][:limit]
+
+        auth_store = InMemoryAuthStore()
+        alert_store = InMemoryAlertStore()
+        sender = FakeTelegramSender()
+        client = self.make_client(
+            auth_store=auth_store,
+            alert_store=alert_store,
+            telegram_sender=sender,
+            client_factory=FakeMarketClient,
+            historical_store=InMemoryHistoricalDataStore(),
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        alice = auth_store.list_users()[0]
+        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
+        client.put(
+            "/api/alerts/telegram",
+            json={
+                "enabled": True,
+                "bot_token": "123456:abcdef-secret-token",
+                "chat_id": "987654321",
+            },
+        )
+
+        query = "/api/live-chart?symbol=BTCUSDT&interval=1h&limit=4&strategy="
+        first = client.get(query)
+        second = client.get(query)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(sender.messages), 1)
+        self.assertEqual(sender.messages[0][0], "123456:abcdef-secret-token")
+        self.assertEqual(sender.messages[0][1], "987654321")
+        self.assertIn("Market event: Volume spike on BTCUSDT", sender.messages[0][2])
+        self.assertIn("volume_ratio=3.6", sender.messages[0][2])
+
+    def test_futoi_sends_position_change_telegram_alert_once(self):
+        class FakeTelegramSender:
+            def __init__(self) -> None:
+                self.messages: list[tuple[str, str, str]] = []
+
+            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
+                self.messages.append((bot_token, chat_id, text))
+
+        def futoi_record(trade_date: date, position: float) -> FutoiRecord:
+            return FutoiRecord(
+                trade_date=trade_date,
+                trade_time="18:45:00",
+                ticker="IMOEXF",
+                client_group="FIZ",
+                position=position,
+                position_long=max(position, 0.0),
+                position_short=0.0,
+                position_long_count=1,
+                position_short_count=0,
+            )
+
+        auth_store = InMemoryAuthStore()
+        alert_store = InMemoryAlertStore()
+        history_store = InMemoryHistoricalDataStore()
+        sender = FakeTelegramSender()
+        history_store.upsert_futoi_records(
+            [
+                futoi_record(date(2024, 4, 7), 100.0),
+                futoi_record(date(2024, 4, 8), 180.0),
+            ],
+            source="unit-test",
+        )
+        client = self.make_client(
+            auth_store=auth_store,
+            alert_store=alert_store,
+            historical_store=history_store,
+            telegram_sender=sender,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        alice = auth_store.list_users()[0]
+        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
+        client.put(
+            "/api/alerts/telegram",
+            json={
+                "enabled": True,
+                "bot_token": "123456:abcdef-secret-token",
+                "chat_id": "987654321",
+            },
+        )
+
+        query = "/api/futoi?date=2024-04-08&ticker=IMOEXF&limit=10&history_days=1"
+        first = client.get(query)
+        second = client.get(query)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(sender.messages), 1)
+        self.assertIn(
+            "Market event: FUTOI positioning changed for IMOEXF",
+            sender.messages[0][2],
+        )
+        self.assertIn("net_change=80.0", sender.messages[0][2])
+
+    def test_market_breadth_sends_confirmation_telegram_alert_once(self):
+        class FakeTelegramSender:
+            def __init__(self) -> None:
+                self.messages: list[tuple[str, str, str]] = []
+
+            def send_message(self, bot_token: str, chat_id: str, text: str) -> None:
+                self.messages.append((bot_token, chat_id, text))
+
+        class FakeMarketBreadthService:
+            def payload(self, symbols: list[str] | None = None) -> dict[str, Any]:
+                return {
+                    "ok": True,
+                    "source": "unit-test",
+                    "groups": [],
+                    "series": {},
+                    "put_call_symbol": "$CPC",
+                    "requested_symbols": symbols,
+                }
+
+        auth_store = InMemoryAuthStore()
+        alert_store = InMemoryAlertStore()
+        history_store = InMemoryHistoricalDataStore()
+        sender = FakeTelegramSender()
+        history_store.upsert_breadth_bars(
+            "$S5FD",
+            [
+                MarketBreadthBar(
+                    symbol="$S5FD",
+                    date=date(2024, 4, 8),
+                    open=70.0,
+                    high=70.0,
+                    low=70.0,
+                    close=70.0,
+                    volume=1.0,
+                )
+            ],
+            source="unit-test",
+        )
+        history_store.upsert_breadth_bars(
+            "$MMFI",
+            [
+                MarketBreadthBar(
+                    symbol="$MMFI",
+                    date=date(2024, 4, 8),
+                    open=75.0,
+                    high=75.0,
+                    low=75.0,
+                    close=75.0,
+                    volume=1.0,
+                )
+            ],
+            source="unit-test",
+        )
+        client = self.make_client(
+            auth_store=auth_store,
+            alert_store=alert_store,
+            historical_store=history_store,
+            market_breadth_service=FakeMarketBreadthService(),
+            telegram_sender=sender,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        alice = auth_store.list_users()[0]
+        auth_store.set_user_access(alice.id, is_active=True, activated_at=utcnow())
+        client.put(
+            "/api/alerts/telegram",
+            json={
+                "enabled": True,
+                "bot_token": "123456:abcdef-secret-token",
+                "chat_id": "987654321",
+            },
+        )
+
+        query = "/api/market-breadth?symbols=$S5FD,$MMFI"
+        first = client.get(query)
+        second = client.get(query)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(sender.messages), 1)
+        self.assertIn("Market event: Breadth confirmation", sender.messages[0][2])
+        self.assertIn("average_breadth=72.5", sender.messages[0][2])
+
     def test_unexpected_api_errors_are_written_to_app_log(self):
         def failing_client_factory() -> Any:
             raise RuntimeError("simulated route failure")
@@ -773,6 +989,67 @@ class WebAppTests(unittest.TestCase):
             ["2023-06-18", "2024-06-17"],
         )
 
+    def test_active_user_can_read_futoi_dashboard_metrics(self):
+        auth_store = InMemoryAuthStore()
+        history_store = InMemoryHistoricalDataStore()
+
+        def futoi_record(trade_date: date, position: float) -> FutoiRecord:
+            return FutoiRecord(
+                trade_date=trade_date,
+                trade_time="18:45:00",
+                ticker="IMOEXF",
+                client_group="FIZ",
+                position=position,
+                position_long=max(position, 0.0),
+                position_short=-20.0,
+                position_long_count=1,
+                position_short_count=1,
+            )
+
+        history_store.upsert_futoi_records(
+            [
+                futoi_record(date(2024, 4, 1), 100.0),
+                futoi_record(date(2024, 4, 7), 120.0),
+                futoi_record(date(2024, 4, 8), 180.0),
+            ],
+            source="unit-test",
+        )
+        history_store.upsert_futoi_instruments(
+            [
+                FutoiInstrument(
+                    ticker="IMOEXF",
+                    last_trade_date=date(2024, 4, 8),
+                    gross_position=200.0,
+                    net_position=180.0,
+                    row_count=1,
+                )
+            ],
+            source="unit-test",
+        )
+        client = self.make_client(auth_store=auth_store, historical_store=history_store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        user = auth_store.list_users()[0]
+        auth_store.set_user_access(user.id, is_active=True, activated_at=utcnow())
+
+        response = client.get(
+            "/api/futoi?date=2024-04-08&ticker=IMOEXF&limit=1&history_days=7"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        dashboard = response.json()["dashboard"]
+        self.assertEqual(dashboard["summary"]["ticker"], "IMOEXF")
+        self.assertEqual(dashboard["summary"]["net_position"], 180.0)
+        self.assertEqual(dashboard["summary"]["net_change_1d"], 60.0)
+        self.assertEqual(dashboard["summary"]["net_change_1w"], 80.0)
+        self.assertEqual(
+            [snapshot["net_position"] for snapshot in dashboard["snapshots"]],
+            [100.0, 120.0, 180.0],
+        )
+        self.assertEqual(dashboard["events"][0]["type"], "futoi_change")
+
     def test_active_user_can_read_futoi_instruments(self):
         auth_store = InMemoryAuthStore()
         history_store = InMemoryHistoricalDataStore()
@@ -812,6 +1089,138 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(instruments[0]["ticker"], "IMOEXF")
         self.assertEqual(instruments[0]["client_groups"], ["FIZ", "YUR"])
         self.assertEqual(instruments[0]["gross_position"], 38.0)
+
+    def test_active_user_can_read_daily_market_report(self):
+        auth_store = InMemoryAuthStore()
+        history_store = InMemoryHistoricalDataStore()
+        history_store.upsert_futoi_records(
+            [
+                FutoiRecord(
+                    trade_date=date(2024, 4, 7),
+                    trade_time="18:45:00",
+                    ticker="IMOEXF",
+                    client_group="FIZ",
+                    position=100.0,
+                    position_long=100.0,
+                    position_short=0.0,
+                    position_long_count=1,
+                    position_short_count=0,
+                ),
+                FutoiRecord(
+                    trade_date=date(2024, 4, 8),
+                    trade_time="18:45:00",
+                    ticker="IMOEXF",
+                    client_group="FIZ",
+                    position=180.0,
+                    position_long=180.0,
+                    position_short=0.0,
+                    position_long_count=1,
+                    position_short_count=0,
+                ),
+            ],
+            source="unit-test",
+        )
+        client = self.make_client(auth_store=auth_store, historical_store=history_store)
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        user = auth_store.list_users()[0]
+
+        inactive = client.get("/api/reports/daily?date=2024-04-08")
+        self.assertEqual(inactive.status_code, 403)
+
+        auth_store.set_user_access(user.id, is_active=True, activated_at=utcnow())
+        response = client.get("/api/reports/daily?date=2024-04-08")
+
+        self.assertEqual(response.status_code, 200)
+        report = response.json()["report"]
+        self.assertEqual(report["language"], "ru")
+        self.assertEqual(report["date"], "2024-04-08")
+        self.assertIn("Ежедневный отчет рынка", report["title"])
+        self.assertIn("Что изменилось сегодня", report["text"])
+        self.assertIn("IMOEXF", report["triggered_symbols"])
+
+    def test_active_user_can_manage_saved_workspaces_and_watchlists(self):
+        auth_store = InMemoryAuthStore()
+        workspace_store = InMemoryWorkspaceStore()
+        client = self.make_client(
+            auth_store=auth_store,
+            workspace_store=workspace_store,
+        )
+        client.post(
+            "/api/auth/register",
+            json={"username": "alice@example.com", "password": "password123"},
+        )
+        auth_store.set_user_access(
+            auth_store.list_users()[0].id,
+            is_active=True,
+            activated_at=utcnow(),
+        )
+
+        workspace_response = client.post(
+            "/api/workspaces",
+            json={
+                "name": "MOEX live",
+                "market": "russian_bluechips",
+                "symbol": "SBER",
+                "settings": {
+                    "interval": "1h",
+                    "limit": 180,
+                    "strategies": ["ema-rsi"],
+                    "showSignals": True,
+                },
+            },
+        )
+        self.assertEqual(workspace_response.status_code, 200)
+        workspace = workspace_response.json()["workspace"]
+        workspace_id = workspace["id"]
+        self.assertEqual(workspace["settings"]["interval"], "1h")
+
+        updated_workspace_response = client.put(
+            f"/api/workspaces/{workspace_id}",
+            json={
+                "name": "MOEX swing",
+                "market": "russian_bluechips",
+                "symbol": "GAZP",
+                "settings": {"interval": "4h", "strategies": ["breakout"]},
+            },
+        )
+        self.assertEqual(updated_workspace_response.status_code, 200)
+        self.assertEqual(updated_workspace_response.json()["workspace"]["symbol"], "GAZP")
+        self.assertEqual(client.get("/api/workspaces").json()["workspaces"][0]["id"], workspace_id)
+
+        watchlist_response = client.post(
+            "/api/watchlists",
+            json={
+                "name": "HK tech",
+                "market": "hong_kong_stocks",
+                "symbols": ["9988.HK", "9888.HK", "0700.HK"],
+            },
+        )
+        self.assertEqual(watchlist_response.status_code, 200)
+        watchlist = watchlist_response.json()["watchlist"]
+        self.assertEqual(watchlist["symbols"], ["9988.HK", "9888.HK", "0700.HK"])
+
+        deleted_workspace_response = client.delete(f"/api/workspaces/{workspace_id}")
+        deleted_watchlist_response = client.delete(f"/api/watchlists/{watchlist['id']}")
+
+        self.assertEqual(deleted_workspace_response.status_code, 200)
+        self.assertEqual(deleted_watchlist_response.status_code, 200)
+        self.assertEqual(client.get("/api/workspaces").json()["workspaces"], [])
+        self.assertEqual(client.get("/api/watchlists").json()["watchlists"], [])
+
+    def test_workspace_api_requires_active_user(self):
+        client = self.make_client(workspace_store=InMemoryWorkspaceStore())
+        client.post(
+            "/api/auth/register",
+            json={"username": "inactive@example.com", "password": "password123"},
+        )
+
+        response = client.get("/api/workspaces")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"ok": False, "error": "account inactive"})
 
     def test_register_sets_inactive_session_and_blocks_trading_api(self):
         client = self.make_client()

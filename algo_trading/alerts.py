@@ -377,6 +377,23 @@ def build_signal_signature(
     )
 
 
+def build_event_signature(event: Mapping[str, object]) -> str:
+    explicit_id = str(event.get("id") or "").strip()
+    if explicit_id:
+        return normalize_signal_signature(explicit_id)
+    return normalize_signal_signature(
+        "|".join(
+            [
+                str(event.get("type") or "market_event"),
+                str(event.get("market") or ""),
+                str(event.get("symbol") or ""),
+                str(event.get("time") or ""),
+                str(event.get("source") or ""),
+            ]
+        )
+    )
+
+
 def build_telegram_signal_message(
     *,
     market: str,
@@ -398,6 +415,29 @@ def build_telegram_signal_message(
             f"Reason: {reason}",
         ]
     )
+
+
+def build_telegram_event_message(event: Mapping[str, object]) -> str:
+    title = str(event.get("title") or "Market event")
+    metrics = event.get("metrics")
+    metric_parts: list[str] = []
+    if isinstance(metrics, Mapping):
+        for key in sorted(metrics):
+            metric_parts.append(f"{key}={metrics[key]}")
+    lines = [
+        f"Market event: {title}",
+        f"Type: {event.get('type') or 'market_event'}",
+        f"Market: {event.get('market') or ''}",
+        f"Symbol: {event.get('symbol') or ''}",
+        f"Severity: {event.get('severity') or 'medium'}",
+        f"Time: {event.get('time') or ''}",
+    ]
+    description = str(event.get("description") or "").strip()
+    if description:
+        lines.append(f"Details: {description}")
+    if metric_parts:
+        lines.append(f"Metrics: {', '.join(metric_parts)}")
+    return "\n".join(lines)
 
 
 def build_telegram_test_message(username: str) -> str:

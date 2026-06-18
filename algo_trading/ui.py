@@ -26,6 +26,11 @@ from algo_trading.algopack import (
 )
 from algo_trading.historical_store import HistoricalDataStore
 from algo_trading.market_breadth import default_symbols as default_breadth_symbols
+from algo_trading.market_intelligence import (
+    build_algopack_events,
+    build_volume_spike_events,
+    public_market_event,
+)
 from algo_trading.models import (
     AllowedSide,
     Candle,
@@ -182,18 +187,26 @@ def live_chart_payload(
             if len(configs) > 1
             else _strategy_signal_markers(candles, config)
         )
-    indicators = _popular_indicator_payload(candles, config)
-    indicators.extend(
-        _algopack_indicator_payload(
-            _load_algopack_records(
-                payload,
-                historical_store,
-                market,
-                config.symbol,
-                candles,
-            )
-        )
+    algopack_records = _load_algopack_records(
+        payload,
+        historical_store,
+        market,
+        config.symbol,
+        candles,
     )
+    indicators = _popular_indicator_payload(candles, config)
+    indicators.extend(_algopack_indicator_payload(algopack_records))
+    volume_lookback = min(20, max(1, len(candles) - 1))
+    events = [
+        *build_volume_spike_events(
+            candles,
+            market=market,
+            symbol=config.symbol,
+            interval=config.interval,
+            lookback=volume_lookback,
+        ),
+        *build_algopack_events(algopack_records),
+    ]
     return {
         "ok": True,
         "market": market,
@@ -205,6 +218,7 @@ def live_chart_payload(
         "signals": signals,
         "rsi_alert_signal": _latest_rsi_alert_signal(candles, config) if configs else None,
         "indicators": indicators,
+        "events": [public_market_event(event) for event in events],
     }
 
 

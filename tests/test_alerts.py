@@ -4,6 +4,8 @@ import unittest
 from algo_trading.alerts import (
     InMemoryAlertStore,
     TelegramBotClient,
+    build_event_signature,
+    build_telegram_event_message,
     build_telegram_signal_message,
     public_telegram_alert_settings,
 )
@@ -64,6 +66,31 @@ class AlertTests(unittest.TestCase):
         self.assertIn("5m", message)
         self.assertIn("long_signal", message)
         self.assertIn("rsi_reversal_long", message)
+
+    def test_market_event_message_contains_event_context(self):
+        event = {
+            "id": "volume_spike:crypto_spot:BTCUSDT:1h:3",
+            "type": "volume_spike",
+            "market": "crypto_spot",
+            "symbol": "BTCUSDT",
+            "title": "Volume spike on BTCUSDT",
+            "description": "Latest 1h volume is 3.6x above average.",
+            "severity": "high",
+            "time": 3,
+            "metrics": {"volume_ratio": 3.6},
+            "source": "candles",
+        }
+
+        signature = build_event_signature(event)
+        message = build_telegram_event_message(event)
+
+        self.assertEqual(signature, "volume_spike:crypto_spot:BTCUSDT:1h:3")
+        self.assertIn("Market event: Volume spike on BTCUSDT", message)
+        self.assertIn("Type: volume_spike", message)
+        self.assertIn("Market: crypto_spot", message)
+        self.assertIn("Symbol: BTCUSDT", message)
+        self.assertIn("Severity: high", message)
+        self.assertIn("volume_ratio=3.6", message)
 
     def test_telegram_client_posts_send_message_payload(self):
         captured = {}

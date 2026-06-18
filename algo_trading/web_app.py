@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import mimetypes
 import os
 import time
@@ -20,7 +20,9 @@ from algo_trading.alerts import (
     PostgresAlertStore,
     TelegramBotClient,
     TelegramSender,
+    build_event_signature,
     build_signal_signature,
+    build_telegram_event_message,
     build_telegram_signal_message,
     build_telegram_test_message,
     public_telegram_alert_settings,
@@ -59,7 +61,21 @@ from algo_trading.live_symbols import (
     live_symbols_payload,
 )
 from algo_trading.logging_config import configure_error_logging
-from algo_trading.market_breadth import MarketBreadthService
+from algo_trading.market_breadth import (
+    MarketBreadthService,
+    default_symbols as default_breadth_symbols,
+)
+from algo_trading.market_intelligence import (
+    build_breadth_confirmation_events,
+    build_futoi_position_dashboard,
+    build_unusual_futoi_events,
+    public_futoi_dashboard,
+    public_market_event,
+)
+from algo_trading.market_reports import (
+    build_daily_market_report,
+    public_daily_market_report,
+)
 from algo_trading.response_cache import (
     ResponseCache,
     api_cache_key,
@@ -75,6 +91,12 @@ from algo_trading.ui import (
     top_symbols_payload,
     _live_client_for_handler,
 )
+from algo_trading.workspaces import (
+    WorkspaceStore,
+    public_watchlist,
+    public_workspace,
+    workspace_store_from_env,
+)
 
 ADMIN_EMAIL = "cuiyeqing960904@gmail.com"
 EXPIRY_CHECK_SECONDS = 60 * 60
@@ -82,12 +104,14 @@ HISTORICAL_CSV_REFRESH_SECONDS = 60 * 60
 HISTORICAL_CSV_PRUNE_SECONDS = 24 * 60 * 60
 MOEX_FUTOI_REFRESH_SECONDS = 24 * 60 * 60
 MOEX_FUTOI_PRUNE_SECONDS = FUTOI_PRUNE_SECONDS
+DAILY_MARKET_REPORT_REFRESH_SECONDS = 24 * 60 * 60
 API_CACHE_TTL_SYMBOLS_SECONDS = 30
 API_CACHE_TTL_LIVE_CHART_SECONDS = 10
 API_CACHE_TTL_QUANT_STRATEGIES_SECONDS = 30
 API_CACHE_TTL_MARKET_BREADTH_SECONDS = 300
 API_CACHE_TTL_FUTOI_SECONDS = 60
 API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS = 300
+API_CACHE_TTL_DAILY_REPORT_SECONDS = 300
 
 
 def parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
@@ -116,10 +140,12 @@ def create_app(
     historical_csv_prune_seconds: float | None = None,
     futoi_refresh_seconds: float | None = None,
     futoi_prune_seconds: float | None = None,
+    daily_market_report_refresh_seconds: float | None = None,
     historical_store: HistoricalDataStore | None = None,
     feedback_store: FeedbackStore | None = None,
     alert_store: AlertStore | None = None,
     live_symbol_store: LiveSymbolStore | None = None,
+    workspace_store: WorkspaceStore | None = None,
     telegram_sender: TelegramSender | None = None,
     job_queue: JobQueue | None = None,
     response_cache: ResponseCache | None = None,
@@ -147,6 +173,8 @@ def create_app(
     symbol_store = live_symbol_store or live_symbol_store_from_env()
     symbol_store.ensure_schema()
     symbol_store.seed_default_symbols()
+    saved_state = workspace_store or workspace_store_from_env()
+    saved_state.ensure_schema()
     telegram = telegram_sender or TelegramBotClient()
     history_store = historical_store or historical_store_from_env()
     history_store.ensure_schema()
@@ -190,6 +218,16 @@ def create_app(
         if futoi_prune_seconds is not None
         else float(os.environ.get("MOEX_FUTOI_PRUNE_SECONDS", MOEX_FUTOI_PRUNE_SECONDS))
     )
+    report_refresh_interval = (
+        daily_market_report_refresh_seconds
+        if daily_market_report_refresh_seconds is not None
+        else float(
+            os.environ.get(
+                "DAILY_MARKET_REPORT_REFRESH_SECONDS",
+                DAILY_MARKET_REPORT_REFRESH_SECONDS,
+            )
+        )
+    )
     api_cache_ttls = {
         "symbols": env_int("API_CACHE_TTL_SYMBOLS_SECONDS", API_CACHE_TTL_SYMBOLS_SECONDS),
         "live-chart": env_int(
@@ -209,11 +247,16 @@ def create_app(
             "API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS",
             API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS,
         ),
+        "daily-report": env_int(
+            "API_CACHE_TTL_DAILY_REPORT_SECONDS",
+            API_CACHE_TTL_DAILY_REPORT_SECONDS,
+        ),
     }
     maintenance_interval = min(
         [
             interval
             for interval in (csv_refresh_interval, futoi_interval, futoi_prune_interval)
+            + (report_refresh_interval,)
             if interval > 0
         ],
         default=0,
@@ -274,6 +317,7 @@ def create_app(
         last_prune = 0.0
         last_futoi = 0.0
         last_futoi_prune = 0.0
+        last_report = 0.0
         while True:
             await asyncio.sleep(max(0.01, maintenance_interval))
             now = time.monotonic()
@@ -323,6 +367,14 @@ def create_app(
                     description="Prune MOEX FUTOI historical data older than retention",
                 )
                 last_futoi_prune = now
+            if report_refresh_interval > 0 and now - last_report >= report_refresh_interval:
+                await enqueue_or_run_background_job(
+                    background_jobs.generate_daily_market_report,
+                    background_jobs.generate_daily_market_report,
+                    job_id_prefix="generate-daily-market-report",
+                    description="Generate Russian daily market intelligence report",
+                )
+                last_report = now
             if csv_prune_interval > 0 and now - last_prune >= csv_prune_interval:
                 prune_all = getattr(csv_service, "prune_all", None)
                 if callable(prune_all):
@@ -629,6 +681,7 @@ def create_app(
         cache_key, cached = read_cached_api_payload(request, "live-chart")
         if cached is not None:
             maybe_send_telegram_rsi_alert(user, cached)
+            maybe_send_telegram_market_events(user, cached.get("events"))
             return cached
         cache_state: dict[str, bool] = {}
         chart_payload = live_chart_payload(
@@ -643,6 +696,7 @@ def create_app(
         else:
             write_cached_api_payload("live-chart", cache_key, chart_payload)
         maybe_send_telegram_rsi_alert(user, chart_payload)
+        maybe_send_telegram_market_events(user, chart_payload.get("events"))
         return chart_payload
 
     @app.get("/api/quant-strategies")
@@ -676,18 +730,29 @@ def create_app(
     def get_market_breadth(
         request: Request,
         symbols: str = "",
-        _user: AuthUser = Depends(require_active_user),
+        user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         requested_symbols = (
             [symbol.strip().upper() for symbol in symbols.split(",") if symbol.strip()]
             if symbols
             else None
         )
-        return cached_api_payload(
+        payload = cached_api_payload(
             request,
             "market-breadth",
             lambda: breadth_service.payload(requested_symbols),
         )
+        breadth_events = build_breadth_confirmation_events(
+            {
+                symbol: history_store.load_breadth_bars(symbol)
+                for symbol in (requested_symbols or default_breadth_symbols())
+            }
+        )
+        maybe_send_telegram_market_events(
+            user,
+            [public_market_event(event) for event in breadth_events],
+        )
+        return payload
 
     @app.get("/api/futoi")
     def get_futoi(
@@ -696,7 +761,7 @@ def create_app(
         ticker: str = "",
         limit: int = 500,
         history_days: int = 365,
-        _user: AuthUser = Depends(require_active_user),
+        user: AuthUser = Depends(require_active_user),
     ) -> dict[str, Any]:
         if limit < 0:
             raise ValueError("limit cannot be negative")
@@ -720,6 +785,10 @@ def create_app(
                 if selected_ticker
                 else records
             )
+            dashboard = build_futoi_position_dashboard(
+                chart_records,
+                futoi.list_instruments(),
+            )
             return {
                 "ok": True,
                 "records": [public_futoi_record(record) for record in records],
@@ -727,13 +796,18 @@ def create_app(
                     public_futoi_record(record)
                     for record in chart_records
                 ],
+                "dashboard": public_futoi_dashboard(dashboard),
             }
 
-        return cached_api_payload(
+        payload = cached_api_payload(
             request,
             "futoi",
             futoi_payload,
         )
+        dashboard = payload.get("dashboard")
+        events = dashboard.get("events") if isinstance(dashboard, dict) else None
+        maybe_send_telegram_market_events(user, events)
+        return payload
 
     @app.get("/api/futoi/instruments")
     def get_futoi_instruments(
@@ -751,6 +825,143 @@ def create_app(
                 ],
             },
         )
+
+    @app.get("/api/reports/daily")
+    def get_daily_market_report(
+        request: Request,
+        date: str = "",
+        _user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        selected_date = parse_futoi_date(date) or datetime.now(timezone.utc).date()
+
+        def report_payload() -> dict[str, Any]:
+            start_date = selected_date - timedelta(days=7)
+            futoi_records = history_store.load_futoi_records(
+                start_date=start_date,
+                end_date=selected_date,
+                limit=None,
+            )
+            algopack_records = history_store.load_algopack_records(
+                start_date=selected_date,
+                end_date=selected_date,
+                limit=None,
+            )
+            breadth_bars_by_symbol = {
+                symbol: history_store.load_breadth_bars(symbol)
+                for symbol in default_breadth_symbols()[:8]
+            }
+            report = build_daily_market_report(
+                trading_date=selected_date,
+                futoi_records=futoi_records,
+                algopack_records=algopack_records,
+                breadth_bars_by_symbol=breadth_bars_by_symbol,
+                triggered_events=build_unusual_futoi_events(futoi_records),
+            )
+            return {"ok": True, "report": public_daily_market_report(report)}
+
+        return cached_api_payload(request, "daily-report", report_payload)
+
+    @app.get("/api/workspaces")
+    def get_workspaces(user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "workspaces": [
+                public_workspace(workspace)
+                for workspace in saved_state.list_workspaces(user.id)
+            ],
+        }
+
+    @app.post("/api/workspaces")
+    def create_workspace(
+        payload: dict[str, Any] | None = Body(default=None),
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        workspace_payload = payload or {}
+        workspace = saved_state.create_workspace(
+            user_id=user.id,
+            name=str(workspace_payload.get("name") or ""),
+            market=str(workspace_payload.get("market") or ""),
+            symbol=str(workspace_payload.get("symbol") or ""),
+            settings=workspace_payload.get("settings") or {},
+        )
+        return {"ok": True, "workspace": public_workspace(workspace)}
+
+    @app.put("/api/workspaces/{workspace_id}")
+    def update_workspace(
+        workspace_id: str,
+        payload: dict[str, Any] | None = Body(default=None),
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        workspace_payload = payload or {}
+        workspace = saved_state.update_workspace(
+            user_id=user.id,
+            workspace_id=workspace_id,
+            name=str(workspace_payload.get("name") or ""),
+            market=str(workspace_payload.get("market") or ""),
+            symbol=str(workspace_payload.get("symbol") or ""),
+            settings=workspace_payload.get("settings") or {},
+        )
+        return {"ok": True, "workspace": public_workspace(workspace)}
+
+    @app.delete("/api/workspaces/{workspace_id}")
+    def delete_workspace(
+        workspace_id: str,
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "deleted": saved_state.delete_workspace(user.id, workspace_id),
+        }
+
+    @app.get("/api/watchlists")
+    def get_watchlists(user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "watchlists": [
+                public_watchlist(watchlist)
+                for watchlist in saved_state.list_watchlists(user.id)
+            ],
+        }
+
+    @app.post("/api/watchlists")
+    def create_watchlist(
+        payload: dict[str, Any] | None = Body(default=None),
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        watchlist_payload = payload or {}
+        watchlist = saved_state.create_watchlist(
+            user_id=user.id,
+            name=str(watchlist_payload.get("name") or ""),
+            market=str(watchlist_payload.get("market") or ""),
+            symbols=watchlist_payload.get("symbols") or [],
+        )
+        return {"ok": True, "watchlist": public_watchlist(watchlist)}
+
+    @app.put("/api/watchlists/{watchlist_id}")
+    def update_watchlist(
+        watchlist_id: str,
+        payload: dict[str, Any] | None = Body(default=None),
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        watchlist_payload = payload or {}
+        watchlist = saved_state.update_watchlist(
+            user_id=user.id,
+            watchlist_id=watchlist_id,
+            name=str(watchlist_payload.get("name") or ""),
+            market=str(watchlist_payload.get("market") or ""),
+            symbols=watchlist_payload.get("symbols") or [],
+        )
+        return {"ok": True, "watchlist": public_watchlist(watchlist)}
+
+    @app.delete("/api/watchlists/{watchlist_id}")
+    def delete_watchlist(
+        watchlist_id: str,
+        user: AuthUser = Depends(require_active_user),
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "deleted": saved_state.delete_watchlist(user.id, watchlist_id),
+        }
 
     @app.post("/api/feedback")
     def submit_feedback(
@@ -889,6 +1100,34 @@ def create_app(
         except Exception:
             return
         alerts.record_signal_delivery(user.id, signature)
+
+    def maybe_send_telegram_market_events(
+        user: AuthUser,
+        events: Any,
+    ) -> None:
+        settings = alerts.get_telegram_settings(user.id)
+        if not settings.enabled or not settings.bot_token or not settings.chat_id:
+            return
+        if not isinstance(events, list):
+            return
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            try:
+                signature = build_event_signature(event)
+            except ValueError:
+                continue
+            if alerts.has_signal_delivery(user.id, signature):
+                continue
+            try:
+                telegram.send_message(
+                    settings.bot_token,
+                    settings.chat_id,
+                    build_telegram_event_message(event),
+                )
+            except Exception:
+                continue
+            alerts.record_signal_delivery(user.id, signature)
 
     return app
 

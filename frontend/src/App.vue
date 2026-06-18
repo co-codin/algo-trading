@@ -35,7 +35,10 @@ import type {
   FeedbackItem,
   FeedbackPayload,
   FeedbackStatus,
+  DailyMarketReport,
+  DailyMarketReportPayload,
   FutoiChartPoint,
+  FutoiDashboard,
   FutoiInstrument,
   FutoiInstrumentsPayload,
   FutoiPayload,
@@ -46,10 +49,15 @@ import type {
   MarketBreadthBar,
   MarketBreadthGroup,
   MarketBreadthPayload,
+  MarketEvent,
   Mode,
   PlatformSettingsPayload,
   QuantStrategiesPayload,
   QuantStrategyIdea,
+  SavedWatchlist,
+  SavedWatchlistsPayload,
+  SavedWorkspace,
+  SavedWorkspacesPayload,
   StrategyInfo,
   StrategyPayload,
 } from "./types";
@@ -118,6 +126,11 @@ type LiveWorkspace = {
   maxSignals: number;
   showSignals: boolean;
   savedAt: string;
+};
+type WatchlistForm = {
+  name: string;
+  market: string;
+  symbols: string;
 };
 
 const FREE_TRIAL_ADMIN_EMAIL = "cuiyeqing960904@gmail.com";
@@ -254,6 +267,7 @@ const routeModes: Record<string, Mode> = {
   "/breadth": "breadth",
   "/quant": "quant",
   "/futoi": "futoi",
+  "/reports": "reports",
   "/feedback": "feedback",
   "/profile": "profile",
   "/admin": "admin",
@@ -266,6 +280,7 @@ const modeRoutes: Record<Mode, string> = {
   breadth: "/breadth",
   quant: "/quant",
   futoi: "/futoi",
+  reports: "/reports",
   feedback: "/feedback",
   profile: "/profile",
   admin: "/admin",
@@ -376,8 +391,17 @@ const breadthPayload = ref<MarketBreadthPayload | null>(null);
 const futoiRecords = ref<FutoiRecord[]>([]);
 const futoiChartRecords = ref<FutoiRecord[]>([]);
 const futoiInstruments = ref<FutoiInstrument[]>([]);
+const futoiDashboard = ref<FutoiDashboard | null>(null);
 const futoiInstrumentSearch = ref("");
 const selectedFutoiTicker = ref("");
+const dailyReport = ref<DailyMarketReport | null>(null);
+const reportDate = ref(new Date().toISOString().slice(0, 10));
+const liveWatchlists = ref<SavedWatchlist[]>([]);
+const watchlistForm = reactive<WatchlistForm>({
+  name: "",
+  market: "crypto_spot",
+  symbols: "",
+});
 const liveStatus = ref(t("status.ready"));
 const liveStatusType = ref<StatusType>("");
 const quantStatus = ref(t("status.ready"));
@@ -386,6 +410,8 @@ const breadthStatus = ref(t("status.ready"));
 const breadthStatusType = ref<StatusType>("");
 const futoiStatus = ref(t("status.ready"));
 const futoiStatusType = ref<StatusType>("");
+const reportStatus = ref(t("status.ready"));
+const reportStatusType = ref<StatusType>("");
 const liveMarket = ref("crypto_spot");
 const liveSymbol = ref("BTCUSDT");
 const liveSymbolSearch = ref("");
@@ -444,6 +470,7 @@ const featureTabs = computed(() => [
   { mode: "breadth" as const, label: t("tabs.breadth") },
   { mode: "quant" as const, label: t("tabs.quant") },
   ...(isRussianLocale.value ? [{ mode: "futoi" as const, label: t("tabs.futoi") }] : []),
+  { mode: "reports" as const, label: t("tabs.reports") },
 ]);
 const accountMenuItems = computed(() => [
   { mode: "profile" as const, label: t("tabs.profile") },
@@ -751,6 +778,8 @@ const visibleRussianLiveIndicators = computed<IndicatorDefinition[]>(() => {
 });
 const russianLiveCandleCount = computed(() => russianLivePayload.value?.candles.length ?? 0);
 const russianLiveSignalCount = computed(() => russianLivePayload.value?.signals.length ?? 0);
+const liveMarketEvents = computed<MarketEvent[]>(() => livePayload.value?.events ?? []);
+const russianLiveMarketEvents = computed<MarketEvent[]>(() => russianLivePayload.value?.events ?? []);
 const breadthGroups = computed<MarketBreadthGroup[]>(() => breadthPayload.value?.groups ?? []);
 const breadthGroupSummaries = computed<BreadthGroupSummary[]>(() =>
   breadthGroups.value.map((group) => summarizeBreadthGroup(group)),
@@ -829,6 +858,26 @@ const futoiRecordMetrics = computed<FutoiMetric[]>(() => {
     },
   ];
 });
+const futoiDashboardMetrics = computed<FutoiMetric[]>(() => [
+  {
+    label: t("labels.futoiInstruments"),
+    value: formatNumber(futoiDashboard.value?.instrument_count ?? 0),
+  },
+  {
+    label: t("labels.snapshots"),
+    value: formatNumber(futoiDashboard.value?.snapshot_count ?? 0),
+  },
+  {
+    label: t("labels.unusualActivity"),
+    value: formatNumber(futoiDashboard.value?.unusual_events.length ?? 0),
+  },
+  {
+    label: t("labels.latest"),
+    value: futoiDashboard.value?.latest[0]?.ticker ?? "—",
+  },
+]);
+const futoiDashboardEvents = computed<MarketEvent[]>(() => futoiDashboard.value?.unusual_events ?? []);
+const dailyReportSections = computed(() => dailyReport.value?.sections ?? []);
 const chartLabels = computed(() => ({
   aria: t("chart.aria"),
   empty: t("empty.noCandles"),
@@ -936,6 +985,9 @@ watch(locale, () => {
   if (!futoiStatusType.value) {
     futoiStatus.value = t("status.ready");
   }
+  if (!reportStatusType.value) {
+    reportStatus.value = t("status.ready");
+  }
   if (!adminStatusType.value) {
     adminStatus.value = t("status.ready");
   }
@@ -987,7 +1039,15 @@ function modeFromLocation(): Mode {
 }
 
 function isFeatureMode(mode: Mode): boolean {
-  return mode === "live" || mode === "russian-live" || mode === "breadth" || mode === "quant" || mode === "futoi" || mode === "feedback";
+  return (
+    mode === "live" ||
+    mode === "russian-live" ||
+    mode === "breadth" ||
+    mode === "quant" ||
+    mode === "futoi" ||
+    mode === "reports" ||
+    mode === "feedback"
+  );
 }
 
 function isRussianLiveMarket(market: string): boolean {
@@ -1044,6 +1104,9 @@ function setMode(mode: Mode, updateUrl = true) {
   if (nextMode === "futoi") {
     void loadFutoiDashboard();
   }
+  if (nextMode === "reports") {
+    void loadDailyMarketReport();
+  }
   if (nextMode === "profile") {
     void loadProfile();
   }
@@ -1086,6 +1149,11 @@ function setFutoiStatus(message: string, type: StatusType = "") {
   futoiStatusType.value = type;
 }
 
+function setReportStatus(message: string, type: StatusType = "") {
+  reportStatus.value = message;
+  reportStatusType.value = type;
+}
+
 function setAdminStatus(message: string, type: StatusType = "") {
   adminStatus.value = message;
   adminStatusType.value = type;
@@ -1118,10 +1186,13 @@ async function bootstrapAuthenticatedApp() {
   if (canUseFeatures.value) {
     await loadLiveSymbols();
     await loadStrategies();
+    await loadSavedWorkspaces();
+    await loadWatchlists();
   } else {
     liveSymbolsByMarket.value = {};
     russianLiveSymbolsByMarket.value = {};
     strategies.value = [];
+    liveWatchlists.value = [];
   }
   applyLiveSettingsFromLocation();
   applyRussianLiveSettingsFromLocation();
@@ -1313,11 +1384,27 @@ function loadLiveWorkspaces() {
   }
 }
 
+async function loadSavedWorkspaces() {
+  if (!canUseFeatures.value) {
+    return;
+  }
+  try {
+    const payload = await requestJson<SavedWorkspacesPayload>("/api/workspaces");
+    liveWorkspaces.value = payload.workspaces
+      .map(liveWorkspaceFromSavedWorkspace)
+      .filter(isLiveWorkspace)
+      .slice(0, 8);
+    persistLiveWorkspaces();
+  } catch {
+    loadLiveWorkspaces();
+  }
+}
+
 function persistLiveWorkspaces() {
   localStorage.setItem(LIVE_WORKSPACE_STORAGE_KEY, JSON.stringify(liveWorkspaces.value));
 }
 
-function saveLiveWorkspace() {
+async function saveLiveWorkspace() {
   const now = new Date();
   const workspace: LiveWorkspace = {
     id: `${now.getTime()}`,
@@ -1340,7 +1427,26 @@ function saveLiveWorkspace() {
   ].slice(0, 8);
   liveWorkspaceName.value = "";
   persistLiveWorkspaces();
-  setLiveStatus(t("status.workspaceSaved"));
+  try {
+    const payload = await requestJson<{ ok: true; workspace: SavedWorkspace }>("/api/workspaces", {
+      method: "POST",
+      body: JSON.stringify({
+        name: workspace.name,
+        market: workspace.market,
+        symbol: workspace.symbol,
+        settings: liveWorkspaceSettings(workspace),
+      }),
+    });
+    const savedWorkspace = liveWorkspaceFromSavedWorkspace(payload.workspace);
+    liveWorkspaces.value = [
+      savedWorkspace,
+      ...liveWorkspaces.value.filter((existing) => existing.name !== savedWorkspace.name),
+    ].slice(0, 8);
+    persistLiveWorkspaces();
+    setLiveStatus(t("status.workspaceSaved"));
+  } catch (error) {
+    setLiveStatus(errorMessage(error), "error");
+  }
 }
 
 function applyLiveWorkspace(workspace: LiveWorkspace) {
@@ -1396,11 +1502,18 @@ function enforceLocaleAvailability() {
   }
 }
 
-function deleteLiveWorkspace(workspaceId: string) {
+async function deleteLiveWorkspace(workspaceId: string) {
   liveWorkspaces.value = liveWorkspaces.value.filter(
     (workspace) => workspace.id !== workspaceId,
   );
   persistLiveWorkspaces();
+  try {
+    await requestJson<{ ok: true; deleted: boolean }>(`/api/workspaces/${workspaceId}`, {
+      method: "DELETE",
+    });
+  } catch (error) {
+    setLiveStatus(errorMessage(error), "error");
+  }
 }
 
 function isLiveWorkspace(value: unknown): value is LiveWorkspace {
@@ -1417,6 +1530,143 @@ function isLiveWorkspace(value: unknown): value is LiveWorkspace {
     Array.isArray(workspace.indicators) &&
     Array.isArray(workspace.strategies)
   );
+}
+
+function liveWorkspaceFromSavedWorkspace(workspace: SavedWorkspace): LiveWorkspace {
+  const settings = workspace.settings;
+  return {
+    id: workspace.id,
+    name: workspace.name,
+    market: workspace.market,
+    symbol: workspace.symbol,
+    interval: stringSetting(settings.interval, "1h"),
+    limit: stringOrNumberSetting(settings.limit, 180),
+    indicators: stringArraySetting(settings.indicators, defaultLiveIndicators),
+    strategies: stringArraySetting(settings.strategies, ["ema-rsi"]),
+    signalDisplayMode: signalDisplayModeSetting(settings.signalDisplayMode, "consensus"),
+    consensusMinConfirmations: numberSetting(settings.consensusMinConfirmations, 5),
+    maxSignals: numberSetting(settings.maxSignals, 80),
+    showSignals: booleanSetting(settings.showSignals, true),
+    savedAt: workspace.updated_at,
+  };
+}
+
+function liveWorkspaceSettings(workspace: LiveWorkspace): Record<string, unknown> {
+  return {
+    interval: workspace.interval,
+    limit: workspace.limit,
+    indicators: workspace.indicators,
+    strategies: workspace.strategies,
+    signalDisplayMode: workspace.signalDisplayMode,
+    consensusMinConfirmations: workspace.consensusMinConfirmations,
+    maxSignals: workspace.maxSignals,
+    showSignals: workspace.showSignals,
+  };
+}
+
+function stringSetting(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function stringOrNumberSetting(value: unknown, fallback: string | number): string | number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function stringArraySetting(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+  const normalized = value
+    .map((item) => String(item).trim())
+    .filter((item) => item.length > 0);
+  return normalized.length ? normalized : [...fallback];
+}
+
+function numberSetting(value: unknown, fallback: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function booleanSetting(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function signalDisplayModeSetting(value: unknown, fallback: SignalDisplayMode): SignalDisplayMode {
+  return value === "individual" || value === "consensus" ? value : fallback;
+}
+
+async function loadWatchlists() {
+  if (!canUseFeatures.value) {
+    liveWatchlists.value = [];
+    return;
+  }
+  try {
+    const payload = await requestJson<SavedWatchlistsPayload>("/api/watchlists");
+    liveWatchlists.value = payload.watchlists;
+  } catch (error) {
+    liveWatchlists.value = [];
+    setLiveStatus(errorMessage(error), "error");
+  }
+}
+
+async function saveWatchlist() {
+  if (!canUseFeatures.value) {
+    setLiveStatus(t("auth.inactive"), "error");
+    return;
+  }
+  const symbols = watchlistForm.symbols
+    .split(/[\s,]+/)
+    .map((symbol) => symbol.trim().toUpperCase())
+    .filter(Boolean);
+  try {
+    const payload = await requestJson<{ ok: true; watchlist: SavedWatchlist }>("/api/watchlists", {
+      method: "POST",
+      body: JSON.stringify({
+        name: watchlistForm.name || `${watchlistForm.market} watchlist`,
+        market: watchlistForm.market,
+        symbols,
+      }),
+    });
+    liveWatchlists.value = [
+      payload.watchlist,
+      ...liveWatchlists.value.filter((watchlist) => watchlist.id !== payload.watchlist.id),
+    ];
+    watchlistForm.name = "";
+    watchlistForm.symbols = "";
+    setLiveStatus(t("status.watchlistSaved"));
+  } catch (error) {
+    setLiveStatus(errorMessage(error), "error");
+  }
+}
+
+async function deleteWatchlist(watchlistId: string) {
+  liveWatchlists.value = liveWatchlists.value.filter((watchlist) => watchlist.id !== watchlistId);
+  try {
+    await requestJson<{ ok: true; deleted: boolean }>(`/api/watchlists/${watchlistId}`, {
+      method: "DELETE",
+    });
+  } catch (error) {
+    setLiveStatus(errorMessage(error), "error");
+  }
+}
+
+function applyWatchlistSymbol(watchlist: SavedWatchlist, symbol: string) {
+  if (russianLiveMarkets.has(watchlist.market)) {
+    russianLiveMarket.value = watchlist.market;
+    russianLiveSymbol.value = symbol;
+    setMode("russian-live");
+    return;
+  }
+  liveMarket.value = watchlist.market;
+  liveSymbol.value = symbol;
+  setMode("live");
+}
+
+function watchlistSymbolsLabel(watchlist: SavedWatchlist): string {
+  return watchlist.symbols.slice(0, 6).join(", ");
 }
 
 async function toggleLiveAlerts() {
@@ -1736,8 +1986,11 @@ async function logout() {
   breadthPayload.value = null;
   futoiRecords.value = [];
   futoiChartRecords.value = [];
+  futoiDashboard.value = null;
   futoiInstruments.value = [];
   selectedFutoiTicker.value = "";
+  dailyReport.value = null;
+  liveWatchlists.value = [];
   adminUsers.value = [];
   adminFeedback.value = [];
   feedbackForm.title = "";
@@ -2063,11 +2316,33 @@ async function loadFutoi() {
     const payload = await requestJson<FutoiPayload>(`/api/futoi?${params.toString()}`);
     futoiRecords.value = payload.records;
     futoiChartRecords.value = payload.chart_records;
+    futoiDashboard.value = payload.dashboard;
     setFutoiStatus(`${t("status.updated")} ${payload.records.length}`);
   } catch (error) {
     futoiRecords.value = [];
     futoiChartRecords.value = [];
+    futoiDashboard.value = null;
     setFutoiStatus(errorMessage(error), "error");
+  }
+}
+
+async function loadDailyMarketReport() {
+  if (!canUseFeatures.value) {
+    setReportStatus(t("auth.inactive"), "error");
+    return;
+  }
+  setReportStatus(t("status.loadingReport"), "busy");
+  const params = new URLSearchParams();
+  if (reportDate.value) {
+    params.set("date", reportDate.value);
+  }
+  try {
+    const payload = await requestJson<DailyMarketReportPayload>(`/api/reports/daily?${params.toString()}`);
+    dailyReport.value = payload.report;
+    setReportStatus(`${t("status.updated")} ${payload.report.date}`);
+  } catch (error) {
+    dailyReport.value = null;
+    setReportStatus(errorMessage(error), "error");
   }
 }
 
@@ -2135,8 +2410,20 @@ function formatNumber(value: unknown): string {
   return number.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
-function formatDateTime(value: string | null | undefined): string {
+function formatDateTime(value: number | string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "—";
+}
+
+function eventTimeLabel(event: MarketEvent): string {
+  return event.time ? formatDateTime(event.time) : event.source;
+}
+
+function eventMetricEntries(event: MarketEvent): Array<[string, string | number | null]> {
+  return Object.entries(event.metrics ?? {}).slice(0, 4);
+}
+
+function eventSeverityClass(event: MarketEvent): string {
+  return `is-${event.severity}`;
 }
 
 function formatFeedbackStatus(status: FeedbackStatus): string {
@@ -2866,6 +3153,75 @@ function errorMessage(error: unknown): string {
           </div>
         </div>
       </div>
+      <div class="watchlist-panel">
+        <div class="watchlist-form">
+          <label>
+            <span>{{ t("labels.watchlists") }}</span>
+            <input
+              v-model.trim="watchlistForm.name"
+              autocomplete="off"
+              :placeholder="t('labels.watchlistName')"
+            >
+          </label>
+          <label>
+            <span>{{ t("labels.market") }}</span>
+            <select v-model="watchlistForm.market">
+              <option
+                v-for="option in [...liveMarketOptions, ...russianLiveMarketOptions]"
+                :key="`watchlist-market-${option.value}`"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>{{ t("labels.symbols") }}</span>
+            <input
+              v-model.trim="watchlistForm.symbols"
+              autocomplete="off"
+              :placeholder="t('labels.symbolsCsv')"
+            >
+          </label>
+          <button class="secondary" type="button" @click="saveWatchlist">
+            {{ t("actions.saveWatchlist") }}
+          </button>
+        </div>
+        <div v-if="liveWatchlists.length" class="watchlist-list">
+          <article
+            v-for="watchlist in liveWatchlists"
+            :key="watchlist.id"
+            class="watchlist-card"
+          >
+            <header>
+              <div>
+                <span>{{ watchlist.market }}</span>
+                <strong>{{ watchlist.name }}</strong>
+              </div>
+              <button
+                class="secondary workspace-delete"
+                type="button"
+                :aria-label="`${t('actions.deleteWatchlist')} ${watchlist.name}`"
+                @click="deleteWatchlist(watchlist.id)"
+              >
+                x
+              </button>
+            </header>
+            <p>{{ watchlistSymbolsLabel(watchlist) }}</p>
+            <div class="watchlist-symbols">
+              <button
+                v-for="symbol in watchlist.symbols"
+                :key="`${watchlist.id}:${symbol}`"
+                class="secondary"
+                type="button"
+                @click="applyWatchlistSymbol(watchlist, symbol)"
+              >
+                {{ symbol }}
+              </button>
+            </div>
+          </article>
+        </div>
+      </div>
       <div class="indicator-picker">
         <span>{{ t("labels.indicators") }}</span>
         <label
@@ -2903,6 +3259,28 @@ function errorMessage(error: unknown): string {
           />
           <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
         </div>
+      </div>
+      <div class="market-event-feed">
+        <header>
+          <h3>{{ t("labels.marketEvents") }}</h3>
+          <span>{{ formatNumber(liveMarketEvents.length) }}</span>
+        </header>
+        <article
+          v-for="event in liveMarketEvents"
+          :key="event.id"
+          class="market-event-card"
+          :class="eventSeverityClass(event)"
+        >
+          <span>{{ eventTimeLabel(event) }}</span>
+          <h4>{{ event.title }}</h4>
+          <p>{{ event.details }}</p>
+          <dl>
+            <div v-for="[metric, value] in eventMetricEntries(event)" :key="`${event.id}:${metric}`">
+              <dt>{{ metric }}</dt>
+              <dd>{{ formatNumber(value) }}</dd>
+            </div>
+          </dl>
+        </article>
       </div>
     </section>
 
@@ -3144,6 +3522,28 @@ function errorMessage(error: unknown): string {
           />
           <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
         </div>
+      </div>
+      <div class="market-event-feed">
+        <header>
+          <h3>{{ t("labels.marketEvents") }}</h3>
+          <span>{{ formatNumber(russianLiveMarketEvents.length) }}</span>
+        </header>
+        <article
+          v-for="event in russianLiveMarketEvents"
+          :key="event.id"
+          class="market-event-card"
+          :class="eventSeverityClass(event)"
+        >
+          <span>{{ eventTimeLabel(event) }}</span>
+          <h4>{{ event.title }}</h4>
+          <p>{{ event.details }}</p>
+          <dl>
+            <div v-for="[metric, value] in eventMetricEntries(event)" :key="`${event.id}:${metric}`">
+              <dt>{{ metric }}</dt>
+              <dd>{{ formatNumber(value) }}</dd>
+            </div>
+          </dl>
+        </article>
       </div>
     </section>
 
@@ -3503,6 +3903,16 @@ function errorMessage(error: unknown): string {
               <b>{{ metric.value }}</b>
             </div>
           </div>
+          <section class="futoi-dashboard-grid" :aria-label="t('labels.futoiDashboard')">
+            <div
+              v-for="metric in futoiDashboardMetrics"
+              :key="`dashboard-${metric.label}`"
+              class="futoi-metric"
+            >
+              <span>{{ metric.label }}</span>
+              <b>{{ metric.value }}</b>
+            </div>
+          </section>
           <div class="futoi-chart-shell">
             <div class="futoi-chart-legend">
               <span><i class="legend-dot net"></i>{{ futoiChartLabels.net }}</span>
@@ -3514,6 +3924,28 @@ function errorMessage(error: unknown): string {
               :points="futoiChartPoints"
               :labels="futoiChartLabels"
             />
+          </div>
+          <div class="market-event-feed futoi-event-feed">
+            <header>
+              <h3>{{ t("labels.unusualActivity") }}</h3>
+              <span>{{ formatNumber(futoiDashboardEvents.length) }}</span>
+            </header>
+            <article
+              v-for="event in futoiDashboardEvents"
+              :key="event.id"
+              class="market-event-card"
+              :class="eventSeverityClass(event)"
+            >
+              <span>{{ eventTimeLabel(event) }}</span>
+              <h4>{{ event.title }}</h4>
+              <p>{{ event.details }}</p>
+              <dl>
+                <div v-for="[metric, value] in eventMetricEntries(event)" :key="`${event.id}:${metric}`">
+                  <dt>{{ metric }}</dt>
+                  <dd>{{ formatNumber(value) }}</dd>
+                </div>
+              </dl>
+            </article>
           </div>
           <div v-if="!futoiRecords.length" class="empty">{{ t("empty.noFutoi") }}</div>
           <div v-else class="futoi-table-wrapper">
@@ -3553,6 +3985,46 @@ function errorMessage(error: unknown): string {
           </div>
         </div>
       </div>
+    </section>
+
+    <section v-else-if='activeMode === "reports"' class="report-panel" :class="'panel'">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ t("pages.dailyReport") }}</h2>
+          <p>{{ t("pages.dailyReportSubtitle") }}</p>
+        </div>
+        <div class="actions">
+          <label>
+            <span>{{ t("labels.reportDate") }}</span>
+            <input v-model="reportDate" type="date" @change="loadDailyMarketReport">
+          </label>
+          <button class="primary" type="button" @click="loadDailyMarketReport">
+            {{ t("actions.refresh") }}
+          </button>
+          <div class="status" :class="reportStatusType ? `is-${reportStatusType}` : ''">
+            {{ reportStatus }}
+          </div>
+        </div>
+      </div>
+      <div v-if="dailyReport" class="report-layout">
+        <header class="report-header">
+          <span>{{ dailyReport.date }}</span>
+          <h3>{{ dailyReport.title }}</h3>
+          <p>{{ dailyReport.triggered_symbols.join(", ") || "—" }}</p>
+        </header>
+        <section
+          v-for="section in dailyReportSections"
+          :key="section.title"
+          class="report-section"
+        >
+          <h4>{{ section.title }}</h4>
+          <ul>
+            <li v-for="line in section.lines" :key="`${section.title}:${line}`">{{ line }}</li>
+          </ul>
+        </section>
+        <textarea readonly :value="dailyReport.text" rows="12"></textarea>
+      </div>
+      <div v-else class="empty">{{ t("empty.noReport") }}</div>
     </section>
 
     <section v-else-if='activeMode === "profile"' class="panel profile-panel">
