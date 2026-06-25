@@ -22,12 +22,3 @@ instructions override this file.
   the full verification suite before pushing.
 - Use Lore-style commit messages for commits.
 
-## MOEX And Russian Market Work
-
-- Learn `/home/elijah/Desktop/moexalgo` before changing MOEX/Russian market behavior.
-- If current upstream behavior matters, fetch `https://github.com/moexalgo/moexalgo`
-  and compare the local clone before implementing.
-- Prefer this repo's existing historical store, job, scheduler, and API patterns over
-  new storage or background-processing abstractions.
-- FUTOI data is read-only, APIM-backed, stored historically, and retained for the
-  latest two years unless the user changes that requirement.

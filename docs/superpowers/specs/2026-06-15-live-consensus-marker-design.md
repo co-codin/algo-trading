@@ -50,7 +50,7 @@ In scope:
 - `/live` chart only.
 - Frontend aggregation and controls.
 - Tests for the derived consensus marker contract and chart props.
-- English/Russian labels for new controls.
+- Localized labels for new controls.
 
 Out of scope:
 

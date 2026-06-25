@@ -84,24 +84,13 @@ const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
 ]);
 ```
 
-In `frontend/src/i18n.ts`, add English and Russian message keys:
+In `frontend/src/i18n.ts`, add localized message keys:
 
 ```ts
 "labels.signalView": "Signal view",
 "labels.minConfirmations": "Min confirmations",
 "options.consensusSignals": "Consensus",
 "options.individualSignals": "Individual",
-"chart.consensusLong": "Long",
-"chart.consensusShort": "Short",
-```
-
-Russian:
-
-```ts
-"labels.signalView": "Вид сигналов",
-"labels.minConfirmations": "Мин. подтверждений",
-"options.consensusSignals": "Консенсус",
-"options.individualSignals": "Отдельные",
 "chart.consensusLong": "Long",
 "chart.consensusShort": "Short",
 ```

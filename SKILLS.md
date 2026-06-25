@@ -34,7 +34,7 @@ Detailed playbooks live in:
 ## Frontend Changes
 
 - Keep UI state in `frontend/src/App.vue` aligned with `frontend/src/types.ts`.
-- Update English, Russian, and Chinese translations together.
+- Update English and Chinese translations together.
 - Prefer compact controls and predictable tab behavior on `/live`, `/breadth`, `/profile`, and `/admin`.
 - Remove dead route state, API callers, and translation keys when a page is removed.
 

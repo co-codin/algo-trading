@@ -97,7 +97,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('value: "cme_futures"', source)
         self.assertIn('t("options.usMarket")', source)
         self.assertIn('"options.usMarket": "US Market"', i18n_source)
-        self.assertIn('"options.usMarket": "Рынок США"', i18n_source)
         self.assertIn('"options.usMarket": "美国市场"', i18n_source)
         self.assertIn('<select v-model="liveMarket"', source)
         self.assertIn('<select v-model="liveSymbol"', source)
@@ -196,8 +195,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('"actions.exportSnapshot": "Export snapshot"', i18n_source)
         self.assertIn('"labels.dataHealth": "Data health"', i18n_source)
         self.assertIn('"labels.alerts": "Alerts"', i18n_source)
-        self.assertIn('"actions.saveWorkspace": "Сохранить рабочее место"', i18n_source)
-        self.assertIn('"actions.exportSnapshot": "Экспорт снимка"', i18n_source)
 
         self.assertIn(".workspace-controls", style_source)
         self.assertIn(".health-badge", style_source)
@@ -252,11 +249,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('"quant.metrics.lookback_return_pct": "Lookback return %"', i18n_source)
         self.assertIn('"quant.reasons.rsi-mean-reversion.oversold": "RSI is oversold at {value}."', i18n_source)
         self.assertIn('"strategyActions.bullish": "Bullish"', i18n_source)
-        self.assertIn('"tabs.quant": "Квант-стратегии"', i18n_source)
-        self.assertIn('"pages.quantStrategies": "Квант-стратегии"', i18n_source)
-        self.assertIn('"quant.groups.trend": "Тренд"', i18n_source)
-        self.assertIn('"quant.ideas.time-series-momentum.title": "Моментум временного ряда"', i18n_source)
-        self.assertIn('"quant.reasons.rsi-mean-reversion.oversold": "RSI в зоне перепроданности: {value}."', i18n_source)
         self.assertIn('"tabs.quant": "量化策略"', i18n_source)
         self.assertIn('"pages.quantStrategies": "量化策略"', i18n_source)
         self.assertIn('"quant.groups.trend": "趋势"', i18n_source)
@@ -286,7 +278,6 @@ class UiTests(unittest.TestCase):
         self.assertIn("PlatformSettingsPayload", types_source)
         self.assertIn('"pages.freeTrialSettings": "Free trial"', i18n_source)
         self.assertIn('"labels.freeTrialEndAt": "Free trial ends"', i18n_source)
-        self.assertIn('"pages.freeTrialSettings": "Пробный период"', i18n_source)
         self.assertIn('"pages.freeTrialSettings": "免费试用"', i18n_source)
         self.assertIn(".admin-settings-section", style_source)
 
@@ -309,7 +300,6 @@ class UiTests(unittest.TestCase):
         self.assertIn(':placeholder="t(\'labels.strategySearch\')"', source)
         self.assertIn('v-for="group in filteredLiveStrategyGroups"', source)
         self.assertIn('"labels.strategySearch": "Search strategies"', i18n_source)
-        self.assertIn('"labels.strategySearch": "Поиск стратегий"', i18n_source)
         self.assertIn(".live-control-section", style_source)
         self.assertIn(".market-controls", style_source)
         self.assertIn(".signal-controls", style_source)
@@ -348,8 +338,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('"strategyGroups.breakout": "Breakout"', i18n_source)
         self.assertIn('"strategyGroups.volume": "Volume confirmation"', i18n_source)
         self.assertIn('"labels.strategyPickerHint": "Pick one preset or combine strategies by group."', i18n_source)
-        self.assertIn('"strategyGroups.recommended": "Рекомендуемые"', i18n_source)
-        self.assertIn('"labels.strategyPickerHint": "Выберите пресет или соберите набор по группам."', i18n_source)
         for strategy_name in (
             "adx-trend",
             "ichimoku-breakout",
@@ -574,7 +562,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('breadthPayload?.series[item.symbol]', source)
         self.assertIn('export type MarketBreadthPayload', types_source)
         self.assertIn('"tabs.breadth": "US Market Breadth"', i18n_source)
-        self.assertIn('"tabs.breadth": "Ширина рынка США"', i18n_source)
 
     def test_frontend_defines_bilingual_i18n_contract(self):
         root = Path(__file__).resolve().parents[1]
@@ -585,14 +572,12 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('export type Locale = "en" | "ru" | "zh";', i18n_source)
+        self.assertIn('export type Locale = "en" | "zh";', i18n_source)
         self.assertIn("SUPPORTED_LOCALES", i18n_source)
         self.assertIn('flag: "🇺🇸"', i18n_source)
-        self.assertIn('flag: "🇷🇺"', i18n_source)
         self.assertIn('LOCALE_STORAGE_KEY = "algoTradingLocale"', i18n_source)
         self.assertIn("export const messages", i18n_source)
         self.assertIn("en:", i18n_source)
-        self.assertIn("ru:", i18n_source)
         self.assertIn("strategyDescriptions", i18n_source)
         self.assertIn("translateStrategyDescription", i18n_source)
         self.assertIn("setLocale", app_source)
@@ -609,7 +594,7 @@ class UiTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('export type Locale = "en" | "ru" | "zh";', i18n_source)
+        self.assertIn('export type Locale = "en" | "zh";', i18n_source)
         self.assertIn('{ code: "zh", label: "ZH", flag: "🇨🇳" }', i18n_source)
         self.assertIn("zh:", i18n_source)
         self.assertIn('"auth.title": "交易工作区"', i18n_source)
@@ -622,7 +607,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('macd: "MACD交叉"', i18n_source)
         self.assertIn('"combined-signals": "组合信号"', i18n_source)
         self.assertIn('"combined-signals": "可配置的策略确认组合"', i18n_source)
-        self.assertIn('return value === "ru" || value === "zh" ? value : "en";', i18n_source)
+        self.assertIn('return value === "zh" ? value : "en";', i18n_source)
         self.assertIn("SUPPORTED_LOCALES", app_source)
         self.assertIn("setLocale(item.code)", app_source)
 
@@ -778,12 +763,10 @@ class UiTests(unittest.TestCase):
         self.assertIn('t("landing.title")', app_source)
         self.assertIn('t("actions.openDashboard")', app_source)
         self.assertIn('"landing.title": "Market intelligence terminal"', i18n_source)
-        self.assertIn('"landing.title": "Терминал рыночной аналитики"', i18n_source)
         self.assertIn('"landing.title": "市场情报终端"', i18n_source)
         self.assertIn('"landing.metric.markets"', i18n_source)
         self.assertIn('"landing.sessionTitle"', i18n_source)
         self.assertIn('"landing.info.heading": "Built for daily market review"', i18n_source)
-        self.assertIn('"landing.info.heading": "Для ежедневного обзора рынка"', i18n_source)
         self.assertIn('"landing.info.heading": "为每日市场复盘而建"', i18n_source)
         self.assertIn('"landing.info.coverage.title"', i18n_source)
         self.assertIn('"landing.info.pipeline.title"', i18n_source)
@@ -847,7 +830,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('v-for="feedback in adminFeedback"', app_source)
         self.assertIn('@change="updateFeedbackStatus(feedback, feedback.status)"', app_source)
         self.assertIn('"pages.feedback": "Report a bug / feedback"', i18n_source)
-        self.assertIn('"pages.feedback": "Сообщить об ошибке / отзыв"', i18n_source)
         self.assertIn('"pages.feedback": "报告问题 / 反馈"', i18n_source)
         self.assertIn('"feedback.status.open": "Open"', i18n_source)
         self.assertIn('"feedback.status.in_progress": "In progress"', i18n_source)
@@ -948,7 +930,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('v-model.number="liveMaxSignals"', source)
         self.assertIn('t("labels.maxMarkers")', source)
         self.assertIn('"labels.maxMarkers": "Max markers"', i18n_source)
-        self.assertIn('"labels.maxMarkers": "Макс. меток"', i18n_source)
 
     def test_live_page_exposes_commodities_market(self):
         root = Path(__file__).resolve().parents[1]
@@ -966,7 +947,6 @@ class UiTests(unittest.TestCase):
         for symbol in ("GC=F", "SI=F", "NG=F", "BZ=F", "PL=F", "PA=F", "HG=F"):
             self.assertNotIn(f'value: "{symbol}"', source)
         self.assertIn('"options.commodities": "Commodities"', i18n_source)
-        self.assertIn('"options.commodities": "Сырьевые товары"', i18n_source)
 
     def test_live_page_exposes_mag7_stocks_market(self):
         root = Path(__file__).resolve().parents[1]
@@ -981,7 +961,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('t("options.mag7Stocks")', app_source)
         self.assertNotIn("mag7_stocks: mag7StockSymbolOptions", app_source)
         self.assertIn('"options.mag7Stocks": "MAG 7 Stocks"', i18n_source)
-        self.assertIn('"options.mag7Stocks": "Акции MAG 7"', i18n_source)
 
     def test_live_page_exposes_hong_kong_stocks_market(self):
         root = Path(__file__).resolve().parents[1]
@@ -996,7 +975,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('t("options.hongKongStocks")', app_source)
         self.assertNotIn("hong_kong_stocks: hongKongStockSymbolOptions", app_source)
         self.assertIn('"options.hongKongStocks": "Hong Kong Stocks"', i18n_source)
-        self.assertIn('"options.hongKongStocks": "Акции Гонконга"', i18n_source)
         self.assertIn('"options.hongKongStocks": "港股"', i18n_source)
 
     def test_live_page_filters_symbol_picker_by_search_text_without_auto_select(self):

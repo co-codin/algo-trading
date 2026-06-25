@@ -2,7 +2,7 @@
 
 ## When To Use
 
-Use this when adding or changing Binance, Yahoo Finance, MOEX, commodities, index futures, breadth, or historical CSV flows.
+Use this when adding or changing Binance, Yahoo Finance, commodities, index futures, breadth, or historical CSV flows.
 
 ## Checklist
 

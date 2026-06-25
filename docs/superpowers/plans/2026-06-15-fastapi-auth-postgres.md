@@ -49,7 +49,7 @@
 - [ ] Write failing source tests that require auth state, login/register forms, `/api/auth/me`, `/api/auth/login`, `/api/auth/register`, `/api/auth/logout`, logout button, and `credentials: "same-origin"`.
 - [ ] Run focused UI source tests and confirm failures.
 - [ ] Implement frontend auth state and shell.
-- [ ] Add translated English/Russian auth labels and messages.
+- [ ] Add localized auth labels and messages.
 - [ ] Run focused UI source tests and `npm run frontend:check`.
 
 ### Task 4: Docker And Dependencies
