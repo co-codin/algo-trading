@@ -28,7 +28,6 @@ def build_quant_strategy_ideas(
     market: str,
     symbol: str,
     breadth_bars_by_symbol: Mapping[str, Sequence[Any]] | None = None,
-    futoi_records: Sequence[Any] | None = None,
 ) -> list[QuantStrategyIdea]:
     normalized_candles = list(candles)
     ideas = [
@@ -37,7 +36,6 @@ def build_quant_strategy_ideas(
         _donchian_breakout_idea(normalized_candles),
     ]
     ideas.append(_breadth_confirmation_idea(breadth_bars_by_symbol or {}))
-    ideas.append(_futoi_positioning_idea(futoi_records or (), symbol=symbol))
     return ideas
 
 
@@ -221,66 +219,6 @@ def _breadth_confirmation_idea(
         },
         reasons=reasons,
     )
-
-
-def _futoi_positioning_idea(
-    futoi_records: Sequence[Any],
-    *,
-    symbol: str,
-) -> QuantStrategyIdea:
-    latest = _latest_futoi_records(futoi_records)
-    if not latest:
-        return _neutral_idea(
-            "futoi-positioning",
-            "FUTOI positioning",
-            "positioning",
-            "No FUTOI records are available for this symbol.",
-            metrics={"record_count": 0},
-        )
-
-    net_position = sum(float(record.position) for record in latest)
-    gross_position = sum(
-        abs(float(record.position_long)) + abs(float(record.position_short))
-        for record in latest
-    )
-    ratio = 0.0 if gross_position == 0.0 else net_position / gross_position
-    score = _clamp(ratio * 100.0, -100.0, 100.0)
-    if ratio >= 0.1:
-        action = "bullish"
-        reasons = [f"Latest FUTOI net positioning is positive for {symbol}."]
-    elif ratio <= -0.1:
-        action = "bearish"
-        reasons = [f"Latest FUTOI net positioning is negative for {symbol}."]
-    else:
-        action = "neutral"
-        reasons = [f"Latest FUTOI net positioning is balanced for {symbol}."]
-
-    return QuantStrategyIdea(
-        id="futoi-positioning",
-        title="FUTOI positioning",
-        group="positioning",
-        action=action,
-        score=score,
-        confidence=_confidence(abs(score) * 3.0, len(latest) * 30),
-        metrics={
-            "net_position": round(net_position, 4),
-            "gross_position": round(gross_position, 4),
-            "net_position_ratio": round(ratio, 4),
-            "record_count": len(latest),
-        },
-        reasons=reasons,
-    )
-
-
-def _latest_futoi_records(records: Sequence[Any]) -> list[Any]:
-    if not records:
-        return []
-    latest_key = max((record.trade_date, str(record.trade_time)) for record in records)
-    return [
-        record
-        for record in records
-        if (record.trade_date, str(record.trade_time)) == latest_key
-    ]
 
 
 def _neutral_idea(

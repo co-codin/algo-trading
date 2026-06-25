@@ -1,9 +1,7 @@
 import unittest
-from datetime import date
 from unittest.mock import patch
 
 from algo_trading import jobs
-from algo_trading.futoi import FutoiRecord
 
 
 class BackgroundJobTests(unittest.TestCase):
@@ -48,84 +46,6 @@ class BackgroundJobTests(unittest.TestCase):
 
         self.assertEqual(result["requested"], 16)
         self.assertEqual(result["failed"], 0)
-
-    def test_refresh_futoi_returns_service_summary(self):
-        class FakeFutoiRefreshService:
-            def refresh_all(self):
-                return {
-                    "requested": 1,
-                    "refreshed": 1,
-                    "records": 10,
-                    "instruments": 4,
-                    "failed": 0,
-                    "skipped": 0,
-                }
-
-        with patch(
-            "algo_trading.jobs.FutoiRefreshService",
-            return_value=FakeFutoiRefreshService(),
-        ):
-            result = jobs.refresh_futoi()
-
-        self.assertEqual(result["records"], 10)
-        self.assertEqual(result["instruments"], 4)
-        self.assertEqual(result["skipped"], 0)
-
-    def test_prune_futoi_returns_service_summary(self):
-        class FakeFutoiRefreshService:
-            def prune_history(self):
-                return {"retention_days": 730, "store_deleted": 2, "csv_deleted": 2, "failed": 0}
-
-        with patch(
-            "algo_trading.jobs.FutoiRefreshService",
-            return_value=FakeFutoiRefreshService(),
-        ):
-            result = jobs.prune_futoi()
-
-        self.assertEqual(result["retention_days"], 730)
-        self.assertEqual(result["store_deleted"], 2)
-
-    def test_generate_daily_market_report_returns_report_summary(self):
-        class FakeHistoricalStore:
-            def load_futoi_records(self, **_kwargs):
-                return [
-                    FutoiRecord(
-                        trade_date=date(2024, 4, 7),
-                        trade_time="18:45:00",
-                        ticker="IMOEXF",
-                        client_group="FIZ",
-                        position=100.0,
-                        position_long=100.0,
-                        position_short=0.0,
-                        position_long_count=1,
-                        position_short_count=0,
-                    ),
-                    FutoiRecord(
-                        trade_date=date(2024, 4, 8),
-                        trade_time="18:45:00",
-                        ticker="IMOEXF",
-                        client_group="FIZ",
-                        position=180.0,
-                        position_long=180.0,
-                        position_short=0.0,
-                        position_long_count=1,
-                        position_short_count=0,
-                    ),
-                ]
-
-            def load_algopack_records(self, **_kwargs):
-                return []
-
-            def load_breadth_bars(self, _symbol):
-                return []
-
-        with patch("algo_trading.jobs.historical_store_from_env", return_value=FakeHistoricalStore()):
-            result = jobs.generate_daily_market_report(date(2024, 4, 8))
-
-        self.assertEqual(result["date"], "2024-04-08")
-        self.assertEqual(result["language"], "ru")
-        self.assertIn("IMOEXF", result["triggered_symbols"])
-        self.assertGreater(result["sections"], 0)
 
     def test_deactivate_expired_users_uses_configured_store(self):
         class FakeAuthStore:

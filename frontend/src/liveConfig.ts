@@ -36,13 +36,6 @@ export const liveCandleOptions = [
 
 export const defaultLiveIndicators = ["ema", "vwap", "volume", "rsi", "macd"];
 
-export const algopackIndicatorOptions = [
-  { value: "algopack-tradestats", dataset: "tradestats", labelKey: "indicators.tradeStats" },
-  { value: "algopack-orderstats", dataset: "orderstats", labelKey: "indicators.orderStats" },
-  { value: "algopack-obstats", dataset: "obstats", labelKey: "indicators.obStats" },
-  { value: "algopack-alerts", dataset: "alerts", labelKey: "indicators.megaAlerts" },
-] as const;
-
 export const strategyGroupCatalog: StrategyGroupDefinition[] = [
   {
     id: "recommended",

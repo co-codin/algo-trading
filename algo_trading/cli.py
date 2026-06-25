@@ -9,7 +9,6 @@ from algo_trading.data import (
     BinanceMarketDataClient,
     HistoricalMarketDataClient,
     MarketDataClient,
-    MoexSharesMarketDataClient,
     TransientMarketDataError,
     YahooFuturesMarketDataClient,
     load_candles_from_csv,
@@ -34,9 +33,6 @@ _CME_FUTURES_MARKET = "cme_futures"
 _COMMODITIES_MARKET = "commodities"
 _MAG7_STOCKS_MARKET = "mag7_stocks"
 _HONG_KONG_STOCKS_MARKET = "hong_kong_stocks"
-_RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
-_RUSSIAN_INDICES_MARKET = "russian_indices"
-_RUSSIAN_FUTURES_MARKET = "russian_futures"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -155,17 +151,6 @@ def _market_from_name(value: str) -> str:
         "hong_kong": _HONG_KONG_STOCKS_MARKET,
         "hong_kong_stocks": _HONG_KONG_STOCKS_MARKET,
         "hong-kong-stocks": _HONG_KONG_STOCKS_MARKET,
-        "moex": _RUSSIAN_BLUECHIPS_MARKET,
-        "russian": _RUSSIAN_BLUECHIPS_MARKET,
-        "russian_bluechips": _RUSSIAN_BLUECHIPS_MARKET,
-        "ru_bluechips": _RUSSIAN_BLUECHIPS_MARKET,
-        "russian_indices": _RUSSIAN_INDICES_MARKET,
-        "russian_index": _RUSSIAN_INDICES_MARKET,
-        "moex_indices": _RUSSIAN_INDICES_MARKET,
-        "moex_index": _RUSSIAN_INDICES_MARKET,
-        "russian_futures": _RUSSIAN_FUTURES_MARKET,
-        "moex_futures": _RUSSIAN_FUTURES_MARKET,
-        "rtsi_futures": _RUSSIAN_FUTURES_MARKET,
     }
     try:
         return aliases[market]
@@ -183,12 +168,6 @@ def _market_client_for_name(market: str) -> HistoricalMarketDataClient:
         _HONG_KONG_STOCKS_MARKET,
     ):
         return YahooFuturesMarketDataClient()
-    if market in {
-        _RUSSIAN_BLUECHIPS_MARKET,
-        _RUSSIAN_INDICES_MARKET,
-        _RUSSIAN_FUTURES_MARKET,
-    }:
-        return MoexSharesMarketDataClient()
     raise ValueError(f"unsupported market: {market}")
 
 
@@ -400,7 +379,7 @@ def _add_candles_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     parser.add_argument(
         "--market",
         default=_CRYPTO_SPOT_MARKET,
-        help="market provider: crypto_spot/binance, cme_futures/yahoo, commodities, mag7_stocks, hong_kong_stocks, russian_bluechips/moex, russian_indices, or russian_futures",
+        help="market provider: crypto_spot/binance, cme_futures/yahoo, commodities, mag7_stocks, or hong_kong_stocks",
     )
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--interval", default="1h")

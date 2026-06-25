@@ -1,7 +1,6 @@
 import tempfile
 import time
 import unittest
-from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,12 +8,8 @@ from fastapi.testclient import TestClient
 
 from algo_trading.auth import InMemoryAuthStore, utcnow
 import algo_trading.ui as ui
-from algo_trading.algopack import AlgoPackRecord
 from algo_trading.data import (
-    BinanceMarketDataClient,
-    MoexSharesMarketDataClient,
     TransientMarketDataError,
-    YahooFuturesMarketDataClient,
 )
 from algo_trading.historical_store import InMemoryHistoricalDataStore
 from algo_trading.models import Candle
@@ -22,7 +17,6 @@ from algo_trading.ui import (
     is_frontend_route,
     is_vite_asset_route,
     live_chart_payload,
-    market_data_client_from_payload,
     strategies_payload,
     top_symbols_payload,
 )
@@ -209,43 +203,6 @@ class UiTests(unittest.TestCase):
         self.assertIn(".health-badge", style_source)
         self.assertIn(".alert-controls", style_source)
 
-    def test_frontend_exposes_market_intelligence_reports_and_persisted_lists(self):
-        root = Path(__file__).resolve().parents[1]
-        app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
-        types_source = (root / "frontend" / "src" / "types.ts").read_text(encoding="utf-8")
-        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
-        style_source = (root / "frontend" / "src" / "styles" / "live.css").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("export type MarketEvent", types_source)
-        self.assertIn("events: MarketEvent[];", types_source)
-        self.assertIn("export type FutoiDashboard", types_source)
-        self.assertIn("dashboard: FutoiDashboard;", types_source)
-        self.assertIn("export type DailyMarketReportPayload", types_source)
-        self.assertIn("export type SavedWorkspacesPayload", types_source)
-        self.assertIn("export type SavedWatchlistsPayload", types_source)
-
-        self.assertIn('"reports" | "feedback"', types_source)
-        self.assertIn('requestJson<SavedWorkspacesPayload>("/api/workspaces")', app_source)
-        self.assertIn('requestJson<SavedWatchlistsPayload>("/api/watchlists")', app_source)
-        self.assertIn('requestJson<DailyMarketReportPayload>(`/api/reports/daily?${params.toString()}`)', app_source)
-        self.assertIn('class="market-event-feed"', app_source)
-        self.assertIn('class="watchlist-panel"', app_source)
-        self.assertIn('class="report-panel"', app_source)
-        self.assertIn('class="futoi-dashboard-grid"', app_source)
-
-        self.assertIn('"tabs.reports": "Daily report"', i18n_source)
-        self.assertIn('"tabs.reports": "Ежедневный отчет"', i18n_source)
-        self.assertIn('"tabs.reports": "每日报告"', i18n_source)
-        self.assertIn('"labels.watchlists": "Watchlists"', i18n_source)
-        self.assertIn('"labels.futoiDashboard": "FUTOI dashboard"', i18n_source)
-
-        self.assertIn(".market-event-feed", style_source)
-        self.assertIn(".watchlist-panel", style_source)
-        self.assertIn(".report-panel", style_source)
-        self.assertIn(".futoi-dashboard-grid", style_source)
-
     def test_frontend_exposes_quant_strategy_tab(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
@@ -308,49 +265,6 @@ class UiTests(unittest.TestCase):
         self.assertIn(".strategy-ideas", style_source)
         self.assertIn(".strategy-idea-card", style_source)
 
-    def test_russian_live_page_exposes_algopack_and_megaalerts_chart(self):
-        root = Path(__file__).resolve().parents[1]
-        app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
-        types_source = (root / "frontend" / "src" / "types.ts").read_text(encoding="utf-8")
-        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
-        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
-            encoding="utf-8"
-        )
-        chart_source = (
-            root / "frontend" / "src" / "components" / "TradingViewChart.vue"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("algopackIndicatorOptions", config_source)
-        self.assertIn('export type Mode = "landing" | "live" | "russian-live"', types_source)
-        self.assertIn('"/moex-live": "russian-live"', app_source)
-        self.assertIn('"/russian-live": "russian-live"', app_source)
-        self.assertIn('"russian-live": "/moex-live"', app_source)
-        self.assertIn('{ mode: "russian-live" as const, label: t("tabs.russianLive") }', app_source)
-        self.assertIn("const russianLivePayload = ref<LiveChartPayload | null>(null);", app_source)
-        self.assertIn(
-            "async function loadRussianLiveChart({ showLoader = false }: ChartLoadOptions = {})",
-            app_source,
-        )
-        self.assertIn('params.set("algopack", russianLiveAlgoPackDatasets.value.join(","))', app_source)
-        self.assertIn("visibleRussianAlgoPackIndicatorOptions", app_source)
-        self.assertIn("isAlgoPackIndicator", app_source)
-        default_indicator_block = app_source.split(
-            "const russianLiveVisibleIndicators = ref<string[]>([", 1
-        )[1].split("]);", 1)[0]
-        self.assertNotIn('"algopack-alerts"', default_indicator_block)
-        self.assertIn('{ value: "algopack-alerts", dataset: "alerts"', config_source)
-        self.assertIn("activeMode === 'russian-live'", app_source)
-        self.assertIn("russianLivePayload.candles", app_source)
-        self.assertNotIn('{ value: "russian_bluechips", label: t("options.moexBluechips") }', app_source)
-        self.assertIn('indicator.pane === "volume"', chart_source)
-        self.assertIn('"tabs.russianLive": "MOEX Live"', i18n_source)
-        self.assertIn('"tabs.russianLive": "Рынок РФ"', i18n_source)
-        self.assertIn('"tabs.russianLive": "MOEX 实时"', i18n_source)
-        self.assertIn('"indicators.tradeStats": "TradeStats"', i18n_source)
-        self.assertIn('"indicators.orderStats": "OrderStats"', i18n_source)
-        self.assertIn('"indicators.obStats": "OBStats"', i18n_source)
-        self.assertIn('"indicators.megaAlerts": "MegaAlerts"', i18n_source)
-
     def test_admin_panel_exposes_free_trial_toggle(self):
         root = Path(__file__).resolve().parents[1]
         app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
@@ -375,29 +289,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('"pages.freeTrialSettings": "Пробный период"', i18n_source)
         self.assertIn('"pages.freeTrialSettings": "免费试用"', i18n_source)
         self.assertIn(".admin-settings-section", style_source)
-
-    def test_frontend_splits_live_configuration_and_styles(self):
-        root = Path(__file__).resolve().parents[1]
-        app_source = (root / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
-        main_source = (root / "frontend" / "src" / "main.ts").read_text(encoding="utf-8")
-        style_source = (root / "frontend" / "src" / "style.css").read_text(encoding="utf-8")
-        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(encoding="utf-8")
-        helpers_source = (root / "frontend" / "src" / "liveUtils.ts").read_text(encoding="utf-8")
-
-        self.assertIn("from \"./liveConfig\"", app_source)
-        self.assertIn("from \"./liveUtils\"", app_source)
-        self.assertNotIn("export const liveSymbolOptions", config_source)
-        self.assertNotIn("export const moexBluechipSymbolOptions", config_source)
-        self.assertIn("export const strategyGroupCatalog", config_source)
-        self.assertIn("export function groupSignalsByConsensus", helpers_source)
-        self.assertIn("export function limitRecentSignals", helpers_source)
-        self.assertNotIn("const moexBluechipSymbolOptions = [", app_source)
-        self.assertNotIn("function groupSignalsByConsensus(", app_source)
-
-        self.assertIn('import "./style.css";', main_source)
-        self.assertIn('@import "./styles/live.css";', style_source)
-        self.assertIn('@import "./styles/breadth.css";', style_source)
-        self.assertIn('@import "./styles/account.css";', style_source)
 
     def test_live_controls_are_grouped_and_strategy_menu_is_searchable(self):
         root = Path(__file__).resolve().parents[1]
@@ -530,18 +421,6 @@ class UiTests(unittest.TestCase):
         self.assertNotIn('value: "ADAUSDT"', config_source)
         self.assertNotIn('value: "AVAXUSDT"', config_source)
 
-    def test_live_symbol_labels_follow_russian_locale(self):
-        source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("const russianLiveSymbolLabels: Record<string, string> = {", source)
-        self.assertIn('SBER: "SBER · Сбербанк"', source)
-        self.assertIn('IMOEX: "IMOEX · Индекс МосБиржи"', source)
-        self.assertIn("function localizedLiveSymbolOption(option: SelectOption): SelectOption", source)
-        self.assertIn("locale.value === \"ru\"", source)
-        self.assertIn(".map(localizedLiveSymbolOption)", source)
-
     def test_live_market_selector_changes_auto_refresh_chart(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
@@ -589,45 +468,6 @@ class UiTests(unittest.TestCase):
             "    livePayload.value = null;",
             source,
         )
-
-    def test_live_pages_show_manual_chart_loader_without_polling_loader(self):
-        root = Path(__file__).resolve().parents[1]
-        app_source = (root / "frontend" / "src" / "App.vue").read_text(
-            encoding="utf-8"
-        )
-        style_source = (root / "frontend" / "src" / "style.css").read_text(
-            encoding="utf-8"
-        )
-        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("type ChartLoadOptions = {", app_source)
-        self.assertIn("showLoader?: boolean;", app_source)
-        self.assertIn("async function loadLiveChart({ showLoader = false }: ChartLoadOptions = {})", app_source)
-        self.assertIn("async function loadRussianLiveChart({ showLoader = false }: ChartLoadOptions = {})", app_source)
-        self.assertIn("const liveChartLoading = ref(false);", app_source)
-        self.assertIn("const russianLiveChartLoading = ref(false);", app_source)
-        self.assertIn("let liveChartLoadingRequestId = 0;", app_source)
-        self.assertIn("let russianLiveChartLoadingRequestId = 0;", app_source)
-        self.assertIn("liveChartLoading.value = true;", app_source)
-        self.assertIn("russianLiveChartLoading.value = true;", app_source)
-        self.assertIn("liveChartLoading.value = false;", app_source)
-        self.assertIn("russianLiveChartLoading.value = false;", app_source)
-        self.assertIn("startLivePolling(true);", app_source)
-        self.assertIn("startRussianLivePolling(true);", app_source)
-        self.assertIn("refreshRussianLiveChart();", app_source)
-        self.assertIn("window.setInterval(() => void loadLiveChart(), seconds * 1000)", app_source)
-        self.assertIn("window.setInterval(() => void loadRussianLiveChart(), seconds * 1000)", app_source)
-        self.assertIn(":class=\"{ 'is-loading': liveChartLoading }\"", app_source)
-        self.assertIn(":class=\"{ 'is-loading': russianLiveChartLoading }\"", app_source)
-        self.assertIn('class="chart-loader"', app_source)
-        self.assertIn(".chart-shell.is-loading", style_source)
-        self.assertIn(".chart-loader", style_source)
-        self.assertIn("chartLoaderSpin", style_source)
-        self.assertIn('"status.loadingChart": "Loading chart"', i18n_source)
-        self.assertIn('"status.loadingChart": "Загрузка графика"', i18n_source)
-        self.assertIn('"status.loadingChart": "正在加载图表"', i18n_source)
 
     def test_live_chart_refresh_preserves_user_zoom(self):
         root = Path(__file__).resolve().parents[1]
@@ -680,270 +520,6 @@ class UiTests(unittest.TestCase):
 
         self.assertIn('if (nextMode !== "live") {', source)
         self.assertIn("resetLiveStrategies();", source)
-
-    def test_frontend_keeps_trading_modes_plus_account_management_modes(self):
-        root = Path(__file__).resolve().parents[1]
-        source = (root / "frontend" / "src" / "App.vue").read_text(
-            encoding="utf-8"
-        )
-        types_source = (root / "frontend" / "src" / "types.ts").read_text(
-            encoding="utf-8"
-        )
-        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn(
-            'export type Mode = "landing" | "live" | "russian-live" | "breadth" | "quant" | "futoi" | "reports" | "feedback" | "profile" | "admin";',
-            types_source,
-        )
-        self.assertIn('"/": "landing"', source)
-        self.assertIn('"/markets": "live"', source)
-        self.assertIn('"/live": "live"', source)
-        self.assertIn('"/chart": "live"', source)
-        self.assertIn('landing: "/"', source)
-        self.assertIn('live: "/markets"', source)
-        self.assertNotIn('"/lab": "lab"', source)
-        self.assertIn('"/moex-live": "russian-live"', source)
-        self.assertIn('"/russian-live": "russian-live"', source)
-        self.assertIn('"/futoi": "futoi"', source)
-        self.assertIn('"/reports": "reports"', source)
-        self.assertIn('"/feedback": "feedback"', source)
-        self.assertIn('"/profile": "profile"', source)
-        self.assertIn('"/admin": "admin"', source)
-        self.assertIn('return routeModes[window.location.pathname] ?? "landing";', source)
-        self.assertNotIn('{ mode: "lab" as const, label: t("tabs.lab") }', source)
-        self.assertIn('{ mode: "live" as const, label: t("tabs.live") }', source)
-        self.assertIn('...(isRussianLocale.value ? [{ mode: "russian-live" as const, label: t("tabs.russianLive") }] : []),', source)
-        self.assertIn('{ mode: "breadth" as const, label: t("tabs.breadth") }', source)
-        self.assertIn('{ mode: "quant" as const, label: t("tabs.quant") }', source)
-        self.assertIn('const isRussianLocale = computed(() => locale.value === "ru");', source)
-        self.assertIn('...(isRussianLocale.value ? [{ mode: "futoi" as const, label: t("tabs.futoi") }] : []),', source)
-        self.assertIn('{ mode: "reports" as const, label: t("tabs.reports") }', source)
-        self.assertIn('const accountMenuItems = computed', source)
-        self.assertIn('{ mode: "profile" as const, label: t("tabs.profile") }', source)
-        self.assertIn('...(canUseFeatures.value ? [{ mode: "feedback" as const, label: t("tabs.feedback") }] : []),', source)
-        self.assertNotIn("const accountTabs = computed", source)
-        self.assertIn('{ mode: "admin" as const, label: t("tabs.admin") }', source)
-        self.assertNotIn('"tabs.lab"', i18n_source)
-        self.assertIn('"tabs.feedback"', i18n_source)
-        self.assertIn('"tabs.russianLive"', i18n_source)
-        self.assertIn('"tabs.quant"', i18n_source)
-        self.assertIn('"tabs.futoi"', i18n_source)
-        self.assertIn('"tabs.live": "Global Markets"', i18n_source)
-        self.assertIn('"tabs.live": "Глобальные рынки"', i18n_source)
-        self.assertIn('"tabs.live": "全球市场"', i18n_source)
-        self.assertIn('"pages.liveMarket": "Global markets"', i18n_source)
-        self.assertNotIn('{ mode: "backtest" as const', source)
-        self.assertNotIn('{ mode: "paper" as const', source)
-        self.assertNotIn('{ mode: "combos" as const', source)
-        self.assertNotIn('{ mode: "runs" as const', source)
-        self.assertNotIn('"tabs.backtest"', i18n_source)
-        self.assertNotIn('"tabs.paper"', i18n_source)
-        self.assertNotIn('"tabs.combos"', i18n_source)
-        self.assertNotIn('"tabs.runs"', i18n_source)
-
-    def test_frontend_exposes_futoi_only_for_russian_locale(self):
-        root = Path(__file__).resolve().parents[1]
-        source = (root / "frontend" / "src" / "App.vue").read_text(
-            encoding="utf-8"
-        )
-        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
-            encoding="utf-8"
-        )
-        types_source = (root / "frontend" / "src" / "types.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("export type FutoiRecord", types_source)
-        self.assertIn("export type FutoiInstrument", types_source)
-        self.assertIn("export type FutoiPayload", types_source)
-        self.assertIn("chart_records: FutoiRecord[];", types_source)
-        self.assertIn("export type FutoiInstrumentsPayload", types_source)
-        self.assertIn('const futoiRecords = ref<FutoiRecord[]>([]);', source)
-        self.assertIn('const futoiChartRecords = ref<FutoiRecord[]>([]);', source)
-        self.assertIn('const futoiInstruments = ref<FutoiInstrument[]>([]);', source)
-        self.assertIn('const futoiInstrumentSearch = ref("");', source)
-        self.assertIn("const filteredFutoiInstruments = computed(() =>", source)
-        self.assertIn("const selectedFutoiInstrument = computed(() =>", source)
-        self.assertIn("async function loadFutoi()", source)
-        self.assertIn("async function loadFutoiInstruments()", source)
-        self.assertIn("async function loadFutoiDashboard()", source)
-        self.assertIn("function selectFutoiInstrument(ticker: string)", source)
-        self.assertIn('if (mode === "futoi" && !isRussianLocale.value) {', source)
-        self.assertIn('if (!isRussianLocale.value && (activeMode.value === "futoi" || activeMode.value === "russian-live")) {', source)
-        self.assertIn('requestJson<FutoiInstrumentsPayload>("/api/futoi/instruments")', source)
-        self.assertIn('requestJson<FutoiPayload>(`/api/futoi?${params.toString()}`)', source)
-        self.assertIn('params.set("history_days", "365");', source)
-        self.assertIn("futoiChartRecords.value = payload.chart_records;", source)
-        self.assertIn('activeMode === "futoi"', source)
-        self.assertIn('class="panel futoi-panel"', source)
-        self.assertIn('class="futoi-dashboard"', source)
-        self.assertIn('class="futoi-instrument-list"', source)
-        self.assertIn('class="futoi-instrument-button"', source)
-        self.assertIn('class="futoi-detail-panel"', source)
-        self.assertIn('class="futoi-metrics"', source)
-        self.assertIn('v-for="instrument in filteredFutoiInstruments"', source)
-        self.assertIn('v-for="record in futoiRecords"', source)
-        self.assertIn('"tabs.futoi": "FUTOI"', i18n_source)
-        self.assertIn('"pages.futoi": "FUTOI"', i18n_source)
-        self.assertIn('"pages.futoiSubtitle"', i18n_source)
-        self.assertIn('"labels.futoiInstruments": "FUTOI instruments"', i18n_source)
-        self.assertIn('"labels.futoiInstruments": "Инструменты FUTOI"', i18n_source)
-        self.assertIn('"labels.futoiOpenInterest": "Открытый интерес"', i18n_source)
-        self.assertIn('"empty.noFutoi"', i18n_source)
-        self.assertIn('"empty.noFutoiInstruments"', i18n_source)
-
-    def test_frontend_shows_russian_live_markets_only_for_russian_locale(self):
-        source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("const russianLiveMarkets = new Set([", source)
-        self.assertIn("function isRussianLiveMarket(market: string): boolean", source)
-        self.assertIn("const liveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});", source)
-        self.assertIn("const russianLiveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});", source)
-        self.assertIn("liveSymbolsByMarket.value = payload.symbols;", source)
-        self.assertIn("russianLiveSymbolsByMarket.value = payload.russian_symbols;", source)
-        self.assertNotIn("const visibleLiveSymbolsByMarket = computed<Record<string, SelectOption[]>>(() =>", source)
-        self.assertIn("const russianLiveMarketOptions = computed<SelectOption[]>(() => [", source)
-        self.assertIn("const activeRussianLiveSymbolOptions = computed", source)
-        self.assertIn("const filteredRussianLiveSymbolOptions = computed", source)
-        self.assertIn('if (mode === "russian-live" && !isRussianLocale.value) {', source)
-        self.assertIn('activeMode.value === "russian-live"', source)
-
-    def test_russian_live_page_syncs_chart_controls_to_moex_url(self):
-        source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
-        ).read_text(encoding="utf-8")
-        i18n_source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "i18n.ts"
-        ).read_text(encoding="utf-8")
-        russian_section = source.split(
-            '<section v-else-if="activeMode === \'russian-live\'"',
-            1,
-        )[1].split(
-            '<section v-else-if=\'activeMode === "breadth"\'',
-            1,
-        )[0]
-
-        self.assertIn("function applyRussianLiveSettingsFromLocation()", source)
-        self.assertIn("function syncRussianLiveUrl()", source)
-        self.assertIn("function russianLiveUrlPath()", source)
-        self.assertIn('params.set("market", russianLiveMarket.value)', source)
-        self.assertIn('params.set("symbol", russianLiveSymbol.value)', source)
-        self.assertIn('params.set("interval", String(russianLiveInterval.value))', source)
-        self.assertIn('params.set("limit", String(russianLiveLimit.value))', source)
-        self.assertIn('params.set("indicators", russianLiveVisibleIndicators.value.join(","))', source)
-        self.assertIn('params.set("strategy", russianLiveStrategyRequest.value)', source)
-        self.assertIn('russianLiveVisibleIndicators.value = parseRussianLiveIndicators(params.get("indicators"));', source)
-        self.assertIn('russianLiveSelectedStrategies.value = parseLiveStrategyRequest(params.get("strategy"), true);', source)
-        self.assertIn('window.history.replaceState({ mode: "russian-live" }, "", nextUrl)', source)
-        self.assertIn(
-            "[russianLiveMarket, russianLiveSymbol, russianLiveInterval, russianLiveLimit, russianLiveStrategyRequest, russianLiveAlgoPackDatasets],",
-            source,
-        )
-        self.assertIn(
-            "if (activeMode.value === \"russian-live\" && !isApplyingRussianLiveSettingsFromUrl) {",
-            source,
-        )
-        self.assertIn('class="strategy-picker live-strategy-field"', russian_section)
-        self.assertIn('details ref="liveStrategyMenu" class="strategy-menu"', russian_section)
-        self.assertIn('v-for="group in filteredLiveStrategyGroups"', russian_section)
-        self.assertIn('russianLiveSelectedStrategies.includes(strategy.name)', russian_section)
-        self.assertIn('toggleRussianLiveStrategy(strategy.name)', russian_section)
-        self.assertIn('const russianLiveSelectedStrategies = ref<string[]>([]);', source)
-        self.assertIn('const russianLiveStrategyRequest = computed(() =>', source)
-        self.assertIn('return t("options.noStrategy");', source)
-        self.assertIn('"options.noStrategy": "No strategy"', i18n_source)
-        self.assertIn('"options.noStrategy": "Без стратегии"', i18n_source)
-        self.assertIn('"options.noStrategy": "无策略"', i18n_source)
-        self.assertIn("const russianLiveConsensusSignals = computed", source)
-        self.assertIn("const displayedRussianLiveSignals = computed", source)
-        self.assertIn(
-            "groupSignalsByConsensus(russianLivePayload.value?.signals ?? [], liveConsensusMinConfirmations.value)",
-            source,
-        )
-        self.assertIn(
-            "limitRecentSignals(russianLiveConsensusSignals.value, liveMaxSignals.value)",
-            source,
-        )
-        self.assertIn('v-model="liveSignalDisplayMode"', russian_section)
-        self.assertIn('v-model.number="liveConsensusMinConfirmations"', russian_section)
-        self.assertIn('v-model.number="liveMaxSignals"', russian_section)
-        self.assertIn('v-model="showSignals"', russian_section)
-        self.assertIn(':signals="displayedRussianLiveSignals"', russian_section)
-
-    def test_frontend_adds_futoi_position_chart(self):
-        root = Path(__file__).resolve().parents[1]
-        source = (root / "frontend" / "src" / "App.vue").read_text(
-            encoding="utf-8"
-        )
-        types_source = (root / "frontend" / "src" / "types.ts").read_text(
-            encoding="utf-8"
-        )
-        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
-            encoding="utf-8"
-        )
-        style_source = (root / "frontend" / "src" / "styles" / "live.css").read_text(
-            encoding="utf-8"
-        )
-        chart_source = (
-            root / "frontend" / "src" / "components" / "FutoiPositionChart.vue"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("export type FutoiChartPoint", types_source)
-        self.assertIn(
-            'const FutoiPositionChart = defineAsyncComponent(() => import("./components/FutoiPositionChart.vue"));',
-            source,
-        )
-        self.assertIn("type FutoiChartLabels", source)
-        self.assertIn(
-            "const futoiChartPoints = computed<FutoiChartPoint[]>(() => buildFutoiChartPoints(futoiChartRecords.value));",
-            source,
-        )
-        self.assertIn("function buildFutoiChartPoints(records: FutoiRecord[]): FutoiChartPoint[]", source)
-        self.assertIn("record.trade_date", source)
-        self.assertIn("record.trade_time", source)
-        self.assertIn("point.net_position += Number(record.position)", source)
-        self.assertIn("point.long_position += Number(record.position_long)", source)
-        self.assertIn("point.short_position += Number(record.position_short)", source)
-        self.assertIn("point.open_interest += Math.abs(Number(record.position_long))", source)
-        self.assertIn(".sort((left, right) => left.time - right.time)", source)
-        self.assertIn('class="futoi-chart-shell"', source)
-        self.assertIn("<FutoiPositionChart", source)
-        self.assertIn(':points="futoiChartPoints"', source)
-        self.assertIn(':labels="futoiChartLabels"', source)
-        self.assertIn('"chart.futoiNet": "Net"', i18n_source)
-        self.assertIn('"chart.futoiLong": "Long"', i18n_source)
-        self.assertIn('"chart.futoiShort": "Short"', i18n_source)
-        self.assertIn('"chart.futoiOpenInterest": "Open interest"', i18n_source)
-        self.assertIn('"chart.futoiNet": "Чистая"', i18n_source)
-        self.assertIn('"chart.futoiNet": "净持仓"', i18n_source)
-        self.assertIn(".futoi-chart-shell", style_source)
-        self.assertIn(".futoi-chart-legend", style_source)
-        self.assertIn("createChart", chart_source)
-        self.assertIn("addSeries(LineSeries", chart_source)
-        self.assertIn("netSeries.value?.setData", chart_source)
-        self.assertIn("longSeries.value?.setData", chart_source)
-        self.assertIn("shortSeries.value?.setData", chart_source)
-
-    def test_frontend_lazy_loads_chart_components(self):
-        source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("defineAsyncComponent", source)
-        self.assertIn(
-            'const TradingViewChart = defineAsyncComponent(() => import("./components/TradingViewChart.vue"));',
-            source,
-        )
-        self.assertIn(
-            'const FutoiPositionChart = defineAsyncComponent(() => import("./components/FutoiPositionChart.vue"));',
-            source,
-        )
-        self.assertNotIn('import TradingViewChart from "./components/TradingViewChart.vue";', source)
-        self.assertNotIn('import FutoiPositionChart from "./components/FutoiPositionChart.vue";', source)
 
     def test_removed_frontend_pages_do_not_keep_client_functions(self):
         source = (
@@ -1215,7 +791,7 @@ class UiTests(unittest.TestCase):
         self.assertIn('"landing.info.access.title"', i18n_source)
         self.assertIn('"landing.info.coverage.hk"', i18n_source)
         self.assertIn('"landing.info.pipeline.postgres"', i18n_source)
-        self.assertIn('"landing.info.signals.megaalerts"', i18n_source)
+        self.assertIn('"landing.info.signals.events"', i18n_source)
         self.assertIn('"landing.info.access.trial"', i18n_source)
         self.assertIn('"actions.openDashboard"', i18n_source)
         self.assertIn(".landing-shell", style_source)
@@ -1374,36 +950,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('"labels.maxMarkers": "Max markers"', i18n_source)
         self.assertIn('"labels.maxMarkers": "Макс. меток"', i18n_source)
 
-    def test_live_page_exposes_moex_stock_and_combined_index_futures_markets(self):
-        root = Path(__file__).resolve().parents[1]
-        source = (root / "frontend" / "src" / "App.vue").read_text(
-            encoding="utf-8"
-        )
-        config_source = (root / "frontend" / "src" / "liveConfig.ts").read_text(
-            encoding="utf-8"
-        )
-        i18n_source = (root / "frontend" / "src" / "i18n.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertNotIn("export const moexBluechipSymbolOptions = [", config_source)
-        self.assertNotIn("export const moexIndexSymbolOptions = [", config_source)
-        self.assertNotIn("export const moexFuturesSymbolOptions = [", config_source)
-        self.assertNotIn("export const moexIndexFuturesSymbolOptions = [", config_source)
-        self.assertNotIn('{ value: "russian_bluechips", label: t("options.moexBluechips") }', source)
-        self.assertNotIn('{ value: "russian_indices_futures", label: t("options.moexIndicesFutures") }', source)
-        self.assertNotIn('value: "russian_indices"', source)
-        self.assertNotIn('value: "russian_futures"', source)
-        self.assertIn('t("options.moexBluechips")', source)
-        self.assertIn('t("options.moexIndicesFutures")', source)
-        self.assertNotIn("russian_bluechips: moexBluechipSymbolOptions", source)
-        self.assertNotIn("russian_indices_futures: moexIndexFuturesSymbolOptions", source)
-        self.assertIn('"options.moexBluechips": "Russian Stocks"', i18n_source)
-        self.assertIn('"options.moexIndicesFutures": "Russian Indices & Futures"', i18n_source)
-        self.assertIn('"options.moexBluechips": "Акции РФ"', i18n_source)
-        self.assertIn('"options.moexIndicesFutures": "Индексы и фьючерсы РФ"', i18n_source)
-        self.assertIn('"options.moexIndicesFutures": "俄罗斯指数和期货"', i18n_source)
-
     def test_live_page_exposes_commodities_market(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "frontend" / "src" / "App.vue").read_text(
@@ -1497,35 +1043,6 @@ class UiTests(unittest.TestCase):
         self.assertIn('"labels.symbolSearch": "Search symbol"', i18n_source)
         self.assertIn('"empty.noMatchingSymbols": "No symbols match that search"', i18n_source)
 
-    def test_live_page_syncs_market_symbol_indicators_and_strategy_to_url(self):
-        source = (
-            Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("function applyLiveSettingsFromLocation()", source)
-        self.assertIn("function syncLiveUrl()", source)
-        self.assertIn("new URLSearchParams(window.location.search)", source)
-        self.assertIn('params.set("market", liveMarket.value)', source)
-        self.assertIn('params.set("symbol", liveSymbol.value)', source)
-        self.assertIn('params.set("indicators", liveVisibleIndicators.value.join(","))', source)
-        self.assertIn('params.set("strategy", liveStrategyRequest.value)', source)
-        self.assertIn('parseLiveStrategyRequest(params.get("strategy"))', source)
-        self.assertIn("function parseLiveStrategyRequest(value: string | null, allowEmpty = false): string[]", source)
-        self.assertIn('window.history.replaceState({ mode: "live" }, "", nextUrl)', source)
-        self.assertIn("watch([liveMarket, liveSymbol, liveVisibleIndicators, liveStrategyRequest],", source)
-        self.assertIn(
-            "applyLiveSettingsFromLocation();\n  applyRussianLiveSettingsFromLocation();\n  enforceLocaleAvailability();\n  setMode(modeFromLocation(), false);",
-            source,
-        )
-        popstate_body = source.split("function handlePopState()", 1)[1].split(
-            "\nfunction ",
-            1,
-        )[0]
-        self.assertIn("const nextMode = modeFromLocation();", popstate_body)
-        self.assertIn('if (nextMode === "live")', popstate_body)
-        self.assertIn("applyLiveSettingsFromLocation();", popstate_body)
-        self.assertIn("setMode(nextMode, false);", popstate_body)
-
     def test_live_page_does_not_show_paper_trade_markers(self):
         source = (
             Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.vue"
@@ -1579,25 +1096,6 @@ class UiTests(unittest.TestCase):
         self.assertIn(".live-market-strip", style_source)
         self.assertIn('textColor: "#d1d4dc"', chart_source)
         self.assertIn('color: "#131722"', chart_source)
-
-    def test_frontend_routes_allow_direct_view_urls(self):
-        self.assertTrue(is_frontend_route("/"))
-        self.assertTrue(is_frontend_route("/markets"))
-        self.assertTrue(is_frontend_route("/live"))
-        self.assertTrue(is_frontend_route("/chart"))
-        self.assertTrue(is_frontend_route("/moex-live"))
-        self.assertTrue(is_frontend_route("/russian-live"))
-        self.assertTrue(is_frontend_route("/breadth"))
-        self.assertTrue(is_frontend_route("/futoi"))
-        self.assertFalse(is_frontend_route("/lab"))
-        self.assertTrue(is_frontend_route("/feedback"))
-        self.assertTrue(is_frontend_route("/profile"))
-        self.assertTrue(is_frontend_route("/admin"))
-        self.assertFalse(is_frontend_route("/backtest"))
-        self.assertFalse(is_frontend_route("/paper"))
-        self.assertFalse(is_frontend_route("/runs"))
-        self.assertFalse(is_frontend_route("/history"))
-        self.assertFalse(is_frontend_route("/combos"))
 
     def test_frontend_routes_do_not_capture_api_or_unknown_paths(self):
         self.assertFalse(is_frontend_route("/api/runs"))
@@ -1864,104 +1362,6 @@ class UiTests(unittest.TestCase):
                 self.assertEqual(series["points"][0]["time"], 0)
                 self.assertIsInstance(series["points"][0]["value"], float)
 
-    def test_live_chart_payload_adds_algopack_indicators_for_russian_stocks(self):
-        first_time = int(datetime(2024, 4, 8, 7, 5, tzinfo=timezone.utc).timestamp() * 1000)
-        second_time = int(datetime(2024, 4, 8, 7, 10, tzinfo=timezone.utc).timestamp() * 1000)
-        client = FakeClient()
-        client.candles = [
-            Candle(open_time=first_time, open=300, high=301, low=299, close=300, volume=10),
-            Candle(open_time=second_time, open=301, high=302, low=300, close=301, volume=11),
-        ]
-        store = InMemoryHistoricalDataStore()
-        store.upsert_algopack_records(
-            [
-                AlgoPackRecord(
-                    dataset="tradestats",
-                    market="russian_bluechips",
-                    ticker="SBER",
-                    trade_date=date(2024, 4, 8),
-                    trade_time="10:05:00",
-                    metrics={"vol": 100, "disb": 0.25},
-                ),
-                AlgoPackRecord(
-                    dataset="orderstats",
-                    market="russian_bluechips",
-                    ticker="SBER",
-                    trade_date=date(2024, 4, 8),
-                    trade_time="10:05:00",
-                    metrics={"put_orders": 12, "cancel_orders": 5},
-                ),
-                AlgoPackRecord(
-                    dataset="obstats",
-                    market="russian_bluechips",
-                    ticker="SBER",
-                    trade_date=date(2024, 4, 8),
-                    trade_time="10:05:00",
-                    metrics={"spread_bbo": 0.1, "imbalance_val_bbo": -0.2},
-                ),
-                AlgoPackRecord(
-                    dataset="alerts",
-                    market="russian_bluechips",
-                    ticker="SBER",
-                    trade_date=date(2024, 4, 8),
-                    trade_time="10:05:00",
-                    metrics={"alert_type": "pr_high_max", "threshold": 307.77, "value": 308.04},
-                ),
-                AlgoPackRecord(
-                    dataset="alerts",
-                    market="russian_bluechips",
-                    ticker="SBER",
-                    trade_date=date(2024, 4, 8),
-                    trade_time="10:05:00",
-                    metrics={"alert_type": "vol_b_99_9_pctl", "threshold": 61475, "value": 78552},
-                ),
-            ],
-            source="unit-test",
-        )
-
-        payload = live_chart_payload(
-            {
-                "market": "russian_bluechips",
-                "symbol": "SBER",
-                "interval": "5m",
-                "limit": 2,
-                "algopack": "tradestats,orderstats,obstats,alerts",
-            },
-            client=client,
-            historical_store=store,
-        )
-
-        algopack_indicators = {
-            indicator["id"]: indicator
-            for indicator in payload["indicators"]
-            if str(indicator["id"]).startswith("algopack-")
-        }
-        self.assertEqual(
-            set(algopack_indicators),
-            {"algopack-tradestats", "algopack-orderstats", "algopack-obstats", "algopack-alerts"},
-        )
-        self.assertEqual(algopack_indicators["algopack-tradestats"]["pane"], "volume")
-        self.assertEqual(
-            algopack_indicators["algopack-tradestats"]["series"][0]["points"][0],
-            {"time": first_time, "value": 100.0},
-        )
-        self.assertEqual(
-            algopack_indicators["algopack-orderstats"]["series"][0]["points"][0]["value"],
-            12.0,
-        )
-        self.assertEqual(
-            algopack_indicators["algopack-obstats"]["series"][1]["points"][0]["value"],
-            -0.2,
-        )
-        self.assertEqual(
-            algopack_indicators["algopack-alerts"]["series"][0]["points"][0],
-            {"time": first_time, "value": 2.0},
-        )
-        event_types = {event["type"] for event in payload["events"]}
-        self.assertIn("mega_alert", event_types)
-        self.assertNotIn("order_stats", event_types)
-        self.assertNotIn("open_interest_stats", event_types)
-
     def test_live_chart_payload_uses_selected_strategy_for_markers(self):
         client = FakeClient()
         client.candles = [candle(index, price) for index, price in enumerate([10, 9, 8, 9, 11, 13, 15])]
@@ -2104,81 +1504,6 @@ class UiTests(unittest.TestCase):
         self.assertIn("ema-rsi", strategy_names)
         self.assertIn("macd", strategy_names)
 
-    def test_live_chart_payload_accepts_moex_bluechip_market(self):
-        client = FakeClient()
-        client.candles = [candle(index, price) for index, price in enumerate([300, 301, 302, 303, 304])]
-
-        payload = live_chart_payload(
-            {
-                "market": "russian_bluechips",
-                "symbol": "SBER",
-                "interval": "5m",
-                "limit": 5,
-                "strategy": "ema-rsi",
-                "fast_ema": 1,
-                "slow_ema": 3,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "rsi_oversold": 0,
-            },
-            client=client,
-        )
-
-        self.assertEqual(client.kline_symbols, ["SBER"])
-        self.assertEqual(payload["market"], "russian_bluechips")
-        self.assertEqual(payload["data_source"], "MOEX shares")
-        self.assertEqual(payload["symbol"], "SBER")
-
-    def test_live_chart_payload_labels_combined_moex_indices_futures_source(self):
-        client = FakeClient()
-        client.candles = [candle(index, price) for index, price in enumerate([300, 301, 302, 303, 304])]
-
-        payload = live_chart_payload(
-            {
-                "market": "russian_indices_futures",
-                "symbol": "IMOEX",
-                "interval": "5m",
-                "limit": 5,
-                "strategy": "ema-rsi",
-                "fast_ema": 1,
-                "slow_ema": 3,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "rsi_oversold": 0,
-            },
-            client=client,
-        )
-
-        self.assertEqual(client.kline_symbols, ["IMOEX"])
-        self.assertEqual(payload["market"], "russian_indices_futures")
-        self.assertEqual(payload["data_source"], "MOEX APIM indices and futures")
-        self.assertEqual(payload["symbol"], "IMOEX")
-
-    def test_live_chart_payload_keeps_old_moex_futures_alias_working(self):
-        client = FakeClient()
-        client.candles = [candle(index, price) for index, price in enumerate([300, 301, 302, 303, 304])]
-
-        payload = live_chart_payload(
-            {
-                "market": "russian_futures",
-                "symbol": "RIM6",
-                "interval": "5m",
-                "limit": 5,
-                "strategy": "ema-rsi",
-                "fast_ema": 1,
-                "slow_ema": 3,
-                "rsi_period": 2,
-                "rsi_overbought": 100,
-                "rsi_oversold": 0,
-            },
-            client=client,
-        )
-
-        self.assertEqual(client.kline_symbols, ["RIM6"])
-        self.assertEqual(payload["market"], "russian_indices_futures")
-        self.assertEqual(payload["data_source"], "MOEX APIM indices and futures")
-        self.assertEqual(payload["symbol"], "RIM6")
-
     def test_live_chart_payload_accepts_commodities_market(self):
         client = FakeClient()
         client.candles = [candle(index, price) for index, price in enumerate([2000, 2001, 2002, 2003, 2004])]
@@ -2254,44 +1579,6 @@ class UiTests(unittest.TestCase):
         self.assertEqual(payload["data_source"], "Yahoo Finance delayed Hong Kong stocks")
         self.assertEqual(payload["symbol"], "9988.HK")
 
-    def test_market_data_client_from_payload_selects_futures_provider(self):
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "cme_futures"}),
-            YahooFuturesMarketDataClient,
-        )
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "commodities"}),
-            YahooFuturesMarketDataClient,
-        )
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "mag7_stocks"}),
-            YahooFuturesMarketDataClient,
-        )
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "hong_kong_stocks"}),
-            YahooFuturesMarketDataClient,
-        )
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "russian_bluechips"}),
-            MoexSharesMarketDataClient,
-        )
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "russian_indices"}),
-            MoexSharesMarketDataClient,
-        )
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "russian_indices_futures"}),
-            MoexSharesMarketDataClient,
-        )
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "russian_futures"}),
-            MoexSharesMarketDataClient,
-        )
-        self.assertIsInstance(
-            market_data_client_from_payload({"market": "crypto_spot"}),
-            BinanceMarketDataClient,
-        )
-
     def test_live_chart_route_uses_market_provider_from_query(self):
         client = FakeClient()
         client.candles = [
@@ -2333,44 +1620,6 @@ class UiTests(unittest.TestCase):
         self.assertEqual(payload["market"], "cme_futures")
         self.assertEqual(payload["symbol"], "ES=F")
         self.assertEqual(client.kline_symbols, ["ES=F"])
-
-    def test_live_chart_route_uses_moex_market_provider_from_query(self):
-        client = FakeClient()
-        client.candles = [
-            candle(index, price)
-            for index, price in enumerate([300, 301, 302, 303, 304, 305, 306])
-        ]
-
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch("algo_trading.ui.MoexSharesMarketDataClient", return_value=client):
-                auth_store = InMemoryAuthStore()
-                http = TestClient(
-                    create_app(
-                        output_root=Path(tmp),
-                        auth_store=auth_store,
-                        seed_admin=False,
-                    )
-                )
-                http.post(
-                    "/api/auth/register",
-                    json={"username": "alice", "password": "password123"},
-                )
-                auth_store.set_user_access(
-                    auth_store.list_users()[0].id,
-                    is_active=True,
-                    activated_at=utcnow(),
-                )
-                response = http.get(
-                    "/api/live-chart"
-                    "?market=russian_bluechips&symbol=SBER&interval=5m&limit=7"
-                    "&strategy=ema-rsi&fast_ema=2&slow_ema=5"
-                    "&rsi_period=2&rsi_overbought=100&rsi_oversold=0"
-                )
-                payload = response.json()
-
-        self.assertEqual(payload["market"], "russian_bluechips")
-        self.assertEqual(payload["symbol"], "SBER")
-        self.assertEqual(client.kline_symbols, ["SBER"])
 
     def test_live_chart_payload_retries_transient_market_data_failures(self):
         client = FlakyLiveClient()

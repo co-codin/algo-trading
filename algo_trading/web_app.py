@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import mimetypes
 import os
 import time
@@ -31,13 +31,6 @@ from algo_trading.feedback import (
     PostgresFeedbackStore,
     public_feedback,
 )
-from algo_trading.futoi import (
-    FutoiRefreshService,
-    FUTOI_PRUNE_SECONDS,
-    parse_futoi_date,
-    public_futoi_instrument,
-    public_futoi_record,
-)
 from algo_trading.historical_store import HistoricalDataStore, historical_store_from_env
 from algo_trading.historical_data import HistoricalCsvRefreshService
 from algo_trading import jobs as background_jobs
@@ -50,16 +43,6 @@ from algo_trading.live_symbols import (
 from algo_trading.logging_config import configure_error_logging
 from algo_trading.market_breadth import (
     MarketBreadthService,
-    default_symbols as default_breadth_symbols,
-)
-from algo_trading.market_intelligence import (
-    build_futoi_position_dashboard,
-    build_unusual_futoi_events,
-    public_futoi_dashboard,
-)
-from algo_trading.market_reports import (
-    build_daily_market_report,
-    public_daily_market_report,
 )
 from algo_trading.response_cache import (
     ResponseCache,
@@ -87,16 +70,10 @@ ADMIN_EMAIL = "cuiyeqing960904@gmail.com"
 EXPIRY_CHECK_SECONDS = 60 * 60
 HISTORICAL_CSV_REFRESH_SECONDS = 60 * 60
 HISTORICAL_CSV_PRUNE_SECONDS = 24 * 60 * 60
-MOEX_FUTOI_REFRESH_SECONDS = 24 * 60 * 60
-MOEX_FUTOI_PRUNE_SECONDS = FUTOI_PRUNE_SECONDS
-DAILY_MARKET_REPORT_REFRESH_SECONDS = 24 * 60 * 60
 API_CACHE_TTL_SYMBOLS_SECONDS = 30
 API_CACHE_TTL_LIVE_CHART_SECONDS = 10
 API_CACHE_TTL_QUANT_STRATEGIES_SECONDS = 30
 API_CACHE_TTL_MARKET_BREADTH_SECONDS = 300
-API_CACHE_TTL_FUTOI_SECONDS = 60
-API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS = 300
-API_CACHE_TTL_DAILY_REPORT_SECONDS = 300
 
 
 def parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
@@ -119,13 +96,9 @@ def create_app(
     auth_store: AuthStore | None = None,
     market_breadth_service: Any | None = None,
     historical_csv_service: Any | None = None,
-    futoi_service: Any | None = None,
     expiry_check_seconds: float | None = None,
     historical_csv_refresh_seconds: float | None = None,
     historical_csv_prune_seconds: float | None = None,
-    futoi_refresh_seconds: float | None = None,
-    futoi_prune_seconds: float | None = None,
-    daily_market_report_refresh_seconds: float | None = None,
     historical_store: HistoricalDataStore | None = None,
     feedback_store: FeedbackStore | None = None,
     live_symbol_store: LiveSymbolStore | None = None,
@@ -160,7 +133,6 @@ def create_app(
     history_store.ensure_schema()
     breadth_service = market_breadth_service or MarketBreadthService(store=history_store)
     csv_service = historical_csv_service or HistoricalCsvRefreshService()
-    futoi = futoi_service or FutoiRefreshService(store=history_store)
     background_queue = job_queue if job_queue is not None else job_queue_from_env()
     api_cache = response_cache if response_cache is not None else response_cache_from_env()
     expiry_interval = (
@@ -188,26 +160,6 @@ def create_app(
             )
         )
     )
-    futoi_interval = (
-        futoi_refresh_seconds
-        if futoi_refresh_seconds is not None
-        else float(os.environ.get("MOEX_FUTOI_REFRESH_SECONDS", MOEX_FUTOI_REFRESH_SECONDS))
-    )
-    futoi_prune_interval = (
-        futoi_prune_seconds
-        if futoi_prune_seconds is not None
-        else float(os.environ.get("MOEX_FUTOI_PRUNE_SECONDS", MOEX_FUTOI_PRUNE_SECONDS))
-    )
-    report_refresh_interval = (
-        daily_market_report_refresh_seconds
-        if daily_market_report_refresh_seconds is not None
-        else float(
-            os.environ.get(
-                "DAILY_MARKET_REPORT_REFRESH_SECONDS",
-                DAILY_MARKET_REPORT_REFRESH_SECONDS,
-            )
-        )
-    )
     api_cache_ttls = {
         "symbols": env_int("API_CACHE_TTL_SYMBOLS_SECONDS", API_CACHE_TTL_SYMBOLS_SECONDS),
         "live-chart": env_int(
@@ -222,21 +174,11 @@ def create_app(
             "API_CACHE_TTL_MARKET_BREADTH_SECONDS",
             API_CACHE_TTL_MARKET_BREADTH_SECONDS,
         ),
-        "futoi": env_int("API_CACHE_TTL_FUTOI_SECONDS", API_CACHE_TTL_FUTOI_SECONDS),
-        "futoi-instruments": env_int(
-            "API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS",
-            API_CACHE_TTL_FUTOI_INSTRUMENTS_SECONDS,
-        ),
-        "daily-report": env_int(
-            "API_CACHE_TTL_DAILY_REPORT_SECONDS",
-            API_CACHE_TTL_DAILY_REPORT_SECONDS,
-        ),
     }
     maintenance_interval = min(
         [
             interval
-            for interval in (csv_refresh_interval, futoi_interval, futoi_prune_interval)
-            + (report_refresh_interval,)
+            for interval in (csv_refresh_interval, csv_prune_interval)
             if interval > 0
         ],
         default=0,
@@ -295,9 +237,6 @@ def create_app(
     async def maintain_historical_csvs_loop() -> None:
         last_csv_refresh = 0.0
         last_prune = 0.0
-        last_futoi = 0.0
-        last_futoi_prune = 0.0
-        last_report = 0.0
         while True:
             await asyncio.sleep(max(0.01, maintenance_interval))
             now = time.monotonic()
@@ -317,44 +256,6 @@ def create_app(
                         description="Refresh US market breadth CSV files",
                     )
                 last_csv_refresh = now
-            refresh_futoi = getattr(futoi, "refresh_all", None) or getattr(
-                futoi,
-                "refresh_daily",
-                None,
-            )
-            if (
-                futoi_interval > 0
-                and callable(refresh_futoi)
-                and now - last_futoi >= futoi_interval
-            ):
-                await enqueue_or_run_background_job(
-                    background_jobs.refresh_futoi,
-                    refresh_futoi,
-                    job_id_prefix="refresh-futoi",
-                    description="Refresh MOEX FUTOI instruments and historical data",
-                )
-                last_futoi = now
-            prune_futoi = getattr(futoi, "prune_history", None)
-            if (
-                futoi_prune_interval > 0
-                and callable(prune_futoi)
-                and now - last_futoi_prune >= futoi_prune_interval
-            ):
-                await enqueue_or_run_background_job(
-                    background_jobs.prune_futoi,
-                    prune_futoi,
-                    job_id_prefix="prune-futoi",
-                    description="Prune MOEX FUTOI historical data older than retention",
-                )
-                last_futoi_prune = now
-            if report_refresh_interval > 0 and now - last_report >= report_refresh_interval:
-                await enqueue_or_run_background_job(
-                    background_jobs.generate_daily_market_report,
-                    background_jobs.generate_daily_market_report,
-                    job_id_prefix="generate-daily-market-report",
-                    description="Generate Russian daily market intelligence report",
-                )
-                last_report = now
             if csv_prune_interval > 0 and now - last_prune >= csv_prune_interval:
                 prune_all = getattr(csv_service, "prune_all", None)
                 if callable(prune_all):
@@ -718,109 +619,6 @@ def create_app(
             "market-breadth",
             lambda: breadth_service.payload(requested_symbols),
         )
-
-    @app.get("/api/futoi")
-    def get_futoi(
-        request: Request,
-        date: str = "",
-        ticker: str = "",
-        limit: int = 500,
-        history_days: int = 365,
-        _user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        if limit < 0:
-            raise ValueError("limit cannot be negative")
-        if history_days < 0:
-            raise ValueError("history_days cannot be negative")
-        selected_date = parse_futoi_date(date)
-        selected_ticker = ticker.strip().upper() or None
-
-        def futoi_payload() -> dict[str, Any]:
-            records = futoi.load_records(
-                trading_date=selected_date,
-                ticker=selected_ticker,
-                limit=min(limit, 5000) if limit else None,
-            )
-            chart_records = (
-                futoi.load_ticker_history(
-                    selected_ticker,
-                    end_date=selected_date,
-                    days=min(history_days or 365, 730),
-                )
-                if selected_ticker
-                else records
-            )
-            dashboard = build_futoi_position_dashboard(
-                chart_records,
-                futoi.list_instruments(),
-            )
-            return {
-                "ok": True,
-                "records": [public_futoi_record(record) for record in records],
-                "chart_records": [
-                    public_futoi_record(record)
-                    for record in chart_records
-                ],
-                "dashboard": public_futoi_dashboard(dashboard),
-            }
-
-        return cached_api_payload(
-            request,
-            "futoi",
-            futoi_payload,
-        )
-
-    @app.get("/api/futoi/instruments")
-    def get_futoi_instruments(
-        request: Request,
-        _user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        return cached_api_payload(
-            request,
-            "futoi-instruments",
-            lambda: {
-                "ok": True,
-                "instruments": [
-                    public_futoi_instrument(instrument)
-                    for instrument in futoi.list_instruments()
-                ],
-            },
-        )
-
-    @app.get("/api/reports/daily")
-    def get_daily_market_report(
-        request: Request,
-        date: str = "",
-        _user: AuthUser = Depends(require_active_user),
-    ) -> dict[str, Any]:
-        selected_date = parse_futoi_date(date) or datetime.now(timezone.utc).date()
-
-        def report_payload() -> dict[str, Any]:
-            start_date = selected_date - timedelta(days=7)
-            futoi_records = history_store.load_futoi_records(
-                start_date=start_date,
-                end_date=selected_date,
-                limit=None,
-            )
-            algopack_records = history_store.load_algopack_records(
-                start_date=selected_date,
-                end_date=selected_date,
-                limit=None,
-            )
-            breadth_bars_by_symbol = {
-                symbol: history_store.load_breadth_bars(symbol)
-                for symbol in default_breadth_symbols()[:8]
-            }
-            report = build_daily_market_report(
-                trading_date=selected_date,
-                futoi_records=futoi_records,
-                algopack_records=algopack_records,
-                breadth_bars_by_symbol=breadth_bars_by_symbol,
-                triggered_events=build_unusual_futoi_events(futoi_records),
-            )
-            return {"ok": True, "report": public_daily_market_report(report)}
-
-        return cached_api_payload(request, "daily-report", report_payload)
 
     @app.get("/api/workspaces")
     def get_workspaces(user: AuthUser = Depends(require_active_user)) -> dict[str, Any]:

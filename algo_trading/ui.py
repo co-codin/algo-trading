@@ -4,7 +4,6 @@ import argparse
 import time
 import urllib.parse
 from dataclasses import replace
-from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,20 +13,12 @@ from algo_trading.data import (
     HONG_KONG_STOCK_SYMBOLS,
     MAG7_STOCK_SYMBOLS,
     MarketDataClient,
-    MoexSharesMarketDataClient,
     TransientMarketDataError,
     YahooFuturesMarketDataClient,
-)
-from algo_trading.algopack import (
-    AlgoPackRecord,
-    AlgoPackService,
-    algopack_record_time_millis,
-    normalized_algopack_datasets,
 )
 from algo_trading.historical_store import HistoricalDataStore
 from algo_trading.market_breadth import default_symbols as default_breadth_symbols
 from algo_trading.market_intelligence import (
-    build_algopack_events,
     build_volume_spike_events,
     public_market_event,
 )
@@ -59,10 +50,6 @@ CME_FUTURES_MARKET = "cme_futures"
 COMMODITIES_MARKET = "commodities"
 MAG7_STOCKS_MARKET = "mag7_stocks"
 HONG_KONG_STOCKS_MARKET = "hong_kong_stocks"
-RUSSIAN_BLUECHIPS_MARKET = "russian_bluechips"
-RUSSIAN_INDICES_MARKET = "russian_indices"
-RUSSIAN_FUTURES_MARKET = "russian_futures"
-RUSSIAN_INDICES_FUTURES_MARKET = "russian_indices_futures"
 DEFAULT_QUANT_BREADTH_SYMBOL_LIMIT = 8
 _DEFAULT_LIVE_CACHE_STALENESS_MS = 60_000
 _LIVE_CACHE_STALENESS_MULTIPLIER = 2
@@ -74,11 +61,8 @@ FRONTEND_ROUTES = frozenset(
         "/markets",
         "/live",
         "/chart",
-        "/moex-live",
-        "/russian-live",
         "/breadth",
         "/quant",
-        "/futoi",
         "/feedback",
         "/profile",
         "/admin",
@@ -187,15 +171,7 @@ def live_chart_payload(
             if len(configs) > 1
             else _strategy_signal_markers(candles, config)
         )
-    algopack_records = _load_algopack_records(
-        payload,
-        historical_store,
-        market,
-        config.symbol,
-        candles,
-    )
     indicators = _popular_indicator_payload(candles, config)
-    indicators.extend(_algopack_indicator_payload(algopack_records))
     volume_lookback = min(20, max(1, len(candles) - 1))
     events = [
         *build_volume_spike_events(
@@ -205,7 +181,6 @@ def live_chart_payload(
             interval=config.interval,
             lookback=volume_lookback,
         ),
-        *build_algopack_events(algopack_records),
     ]
     return {
         "ok": True,
@@ -339,34 +314,6 @@ def _load_quant_breadth_bars(
     return bars_by_symbol
 
 
-def _load_quant_futoi_records(
-    historical_store: HistoricalDataStore | None,
-    market: str,
-    symbol: str,
-) -> list[Any]:
-    if historical_store is None or market not in (
-        RUSSIAN_BLUECHIPS_MARKET,
-        RUSSIAN_INDICES_FUTURES_MARKET,
-    ):
-        return []
-    for ticker in _futoi_ticker_candidates(symbol):
-        try:
-            records = historical_store.load_futoi_records(ticker=ticker, limit=200)
-        except Exception:
-            records = []
-        if records:
-            return records
-    return []
-
-
-def _futoi_ticker_candidates(symbol: str) -> list[str]:
-    normalized = symbol.strip().upper()
-    candidates = [normalized]
-    if normalized and not normalized.endswith("F"):
-        candidates.append(f"{normalized}F")
-    return candidates
-
-
 def _interval_millis(interval: str) -> int:
     value = str(interval).strip()
     if not value:
@@ -401,11 +348,6 @@ def market_data_client_from_payload(payload: dict[str, Any]) -> MarketDataClient
         HONG_KONG_STOCKS_MARKET,
     ):
         return YahooFuturesMarketDataClient()
-    if market in (
-        RUSSIAN_BLUECHIPS_MARKET,
-        RUSSIAN_INDICES_FUTURES_MARKET,
-    ):
-        return MoexSharesMarketDataClient()
     if market == CRYPTO_SPOT_MARKET:
         return BinanceMarketDataClient()
     raise ValueError(f"unsupported market: {market}")
@@ -443,7 +385,6 @@ def quant_strategy_ideas_payload(
         market=market,
         symbol=symbol,
         breadth_bars_by_symbol=_load_quant_breadth_bars(historical_store),
-        futoi_records=_load_quant_futoi_records(historical_store, market, symbol),
     )
     return {
         "ok": True,
@@ -513,20 +454,6 @@ def _market_from_payload(payload: dict[str, Any]) -> str:
         "hong_kong": HONG_KONG_STOCKS_MARKET,
         "hong_kong_stocks": HONG_KONG_STOCKS_MARKET,
         "hong-kong-stocks": HONG_KONG_STOCKS_MARKET,
-        "moex": RUSSIAN_BLUECHIPS_MARKET,
-        "russian": RUSSIAN_BLUECHIPS_MARKET,
-        "russian_bluechips": RUSSIAN_BLUECHIPS_MARKET,
-        "ru_bluechips": RUSSIAN_BLUECHIPS_MARKET,
-        "russian_indices": RUSSIAN_INDICES_FUTURES_MARKET,
-        "russian_index": RUSSIAN_INDICES_FUTURES_MARKET,
-        "moex_indices": RUSSIAN_INDICES_FUTURES_MARKET,
-        "moex_index": RUSSIAN_INDICES_FUTURES_MARKET,
-        "russian_futures": RUSSIAN_INDICES_FUTURES_MARKET,
-        "moex_futures": RUSSIAN_INDICES_FUTURES_MARKET,
-        "rtsi_futures": RUSSIAN_INDICES_FUTURES_MARKET,
-        "russian_indices_futures": RUSSIAN_INDICES_FUTURES_MARKET,
-        "russian_index_futures": RUSSIAN_INDICES_FUTURES_MARKET,
-        "moex_indices_futures": RUSSIAN_INDICES_FUTURES_MARKET,
     }
     try:
         return aliases[market]
@@ -544,10 +471,6 @@ def _live_symbol_from_payload(payload: dict[str, Any], market: str) -> str:
         default_symbol = "AAPL"
     if market == HONG_KONG_STOCKS_MARKET:
         default_symbol = "9988.HK"
-    if market == RUSSIAN_BLUECHIPS_MARKET:
-        default_symbol = "SBER"
-    if market == RUSSIAN_INDICES_FUTURES_MARKET:
-        default_symbol = "IMOEX"
     symbol = str(payload.get("symbol") or default_symbol).upper()
     if market == MAG7_STOCKS_MARKET and symbol not in MAG7_STOCK_SYMBOLS:
         raise ValueError(f"unsupported MAG 7 stock symbol: {symbol}")
@@ -574,13 +497,6 @@ def _data_source_label(
         return "Yahoo Finance delayed US equities"
     if market == HONG_KONG_STOCKS_MARKET:
         return "Yahoo Finance delayed Hong Kong stocks"
-    if market == RUSSIAN_INDICES_FUTURES_MARKET:
-        return "MOEX APIM indices and futures"
-    if market == RUSSIAN_BLUECHIPS_MARKET:
-        source_name = getattr(client, "source_name", None)
-        if isinstance(source_name, str):
-            return source_name
-        return "MOEX shares"
     return "Binance Spot public REST"
 
 
@@ -918,246 +834,6 @@ def _popular_indicator_payload(
             ],
         ),
     ]
-
-
-def _load_algopack_records(
-    payload: dict[str, Any],
-    historical_store: HistoricalDataStore | None,
-    market: str,
-    symbol: str,
-    candles: list[Candle],
-) -> list[AlgoPackRecord]:
-    datasets = _algopack_datasets_from_payload(payload, market, symbol)
-    if not datasets or not candles:
-        return []
-    start_date = _moex_trade_date_from_open_time(candles[0].open_time)
-    end_date = _moex_trade_date_from_open_time(candles[-1].open_time)
-    return AlgoPackService(store=historical_store).load_records(
-        market,
-        symbol,
-        datasets,
-        start_date=start_date,
-        end_date=end_date,
-    )
-
-
-def _algopack_datasets_from_payload(
-    payload: dict[str, Any],
-    market: str,
-    symbol: str,
-) -> list[str]:
-    raw_value = str(payload.get("algopack") or payload.get("algopack_datasets") or "")
-    requested = [
-        item.strip()
-        for item in raw_value.split(",")
-        if item.strip()
-    ]
-    if not requested:
-        return []
-    return normalized_algopack_datasets(requested, market, symbol)
-
-
-def _moex_trade_date_from_open_time(open_time: int) -> date:
-    seconds = open_time / 1000 if open_time > 1_000_000_000_000 else open_time
-    return datetime.fromtimestamp(seconds, tz=timezone.utc).date()
-
-
-def _algopack_indicator_payload(records: list[AlgoPackRecord]) -> list[dict[str, Any]]:
-    if not records:
-        return []
-    records_by_dataset: dict[str, list[AlgoPackRecord]] = {}
-    for record in records:
-        records_by_dataset.setdefault(record.dataset, []).append(record)
-    indicators: list[dict[str, Any]] = []
-    if tradestats := records_by_dataset.get("tradestats"):
-        indicators.extend(_algopack_tradestats_indicator(tradestats))
-    if orderstats := records_by_dataset.get("orderstats"):
-        indicators.extend(_algopack_orderstats_indicator(orderstats))
-    if obstats := records_by_dataset.get("obstats"):
-        indicators.extend(_algopack_obstats_indicator(obstats))
-    if alerts := records_by_dataset.get("alerts"):
-        indicators.extend(_algopack_alerts_indicator(alerts))
-    return indicators
-
-
-def _algopack_tradestats_indicator(records: list[AlgoPackRecord]) -> list[dict[str, Any]]:
-    series = [
-        _algopack_series_payload("trade_volume", "Trade volume", "histogram", "#64748b", records, "vol"),
-        _algopack_series_payload("trade_imbalance", "Buy/sell imbalance", "line", "#2dd4bf", records, "disb"),
-    ]
-    series = [item for item in series if item["points"]]
-    if not series:
-        return []
-    return [
-        _indicator_payload(
-            indicator_id="algopack-tradestats",
-            label="TradeStats",
-            pane="volume",
-            default_visible=False,
-            series=series,
-        )
-    ]
-
-
-def _algopack_orderstats_indicator(records: list[AlgoPackRecord]) -> list[dict[str, Any]]:
-    series = [
-        _algopack_series_payload("orders_placed", "Placed orders", "histogram", "#38bdf8", records, "put_orders"),
-        _algopack_series_payload("orders_cancelled", "Cancelled orders", "histogram", "#f97316", records, "cancel_orders"),
-    ]
-    series = [item for item in series if item["points"]]
-    if not series:
-        return []
-    return [
-        _indicator_payload(
-            indicator_id="algopack-orderstats",
-            label="OrderStats",
-            pane="volume",
-            default_visible=False,
-            series=series,
-        )
-    ]
-
-
-def _algopack_obstats_indicator(records: list[AlgoPackRecord]) -> list[dict[str, Any]]:
-    series = [
-        _algopack_series_payload("spread_bbo", "BBO spread", "line", "#f43f5e", records, "spread_bbo"),
-        _algopack_series_payload("orderbook_imbalance", "Order book imbalance", "line", "#a78bfa", records, "imbalance_val_bbo"),
-    ]
-    series = [item for item in series if item["points"]]
-    if not series:
-        return []
-    return [
-        _indicator_payload(
-            indicator_id="algopack-obstats",
-            label="OBStats",
-            pane="oscillator",
-            default_visible=False,
-            series=series,
-        )
-    ]
-
-
-def _algopack_alerts_indicator(records: list[AlgoPackRecord]) -> list[dict[str, Any]]:
-    series = [
-        {
-            "id": "mega_alert_count",
-            "label": "MegaAlert count",
-            "type": "histogram",
-            "color": "#f59e0b",
-            "points": _algopack_alert_count_points(records),
-        },
-        _algopack_aggregated_series_payload(
-            "mega_alert_value",
-            "MegaAlert value",
-            "line",
-            "#38bdf8",
-            records,
-            "value",
-        ),
-        _algopack_aggregated_series_payload(
-            "mega_alert_threshold",
-            "MegaAlert threshold",
-            "line",
-            "#f43f5e",
-            records,
-            "threshold",
-        ),
-    ]
-    series = [item for item in series if item["points"]]
-    if not series:
-        return []
-    return [
-        _indicator_payload(
-            indicator_id="algopack-alerts",
-            label="MegaAlerts",
-            pane="oscillator",
-            default_visible=False,
-            series=series,
-        )
-    ]
-
-
-def _algopack_series_payload(
-    series_id: str,
-    label: str,
-    series_type: str,
-    color: str,
-    records: list[AlgoPackRecord],
-    metric_name: str,
-) -> dict[str, Any]:
-    return {
-        "id": series_id,
-        "label": label,
-        "type": series_type,
-        "color": color,
-        "points": _algopack_points(records, metric_name),
-    }
-
-
-def _algopack_aggregated_series_payload(
-    series_id: str,
-    label: str,
-    series_type: str,
-    color: str,
-    records: list[AlgoPackRecord],
-    metric_name: str,
-) -> dict[str, Any]:
-    values_by_time: dict[int, list[float]] = {}
-    for record in records:
-        value = record.metrics.get(metric_name)
-        if value is None:
-            continue
-        try:
-            numeric_value = float(value)
-        except (TypeError, ValueError):
-            continue
-        values_by_time.setdefault(algopack_record_time_millis(record), []).append(numeric_value)
-    return {
-        "id": series_id,
-        "label": label,
-        "type": series_type,
-        "color": color,
-        "points": [
-            {
-                "time": timestamp,
-                "value": sum(values) / len(values),
-            }
-            for timestamp, values in sorted(values_by_time.items())
-        ],
-    }
-
-
-def _algopack_alert_count_points(records: list[AlgoPackRecord]) -> list[dict[str, float | int]]:
-    counts_by_time: dict[int, int] = {}
-    for record in records:
-        timestamp = algopack_record_time_millis(record)
-        counts_by_time[timestamp] = counts_by_time.get(timestamp, 0) + 1
-    return [
-        {"time": timestamp, "value": float(count)}
-        for timestamp, count in sorted(counts_by_time.items())
-    ]
-
-
-def _algopack_points(
-    records: list[AlgoPackRecord],
-    metric_name: str,
-) -> list[dict[str, float | int]]:
-    points: list[dict[str, float | int]] = []
-    for record in sorted(records, key=lambda item: (item.trade_date, item.trade_time)):
-        value = record.metrics.get(metric_name)
-        if value is None:
-            continue
-        try:
-            numeric_value = float(value)
-        except (TypeError, ValueError):
-            continue
-        points.append(
-            {
-                "time": algopack_record_time_millis(record),
-                "value": numeric_value,
-            }
-        )
-    return points
 
 
 def _indicator_payload(

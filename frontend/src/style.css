@@ -1791,127 +1791,6 @@ button:focus {
   border-radius: 0;
 }
 
-.futoi-panel {
-  display: grid;
-  gap: 16px;
-}
-
-.futoi-dashboard {
-  display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-
-.futoi-instruments-panel,
-.futoi-detail-panel {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
-}
-
-.futoi-section-heading,
-.futoi-detail-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.futoi-section-heading span,
-.futoi-detail-header span,
-.futoi-metric span {
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
-.futoi-detail-header h3 {
-  margin: 2px 0 0;
-  font-size: 22px;
-}
-
-.futoi-search,
-.futoi-detail-controls {
-  display: grid;
-  gap: 8px;
-}
-
-.futoi-detail-controls {
-  grid-template-columns: minmax(160px, 220px) minmax(120px, 160px);
-  gap: 10px;
-  align-items: end;
-}
-
-.futoi-instrument-list {
-  display: grid;
-  gap: 6px;
-  max-height: 520px;
-  overflow: auto;
-  padding-right: 2px;
-}
-
-.futoi-instrument-button {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel-raised);
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-}
-
-.futoi-instrument-button:hover,
-.futoi-instrument-button.is-active {
-  border-color: var(--primary);
-  background: rgba(37, 99, 235, 0.08);
-}
-
-.futoi-instrument-button span {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.futoi-instrument-button small {
-  color: var(--muted);
-}
-
-.futoi-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.futoi-metric {
-  display: grid;
-  gap: 4px;
-  min-height: 66px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel-raised);
-}
-
-.futoi-metric b {
-  overflow-wrap: anywhere;
-}
-
-.futoi-table-wrapper {
-  overflow-x: auto;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-
-.futoi-table {
-  min-width: 980px;
-}
-
 table {
   width: 100%;
   border-collapse: collapse;
@@ -1983,14 +1862,6 @@ th {
 
   .breadth-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .futoi-dashboard {
-    grid-template-columns: 1fr;
-  }
-
-  .futoi-instrument-list {
-    max-height: 320px;
   }
 
   .profile-grid {
@@ -2122,11 +1993,6 @@ th {
   }
 
   .profile-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .futoi-detail-controls,
-  .futoi-metrics {
     grid-template-columns: 1fr;
   }
 

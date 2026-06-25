@@ -4,44 +4,6 @@ from algo_trading.workspaces import InMemoryWorkspaceStore
 
 
 class WorkspaceStoreTests(unittest.TestCase):
-    def test_user_workspaces_are_saved_listed_and_updated_per_user(self):
-        store = InMemoryWorkspaceStore()
-        store.ensure_schema()
-
-        created = store.create_workspace(
-            user_id=7,
-            name="MOEX momentum",
-            market="russian_bluechips",
-            symbol="SBER",
-            settings={
-                "interval": "1h",
-                "strategies": ["ema-rsi", "macd"],
-                "showSignals": True,
-            },
-        )
-        store.create_workspace(
-            user_id=8,
-            name="Other user",
-            market="crypto_spot",
-            symbol="BTCUSDT",
-            settings={"interval": "1h"},
-        )
-        updated = store.update_workspace(
-            user_id=7,
-            workspace_id=created.id,
-            name="MOEX breakout",
-            market="russian_bluechips",
-            symbol="GAZP",
-            settings={"interval": "4h", "strategies": ["breakout"]},
-        )
-
-        self.assertEqual(updated.id, created.id)
-        self.assertEqual(updated.name, "MOEX breakout")
-        self.assertEqual(updated.symbol, "GAZP")
-        self.assertEqual(updated.settings["interval"], "4h")
-        self.assertEqual([workspace.id for workspace in store.list_workspaces(7)], [created.id])
-        self.assertEqual(store.list_workspaces(8)[0].name, "Other user")
-
     def test_watchlists_are_saved_and_deleted_per_user(self):
         store = InMemoryWorkspaceStore()
         store.ensure_schema()

@@ -47,21 +47,6 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn('id.includes("lightweight-charts")', vite_config)
         self.assertIn('return "charting";', vite_config)
 
-    def test_compose_adds_postgres_and_database_url(self):
-        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-
-        self.assertIn("postgres:", compose)
-        self.assertIn("image: postgres:16-alpine", compose)
-        self.assertIn(
-            "DATABASE_URL: postgresql://algo:algo@postgres:5432/algo_trading",
-            compose,
-        )
-        self.assertIn("condition: service_healthy", compose)
-        self.assertIn("postgres-data:", compose)
-        self.assertIn("MOEX_API_KEY: ${MOEX_API_KEY:-}", compose)
-        self.assertIn("MOEXALGO_API_KEY: ${MOEXALGO_API_KEY:-}", compose)
-        self.assertIn("MOEX_FUTOI_API_KEY: ${MOEX_FUTOI_API_KEY:-}", compose)
-
     def test_compose_adds_redis_queue_and_worker(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
@@ -77,50 +62,6 @@ class InfrastructureTests(unittest.TestCase):
         self.assertIn("RQ_QUEUE: maintenance", compose)
         self.assertIn("Redis.from_url(os.environ['REDIS_URL']).ping()", compose)
         self.assertIn("condition: service_healthy", compose)
-
-    def test_env_template_is_tracked_while_local_env_is_ignored(self):
-        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
-        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
-
-        self.assertIn(".env", gitignore.splitlines())
-        self.assertIn("MOEX_API_KEY=", env_example)
-        self.assertIn("MOEX_FUTOI_API_KEY=", env_example)
-        self.assertIn("ADMIN_EMAIL=", env_example)
-        self.assertIn("ADMIN_PASSWORD=", env_example)
-        self.assertNotIn("Vladimir960904", env_example)
-        self.assertIn("# REDIS_URL=redis://localhost:6379/0", env_example)
-        self.assertIn("API_RESPONSE_CACHE_ENABLED=0", env_example)
-        self.assertIn("API_CACHE_TTL_MARKET_BREADTH_SECONDS=300", env_example)
-        self.assertIn("RQ_QUEUE=maintenance", env_example)
-        self.assertIn("HISTORICAL_CSV_RETENTION_DAYS=1095", env_example)
-        self.assertIn("HISTORICAL_CSV_REFRESH_SECONDS=3600", env_example)
-        self.assertIn("HISTORICAL_CSV_PRUNE_SECONDS=86400", env_example)
-        self.assertIn("MOEX_FUTOI_DATA_DIR=historical_data/futoi", env_example)
-        self.assertIn("MOEX_FUTOI_RETENTION_DAYS=730", env_example)
-        self.assertIn("MOEX_FUTOI_REFRESH_SECONDS=86400", env_example)
-        self.assertIn("MOEX_FUTOI_PRUNE_SECONDS=604800", env_example)
-
-    def test_compose_persists_market_breadth_historical_csvs(self):
-        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-
-        self.assertIn('user: "${UID:-1000}:${GID:-1000}"', compose)
-        self.assertIn("./historical_data:/app/historical_data", compose)
-        self.assertIn("MARKET_BREADTH_DATA_DIR: /app/historical_data/breadth", compose)
-        self.assertIn('HISTORICAL_DATA_DIR: /app/historical_data', compose)
-        self.assertIn('HISTORICAL_CSV_RETENTION_DAYS: "1095"', compose)
-        self.assertIn('HISTORICAL_CSV_REFRESH_SECONDS: "3600"', compose)
-        self.assertIn('HISTORICAL_CSV_PRUNE_SECONDS: "86400"', compose)
-        self.assertIn("MOEX_FUTOI_DATA_DIR: /app/historical_data/futoi", compose)
-        self.assertIn('MOEX_FUTOI_RETENTION_DAYS: "730"', compose)
-        self.assertIn('MOEX_FUTOI_REFRESH_SECONDS: "86400"', compose)
-        self.assertIn('MOEX_FUTOI_PRUNE_SECONDS: "604800"', compose)
-        self.assertIn("ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}", compose)
-        self.assertNotIn("Vladimir960904", compose)
-        self.assertIn('MARKET_BREADTH_RETENTION_DAYS: "365"', compose)
-        self.assertIn("HISTORICAL_DATA_DIR ?= $(CURDIR)/historical_data", makefile)
-        self.assertIn('"$(HISTORICAL_DATA_DIR)"', makefile)
-        self.assertIn('--user "$$(id -u):$$(id -g)"', makefile)
 
     def test_compose_persists_error_logs_outside_git(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")

@@ -3,7 +3,6 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, r
 import { requestJson, toQuery } from "./api";
 import {
   LIVE_WORKSPACE_STORAGE_KEY,
-  algopackIndicatorOptions,
   defaultLiveIndicators,
   liveCandleOptions,
   liveIntervalOptions,
@@ -35,14 +34,6 @@ import type {
   FeedbackItem,
   FeedbackPayload,
   FeedbackStatus,
-  DailyMarketReport,
-  DailyMarketReportPayload,
-  FutoiChartPoint,
-  FutoiDashboard,
-  FutoiInstrument,
-  FutoiInstrumentsPayload,
-  FutoiPayload,
-  FutoiRecord,
   IndicatorDefinition,
   LiveChartPayload,
   LiveSymbolsPayload,
@@ -62,7 +53,6 @@ import type {
   StrategyPayload,
 } from "./types";
 
-const FutoiPositionChart = defineAsyncComponent(() => import("./components/FutoiPositionChart.vue"));
 const TradingViewChart = defineAsyncComponent(() => import("./components/TradingViewChart.vue"));
 
 type StatusType = "" | "busy" | "error";
@@ -98,18 +88,6 @@ type BreadthGroupView = {
   group: MarketBreadthGroup;
   summary: BreadthGroupSummary;
 };
-type FutoiMetric = {
-  label: string;
-  value: string;
-};
-type FutoiChartLabels = {
-  aria: string;
-  empty: string;
-  net: string;
-  long: string;
-  short: string;
-  openInterest: string;
-};
 type LandingInfoSection = {
   title: MessageKey;
   summary: MessageKey;
@@ -138,63 +116,12 @@ type WatchlistForm = {
 
 const FREE_TRIAL_ADMIN_EMAIL = "cuiyeqing960904@gmail.com";
 
-const russianLiveSymbolLabels: Record<string, string> = {
-  AFKS: "AFKS · АФК Система",
-  AFLT: "AFLT · Аэрофлот",
-  ALRS: "ALRS · Алроса",
-  CHMF: "CHMF · Северсталь",
-  FLOT: "FLOT · Совкомфлот",
-  GAZP: "GAZP · Газпром",
-  GMKN: "GMKN · Норникель",
-  IRAO: "IRAO · Интер РАО",
-  LKOH: "LKOH · Лукойл",
-  MAGN: "MAGN · ММК",
-  MGNT: "MGNT · Магнит",
-  MOEX: "MOEX · Московская биржа",
-  MTSS: "MTSS · МТС",
-  NLMK: "NLMK · НЛМК",
-  NVTK: "NVTK · Новатэк",
-  OZON: "OZON · Ozon",
-  PHOR: "PHOR · ФосАгро",
-  PIKK: "PIKK · ПИК",
-  PLZL: "PLZL · Полюс",
-  RASP: "RASP · Распадская",
-  ROSN: "ROSN · Роснефть",
-  RTKM: "RTKM · Ростелеком",
-  RUAL: "RUAL · Русал",
-  SBER: "SBER · Сбербанк",
-  SBERP: "SBERP · Сбербанк-п",
-  SNGS: "SNGS · Сургутнефтегаз",
-  SNGSP: "SNGSP · Сургутнефтегаз-п",
-  TATN: "TATN · Татнефть",
-  TATNP: "TATNP · Татнефть-п",
-  TRNFP: "TRNFP · Транснефть-п",
-  VKCO: "VKCO · VK",
-  VTBR: "VTBR · ВТБ",
-  X5: "X5 · X5 Group",
-  YDEX: "YDEX · Яндекс",
-  IMOEX: "IMOEX · Индекс МосБиржи",
-  RTSI: "RTSI · Индекс РТС",
-  IMOEXF: "IMOEXF · Фьючерс IMOEX",
-  MXM6: "MXM6 · Фьючерс на индекс МосБиржи",
-  MXU6: "MXU6 · Фьючерс на индекс МосБиржи",
-  MXZ6: "MXZ6 · Фьючерс на индекс МосБиржи",
-  RIM6: "RIM6 · Фьючерс на индекс РТС",
-  RIU6: "RIU6 · Фьючерс на индекс РТС",
-  RIZ6: "RIZ6 · Фьючерс на индекс РТС",
-};
-
-const russianLiveMarkets = new Set([
-  "russian_bluechips",
-  "russian_indices_futures",
-]);
-
 const landingTickerTape = [
   { symbol: "BTCUSDT", value: "68,420", tone: "long" },
   { symbol: "SPY", value: "542.18", tone: "long" },
   { symbol: "QQQ", value: "461.03", tone: "short" },
-  { symbol: "SBER", value: "318.42", tone: "long" },
-  { symbol: "FUTOI", value: "1Y", tone: "neutral" },
+  { symbol: "NVDA", value: "141.82", tone: "long" },
+  { symbol: "HKEX", value: "282.40", tone: "neutral" },
 ];
 const landingCandles = [
   { tone: "long", top: "41%", height: "22%" },
@@ -214,11 +141,11 @@ const landingOrderRows = [
   { label: "RSI", value: "63.8", tone: "long" },
   { label: "EMA", value: "Bull", tone: "long" },
   { label: "Breadth", value: "58%", tone: "neutral" },
-  { label: "FUTOI", value: "+12k", tone: "long" },
+  { label: "Signals", value: "+18", tone: "long" },
 ];
 const landingFeatureKeys: MessageKey[] = [
   "landing.feature.live",
-  "landing.feature.moex",
+  "landing.feature.quant",
   "landing.feature.breadth",
 ];
 const landingInfoSections: LandingInfoSection[] = [
@@ -228,7 +155,7 @@ const landingInfoSections: LandingInfoSection[] = [
     items: [
       "landing.info.coverage.global",
       "landing.info.coverage.hk",
-      "landing.info.coverage.moex",
+      "landing.info.coverage.assets",
     ],
   },
   {
@@ -237,7 +164,7 @@ const landingInfoSections: LandingInfoSection[] = [
     items: [
       "landing.info.pipeline.postgres",
       "landing.info.pipeline.history",
-      "landing.info.pipeline.futoi",
+      "landing.info.pipeline.retention",
     ],
   },
   {
@@ -245,7 +172,7 @@ const landingInfoSections: LandingInfoSection[] = [
     summary: "landing.info.signals.summary",
     items: [
       "landing.info.signals.rsi",
-      "landing.info.signals.megaalerts",
+      "landing.info.signals.events",
       "landing.info.signals.quant",
     ],
   },
@@ -265,12 +192,8 @@ const routeModes: Record<string, Mode> = {
   "/markets": "live",
   "/live": "live",
   "/chart": "live",
-  "/moex-live": "russian-live",
-  "/russian-live": "russian-live",
   "/breadth": "breadth",
   "/quant": "quant",
-  "/futoi": "futoi",
-  "/reports": "reports",
   "/feedback": "feedback",
   "/profile": "profile",
   "/admin": "admin",
@@ -279,11 +202,8 @@ const routeModes: Record<string, Mode> = {
 const modeRoutes: Record<Mode, string> = {
   landing: "/",
   live: "/markets",
-  "russian-live": "/moex-live",
   breadth: "/breadth",
   quant: "/quant",
-  futoi: "/futoi",
-  reports: "/reports",
   feedback: "/feedback",
   profile: "/profile",
   admin: "/admin",
@@ -389,16 +309,7 @@ const livePayload = ref<LiveChartPayload | null>(null);
 const quantPayload = ref<QuantStrategiesPayload | null>(null);
 const quantStrategyIdeas = ref<QuantStrategyIdea[]>([]);
 const liveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});
-const russianLiveSymbolsByMarket = ref<Record<string, SelectOption[]>>({});
 const breadthPayload = ref<MarketBreadthPayload | null>(null);
-const futoiRecords = ref<FutoiRecord[]>([]);
-const futoiChartRecords = ref<FutoiRecord[]>([]);
-const futoiInstruments = ref<FutoiInstrument[]>([]);
-const futoiDashboard = ref<FutoiDashboard | null>(null);
-const futoiInstrumentSearch = ref("");
-const selectedFutoiTicker = ref("");
-const dailyReport = ref<DailyMarketReport | null>(null);
-const reportDate = ref(new Date().toISOString().slice(0, 10));
 const liveWatchlists = ref<SavedWatchlist[]>([]);
 const watchlistForm = reactive<WatchlistForm>({
   name: "",
@@ -412,33 +323,16 @@ const quantStatus = ref(t("status.ready"));
 const quantStatusType = ref<StatusType>("");
 const breadthStatus = ref(t("status.ready"));
 const breadthStatusType = ref<StatusType>("");
-const futoiStatus = ref(t("status.ready"));
-const futoiStatusType = ref<StatusType>("");
-const reportStatus = ref(t("status.ready"));
-const reportStatusType = ref<StatusType>("");
 const liveMarket = ref("crypto_spot");
 const liveSymbol = ref("BTCUSDT");
 const liveSymbolSearch = ref("");
 const liveInterval = ref("1h");
 const liveLimit = ref<string | number>(180);
-const russianLivePayload = ref<LiveChartPayload | null>(null);
-const russianLiveMarket = ref("russian_bluechips");
-const russianLiveSymbol = ref("SBER");
-const russianLiveSymbolSearch = ref("");
-const russianLiveInterval = ref("1h");
-const russianLiveLimit = ref<string | number>(180);
-const russianLiveVisibleIndicators = ref<string[]>([
-  ...defaultLiveIndicators,
-]);
-const russianLiveStatus = ref(t("status.ready"));
-const russianLiveStatusType = ref<StatusType>("");
-const russianLiveChartLoading = ref(false);
 const liveRefresh = ref("10");
 const liveSignalDisplayMode = ref<SignalDisplayMode>("consensus");
 const liveConsensusMinConfirmations = ref(5);
 const liveMaxSignals = ref(80);
 const liveSelectedStrategies = ref<string[]>(["ema-rsi"]);
-const russianLiveSelectedStrategies = ref<string[]>([]);
 const liveStrategySearch = ref("");
 const liveStrategyMenu = ref<HTMLDetailsElement | null>(null);
 const accountMenu = ref<HTMLDetailsElement | null>(null);
@@ -449,22 +343,12 @@ const liveAlertsEnabled = ref(false);
 const lastAlertSignature = ref("");
 const showSignals = ref(true);
 const liveDataUpdatedAt = ref<string | null>(null);
-const futoiForm = reactive({
-  date: "",
-  ticker: "",
-  limit: "500",
-});
 let liveTimer = 0;
-let russianLiveTimer = 0;
 let liveChartRequestId = 0;
-let russianLiveChartRequestId = 0;
 let liveChartLoadingRequestId = 0;
-let russianLiveChartLoadingRequestId = 0;
 let isApplyingLiveSettingsFromUrl = false;
-let isApplyingRussianLiveSettingsFromUrl = false;
 
 const canUseFeatures = computed(() => Boolean(authUser.value?.is_active));
-const isRussianLocale = computed(() => locale.value === "ru");
 const isAdminUser = computed(() =>
   authUser.value?.is_admin === true,
 );
@@ -473,11 +357,8 @@ const canManageFreeTrial = computed(
 );
 const featureTabs = computed(() => [
   { mode: "live" as const, label: t("tabs.live") },
-  ...(isRussianLocale.value ? [{ mode: "russian-live" as const, label: t("tabs.russianLive") }] : []),
   { mode: "breadth" as const, label: t("tabs.breadth") },
   { mode: "quant" as const, label: t("tabs.quant") },
-  ...(isRussianLocale.value ? [{ mode: "futoi" as const, label: t("tabs.futoi") }] : []),
-  { mode: "reports" as const, label: t("tabs.reports") },
 ]);
 const accountMenuItems = computed(() => [
   { mode: "profile" as const, label: t("tabs.profile") },
@@ -506,16 +387,6 @@ const liveMarketOptions = computed<SelectOption[]>(() => [
   { value: "mag7_stocks", label: t("options.mag7Stocks") },
   { value: "hong_kong_stocks", label: t("options.hongKongStocks") },
 ]);
-const russianLiveMarketOptions = computed<SelectOption[]>(() => [
-  {
-    value: "russian_bluechips",
-    label: t("options.moexBluechips"),
-  },
-  {
-    value: "russian_indices_futures",
-    label: t("options.moexIndicesFutures"),
-  },
-]);
 const liveSignalDisplayOptions = computed<SelectOption[]>(() => [
   { value: "consensus", label: t("options.consensusSignals") },
   { value: "individual", label: t("options.individualSignals") },
@@ -532,31 +403,6 @@ const popularIndicatorOptions = computed<SelectOption[]>(() => [
   { value: "atr", label: t("indicators.atr") },
   { value: "stoch-rsi", label: t("indicators.stochRsi") },
 ]);
-const visibleRussianAlgoPackIndicatorOptions = computed<SelectOption[]>(() =>
-  algopackIndicatorOptions
-    .filter((option) => {
-      if (option.dataset === "orderstats" && russianLiveMarket.value === "russian_indices_futures") {
-        return false;
-      }
-      if (["IMOEX", "RTSI"].includes(russianLiveSymbol.value.toUpperCase())) {
-        return option.dataset === "alerts";
-      }
-      return true;
-    })
-    .map((option) => ({
-      value: option.value,
-      label: t(option.labelKey),
-    })),
-);
-const russianLiveIndicatorOptions = computed<SelectOption[]>(() => [
-  ...popularIndicatorOptions.value,
-  ...visibleRussianAlgoPackIndicatorOptions.value,
-]);
-const russianLiveAlgoPackDatasets = computed(() =>
-  algopackIndicatorOptions
-    .filter((option) => russianLiveVisibleIndicators.value.includes(option.value))
-    .map((option) => option.dataset),
-);
 const liveStrategyOptions = computed<StrategyOption[]>(() =>
   strategies.value.map((strategy) => ({
     ...strategy,
@@ -619,9 +465,6 @@ const filteredLiveStrategyGroups = computed<StrategyGroup[]>(() => {
 const activeLiveSymbolOptions = computed(
   () => (liveSymbolsByMarket.value[liveMarket.value] ?? []).map(localizedLiveSymbolOption),
 );
-const activeRussianLiveSymbolOptions = computed(
-  () => (russianLiveSymbolsByMarket.value[russianLiveMarket.value] ?? []).map(localizedLiveSymbolOption),
-);
 const filteredLiveSymbolOptions = computed(() => {
   const query = liveSymbolSearch.value;
   if (!query) {
@@ -629,15 +472,7 @@ const filteredLiveSymbolOptions = computed(() => {
   }
   return activeLiveSymbolOptions.value.filter((option) => optionMatchesSearch(option, query));
 });
-const filteredRussianLiveSymbolOptions = computed(() => {
-  const query = russianLiveSymbolSearch.value;
-  if (!query) {
-    return activeRussianLiveSymbolOptions.value;
-  }
-  return activeRussianLiveSymbolOptions.value.filter((option) => optionMatchesSearch(option, query));
-});
 const hasLiveSymbolSearch = computed(() => normalizeSearchText(liveSymbolSearch.value).length > 0);
-const hasRussianLiveSymbolSearch = computed(() => normalizeSearchText(russianLiveSymbolSearch.value).length > 0);
 const selectedLiveStrategyNames = computed(() => {
   const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
   const selectedNames = liveSelectedStrategies.value.filter((name) => availableNames.has(name));
@@ -647,31 +482,15 @@ const selectedLiveStrategyNames = computed(() => {
   const fallback = strategies.value[0]?.name ?? "ema-rsi";
   return [fallback];
 });
-const selectedRussianLiveStrategyNames = computed(() => {
-  const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
-  return russianLiveSelectedStrategies.value.filter((name) => availableNames.has(name));
-});
 const allLiveStrategiesSelected = computed(
   () =>
     strategies.value.length > 0 &&
     selectedLiveStrategyNames.value.length === strategies.value.length,
 );
-const allRussianLiveStrategiesSelected = computed(
-  () =>
-    strategies.value.length > 0 &&
-    selectedRussianLiveStrategyNames.value.length === strategies.value.length,
-);
 const liveStrategyRequest = computed(() =>
   allLiveStrategiesSelected.value ? "all" : selectedLiveStrategyNames.value.join(","),
 );
-const russianLiveStrategyRequest = computed(() => {
-  if (!selectedRussianLiveStrategyNames.value.length) {
-    return "";
-  }
-  return allRussianLiveStrategiesSelected.value ? "all" : selectedRussianLiveStrategyNames.value.join(",");
-});
 const isMultiStrategyLive = computed(() => selectedLiveStrategyNames.value.length > 1);
-const isMultiStrategyRussianLive = computed(() => selectedRussianLiveStrategyNames.value.length > 1);
 const liveChartResetKey = computed(() =>
   [liveMarket.value, liveSymbol.value, liveInterval.value, liveLimit.value].join(":"),
 );
@@ -685,44 +504,11 @@ const activeLiveStrategyLabel = computed(() => {
   }
   return `${selectedNames.length} ${t("labels.strategiesSelected")}`;
 });
-const activeRussianLiveStrategyLabel = computed(() => {
-  if (!selectedRussianLiveStrategyNames.value.length) {
-    return t("options.noStrategy");
-  }
-  if (allRussianLiveStrategiesSelected.value) {
-    return t("options.allStrategies");
-  }
-  const selectedNames = selectedRussianLiveStrategyNames.value;
-  if (selectedNames.length === 1) {
-    return strategyTitle(selectedNames[0]);
-  }
-  return `${selectedNames.length} ${t("labels.strategiesSelected")}`;
-});
 const selectedLiveStrategyPreview = computed(() => {
   if (allLiveStrategiesSelected.value) {
     return `${strategies.value.length} ${t("labels.strategiesSelected")}`;
   }
   const selectedNames = selectedLiveStrategyNames.value;
-  if (selectedNames.length === 1) {
-    return (
-      liveStrategyOptions.value.find((strategy) => strategy.name === selectedNames[0])?.description ??
-      strategyTitle(selectedNames[0])
-    );
-  }
-  const titles = selectedNames.map((name) => strategyTitle(name));
-  if (titles.length <= 3) {
-    return titles.join(", ");
-  }
-  return `${titles.slice(0, 3).join(", ")} +${titles.length - 3}`;
-});
-const selectedRussianLiveStrategyPreview = computed(() => {
-  if (!selectedRussianLiveStrategyNames.value.length) {
-    return t("labels.noStrategyHint");
-  }
-  if (allRussianLiveStrategiesSelected.value) {
-    return `${strategies.value.length} ${t("labels.strategiesSelected")}`;
-  }
-  const selectedNames = selectedRussianLiveStrategyNames.value;
   if (selectedNames.length === 1) {
     return (
       liveStrategyOptions.value.find((strategy) => strategy.name === selectedNames[0])?.description ??
@@ -753,15 +539,6 @@ const liveDataHealth = computed<LiveDataHealth>(() => {
       tone: "warning",
     };
   }
-  if (
-    isRussianLiveMarket(liveMarket.value)
-  ) {
-    return {
-      label: t("health.exchange"),
-      detail: t("health.moexDetail"),
-      tone: "warning",
-    };
-  }
   return {
     label: t("health.live"),
     detail: t("health.liveDetail"),
@@ -774,19 +551,7 @@ const visibleLiveIndicators = computed<IndicatorDefinition[]>(() => {
     selectedIndicators.has(indicator.id),
   );
 });
-const russianLiveChartResetKey = computed(() =>
-  [russianLiveMarket.value, russianLiveSymbol.value, russianLiveInterval.value, russianLiveLimit.value].join(":"),
-);
-const visibleRussianLiveIndicators = computed<IndicatorDefinition[]>(() => {
-  const selectedIndicators = new Set(russianLiveVisibleIndicators.value);
-  return (russianLivePayload.value?.indicators ?? []).filter((indicator) =>
-    selectedIndicators.has(indicator.id),
-  );
-});
-const russianLiveCandleCount = computed(() => russianLivePayload.value?.candles.length ?? 0);
-const russianLiveSignalCount = computed(() => russianLivePayload.value?.signals.length ?? 0);
 const liveMarketEvents = computed<MarketEvent[]>(() => livePayload.value?.events ?? []);
-const russianLiveMarketEvents = computed<MarketEvent[]>(() => russianLivePayload.value?.events ?? []);
 const breadthGroups = computed<MarketBreadthGroup[]>(() => breadthPayload.value?.groups ?? []);
 const breadthGroupSummaries = computed<BreadthGroupSummary[]>(() =>
   breadthGroups.value.map((group) => summarizeBreadthGroup(group)),
@@ -809,82 +574,6 @@ const breadthPutCall = computed(() => {
   const symbol = breadthPayload.value?.put_call_symbol;
   return symbol ? breadthPayload.value?.series[symbol] ?? null : null;
 });
-const filteredFutoiInstruments = computed(() => {
-  const query = normalizeSearchText(futoiInstrumentSearch.value);
-  if (!query) {
-    return futoiInstruments.value;
-  }
-  return futoiInstruments.value.filter((instrument) =>
-    normalizeSearchText(
-      `${instrument.ticker} ${instrument.client_groups.join(" ")} ${instrument.last_trade_date ?? ""}`,
-    ).includes(query),
-  );
-});
-const selectedFutoiInstrument = computed(() =>
-  futoiInstruments.value.find((instrument) => instrument.ticker === selectedFutoiTicker.value) ??
-  null,
-);
-const futoiChartPoints = computed<FutoiChartPoint[]>(() => buildFutoiChartPoints(futoiChartRecords.value));
-const futoiChartLabels = computed<FutoiChartLabels>(() => ({
-  aria: t("chart.futoiAria"),
-  empty: t("empty.noFutoi"),
-  net: t("chart.futoiNet"),
-  long: t("chart.futoiLong"),
-  short: t("chart.futoiShort"),
-  openInterest: t("chart.futoiOpenInterest"),
-}));
-const futoiRecordClientGroups = computed(() =>
-  [...new Set(futoiRecords.value.map((record) => record.client_group))].sort().join(", "),
-);
-const futoiRecordMetrics = computed<FutoiMetric[]>(() => {
-  const selected = selectedFutoiInstrument.value;
-  return [
-    {
-      label: t("labels.futoiOpenInterest"),
-      value: formatNumber(selected?.gross_position ?? 0),
-    },
-    {
-      label: t("labels.netPosition"),
-      value: formatNumber(selected?.net_position ?? 0),
-    },
-    {
-      label: t("labels.longPosition"),
-      value: formatNumber(selected?.long_position ?? 0),
-    },
-    {
-      label: t("labels.shortPosition"),
-      value: formatNumber(selected?.short_position ?? 0),
-    },
-    {
-      label: t("labels.clientGroups"),
-      value: futoiRecordClientGroups.value || selected?.client_groups.join(", ") || "—",
-    },
-    {
-      label: t("labels.rows"),
-      value: formatNumber(futoiRecords.value.length || selected?.row_count || 0),
-    },
-  ];
-});
-const futoiDashboardMetrics = computed<FutoiMetric[]>(() => [
-  {
-    label: t("labels.futoiInstruments"),
-    value: formatNumber(futoiDashboard.value?.instrument_count ?? 0),
-  },
-  {
-    label: t("labels.snapshots"),
-    value: formatNumber(futoiDashboard.value?.snapshot_count ?? 0),
-  },
-  {
-    label: t("labels.unusualActivity"),
-    value: formatNumber(futoiDashboard.value?.unusual_events.length ?? 0),
-  },
-  {
-    label: t("labels.latest"),
-    value: futoiDashboard.value?.latest[0]?.ticker ?? "—",
-  },
-]);
-const futoiDashboardEvents = computed<MarketEvent[]>(() => futoiDashboard.value?.unusual_events ?? []);
-const dailyReportSections = computed(() => dailyReport.value?.sections ?? []);
 const chartLabels = computed(() => ({
   aria: t("chart.aria"),
   empty: t("empty.noCandles"),
@@ -894,9 +583,6 @@ const chartLabels = computed(() => ({
 const consensusSignals = computed(() =>
   groupSignalsByConsensus(livePayload.value?.signals ?? [], liveConsensusMinConfirmations.value),
 );
-const russianLiveConsensusSignals = computed(() =>
-  groupSignalsByConsensus(russianLivePayload.value?.signals ?? [], liveConsensusMinConfirmations.value),
-);
 const displayedSignals = computed(() => {
   const rawSignals = livePayload.value?.signals ?? [];
   if (!isMultiStrategyLive.value || liveSignalDisplayMode.value === "individual") {
@@ -905,15 +591,6 @@ const displayedSignals = computed(() => {
       : rawSignals;
   }
   return limitRecentSignals(consensusSignals.value, liveMaxSignals.value);
-});
-const displayedRussianLiveSignals = computed(() => {
-  const rawSignals = russianLivePayload.value?.signals ?? [];
-  if (!isMultiStrategyRussianLive.value || liveSignalDisplayMode.value === "individual") {
-    return isMultiStrategyRussianLive.value
-      ? limitRecentSignals(rawSignals, liveMaxSignals.value)
-      : rawSignals;
-  }
-  return limitRecentSignals(russianLiveConsensusSignals.value, liveMaxSignals.value);
 });
 const sortedQuantStrategyIdeas = computed(() =>
   [...quantStrategyIdeas.value].sort((left, right) => Math.abs(right.score) - Math.abs(left.score)),
@@ -927,14 +604,8 @@ watch(liveMarket, () => {
   ensureLiveSymbolForMarket(liveMarket.value);
 });
 
-watch(russianLiveMarket, () => {
-  russianLiveSymbolSearch.value = "";
-  ensureRussianLiveSymbolForMarket(russianLiveMarket.value);
-});
-
 watch(strategies, () => {
   liveSelectedStrategies.value = selectedLiveStrategyNames.value;
-  russianLiveSelectedStrategies.value = selectedRussianLiveStrategyNames.value;
 });
 
 watch(liveStrategyRequest, (strategyValue) => {
@@ -950,25 +621,9 @@ watch([liveMarket, liveSymbol, liveInterval, liveLimit, liveStrategyRequest], ()
   }
 });
 
-watch(
-  [russianLiveMarket, russianLiveSymbol, russianLiveInterval, russianLiveLimit, russianLiveStrategyRequest, russianLiveAlgoPackDatasets],
-  () => {
-    if (activeMode.value === "russian-live") {
-      refreshRussianLiveChart();
-    }
-  },
-  { deep: true },
-);
-
 watch([liveMarket, liveSymbol, liveVisibleIndicators, liveStrategyRequest], () => {
   if (activeMode.value === "live" && !isApplyingLiveSettingsFromUrl) {
     syncLiveUrl();
-  }
-}, { deep: true });
-
-watch([russianLiveMarket, russianLiveSymbol, russianLiveInterval, russianLiveLimit, russianLiveVisibleIndicators, russianLiveStrategyRequest], () => {
-  if (activeMode.value === "russian-live" && !isApplyingRussianLiveSettingsFromUrl) {
-    syncRussianLiveUrl();
   }
 }, { deep: true });
 
@@ -980,20 +635,11 @@ watch(locale, () => {
   if (!liveStatusType.value) {
     liveStatus.value = t("status.ready");
   }
-  if (!russianLiveStatusType.value) {
-    russianLiveStatus.value = t("status.ready");
-  }
   if (!breadthStatusType.value) {
     breadthStatus.value = t("status.ready");
   }
   if (!quantStatusType.value) {
     quantStatus.value = t("status.ready");
-  }
-  if (!futoiStatusType.value) {
-    futoiStatus.value = t("status.ready");
-  }
-  if (!reportStatusType.value) {
-    reportStatus.value = t("status.ready");
   }
   if (!adminStatusType.value) {
     adminStatus.value = t("status.ready");
@@ -1007,7 +653,6 @@ watch(locale, () => {
   if (!authStatusType.value && authStatus.value) {
     authStatus.value = t("auth.ready");
   }
-  enforceLocaleAvailability();
 });
 
 onMounted(async () => {
@@ -1035,9 +680,6 @@ function handlePopState() {
   if (nextMode === "live") {
     applyLiveSettingsFromLocation();
   }
-  if (nextMode === "russian-live") {
-    applyRussianLiveSettingsFromLocation();
-  }
   setMode(nextMode, false);
 }
 
@@ -1048,17 +690,10 @@ function modeFromLocation(): Mode {
 function isFeatureMode(mode: Mode): boolean {
   return (
     mode === "live" ||
-    mode === "russian-live" ||
     mode === "breadth" ||
     mode === "quant" ||
-    mode === "futoi" ||
-    mode === "reports" ||
     mode === "feedback"
   );
-}
-
-function isRussianLiveMarket(market: string): boolean {
-  return russianLiveMarkets.has(market);
 }
 
 function permittedMode(mode: Mode): Mode {
@@ -1070,12 +705,6 @@ function permittedMode(mode: Mode): Mode {
   }
   if (isFeatureMode(mode) && !canUseFeatures.value) {
     return "profile";
-  }
-  if (mode === "futoi" && !isRussianLocale.value) {
-    return "live";
-  }
-  if (mode === "russian-live" && !isRussianLocale.value) {
-    return "live";
   }
   return mode;
 }
@@ -1089,9 +718,7 @@ function setMode(mode: Mode, updateUrl = true) {
   }
   const nextUrl = nextMode === "live"
     ? liveUrlPath()
-    : nextMode === "russian-live"
-      ? russianLiveUrlPath()
-      : modeRoutes[nextMode];
+    : modeRoutes[nextMode];
   const currentUrl = `${window.location.pathname}${window.location.search}`;
   if (updateUrl && currentUrl !== nextUrl) {
     window.history.pushState({ mode: nextMode }, "", nextUrl);
@@ -1099,20 +726,11 @@ function setMode(mode: Mode, updateUrl = true) {
   if (nextMode === "live") {
     startLivePolling(true);
   }
-  if (nextMode === "russian-live") {
-    startRussianLivePolling(true);
-  }
   if (nextMode === "breadth") {
     void loadMarketBreadth();
   }
   if (nextMode === "quant") {
     void loadQuantStrategyIdeas();
-  }
-  if (nextMode === "futoi") {
-    void loadFutoiDashboard();
-  }
-  if (nextMode === "reports") {
-    void loadDailyMarketReport();
   }
   if (nextMode === "profile") {
     void loadProfile();
@@ -1136,11 +754,6 @@ function setLiveStatus(message: string, type: StatusType = "") {
   liveStatusType.value = type;
 }
 
-function setRussianLiveStatus(message: string, type: StatusType = "") {
-  russianLiveStatus.value = message;
-  russianLiveStatusType.value = type;
-}
-
 function setBreadthStatus(message: string, type: StatusType = "") {
   breadthStatus.value = message;
   breadthStatusType.value = type;
@@ -1149,16 +762,6 @@ function setBreadthStatus(message: string, type: StatusType = "") {
 function setQuantStatus(message: string, type: StatusType = "") {
   quantStatus.value = message;
   quantStatusType.value = type;
-}
-
-function setFutoiStatus(message: string, type: StatusType = "") {
-  futoiStatus.value = message;
-  futoiStatusType.value = type;
-}
-
-function setReportStatus(message: string, type: StatusType = "") {
-  reportStatus.value = message;
-  reportStatusType.value = type;
 }
 
 function setAdminStatus(message: string, type: StatusType = "") {
@@ -1197,13 +800,10 @@ async function bootstrapAuthenticatedApp() {
     await loadWatchlists();
   } else {
     liveSymbolsByMarket.value = {};
-    russianLiveSymbolsByMarket.value = {};
     strategies.value = [];
     liveWatchlists.value = [];
   }
   applyLiveSettingsFromLocation();
-  applyRussianLiveSettingsFromLocation();
-  enforceLocaleAvailability();
   setMode(modeFromLocation(), false);
 }
 
@@ -1258,91 +858,12 @@ function liveUrlPath() {
   return `${modeRoutes.live}?${params.toString()}`;
 }
 
-function applyRussianLiveSettingsFromLocation() {
-  if (modeFromLocation() !== "russian-live") {
-    return;
-  }
-  const params = new URLSearchParams(window.location.search);
-  isApplyingRussianLiveSettingsFromUrl = true;
-  try {
-    const market = params.get("market");
-    if (market && russianLiveSymbolsByMarket.value[market]) {
-      russianLiveMarket.value = market;
-    }
-    const symbolOptions = activeRussianLiveSymbolOptions.value;
-    const symbol = (params.get("symbol") ?? "").trim().toUpperCase();
-    const matchedSymbol = symbolOptions.find(
-      (option) => String(option.value).toUpperCase() === symbol,
-    );
-    if (matchedSymbol) {
-      russianLiveSymbol.value = String(matchedSymbol.value);
-    } else {
-      ensureRussianLiveSymbolForMarket(russianLiveMarket.value);
-    }
-    const interval = params.get("interval");
-    if (interval && liveIntervalOptions.some((option) => String(option.value) === interval)) {
-      russianLiveInterval.value = interval;
-    }
-    const limit = params.get("limit");
-    const matchedLimit = liveCandleOptions.find((option) => String(option.value) === limit);
-    if (matchedLimit) {
-      russianLiveLimit.value = matchedLimit.value;
-    }
-    if (params.has("indicators")) {
-      russianLiveVisibleIndicators.value = parseRussianLiveIndicators(params.get("indicators"));
-    }
-    if (params.has("strategy")) {
-      russianLiveSelectedStrategies.value = parseLiveStrategyRequest(params.get("strategy"), true);
-    }
-  } finally {
-    queueMicrotask(() => {
-      isApplyingRussianLiveSettingsFromUrl = false;
-    });
-  }
-}
-
-function syncRussianLiveUrl() {
-  const nextUrl = russianLiveUrlPath();
-  const currentUrl = `${window.location.pathname}${window.location.search}`;
-  if (currentUrl !== nextUrl) {
-    window.history.replaceState({ mode: "russian-live" }, "", nextUrl);
-  }
-}
-
-function russianLiveUrlPath() {
-  const params = new URLSearchParams();
-  params.set("market", russianLiveMarket.value);
-  params.set("symbol", russianLiveSymbol.value);
-  params.set("interval", String(russianLiveInterval.value));
-  params.set("limit", String(russianLiveLimit.value));
-  params.set("indicators", russianLiveVisibleIndicators.value.join(","));
-  params.set("strategy", russianLiveStrategyRequest.value);
-  return `${modeRoutes["russian-live"]}?${params.toString()}`;
-}
-
 function parseLiveIndicators(value: string | null) {
   if (!value) {
     return [];
   }
   const availableIndicators = new Set(
     popularIndicatorOptions.value.map((option) => String(option.value)),
-  );
-  return [
-    ...new Set(
-      value
-        .split(",")
-        .map((indicator) => indicator.trim().toLowerCase())
-        .filter((indicator) => availableIndicators.has(indicator)),
-    ),
-  ];
-}
-
-function parseRussianLiveIndicators(value: string | null) {
-  if (!value) {
-    return [];
-  }
-  const availableIndicators = new Set(
-    russianLiveIndicatorOptions.value.map((option) => String(option.value)),
   );
   return [
     ...new Set(
@@ -1486,26 +1007,6 @@ function ensureLiveSymbolForMarket(market: string) {
   }
   if (!symbolOptions.some((option) => String(option.value) === liveSymbol.value)) {
     liveSymbol.value = String(symbolOptions[0].value);
-  }
-}
-
-function ensureRussianLiveSymbolForMarket(market: string) {
-  const symbolOptions = russianLiveSymbolsByMarket.value[market] ?? [];
-  if (!symbolOptions.length) {
-    return;
-  }
-  if (!symbolOptions.some((option) => String(option.value) === russianLiveSymbol.value)) {
-    russianLiveSymbol.value = String(symbolOptions[0].value);
-  }
-}
-
-function enforceLocaleAvailability() {
-  if (!isRussianLocale.value && isRussianLiveMarket(liveMarket.value)) {
-    liveMarket.value = String(liveMarketOptions.value[0]?.value ?? "crypto_spot");
-    ensureLiveSymbolForMarket(liveMarket.value);
-  }
-  if (!isRussianLocale.value && (activeMode.value === "futoi" || activeMode.value === "russian-live")) {
-    setMode("live");
   }
 }
 
@@ -1661,12 +1162,6 @@ async function deleteWatchlist(watchlistId: string) {
 }
 
 function applyWatchlistSymbol(watchlist: SavedWatchlist, symbol: string) {
-  if (russianLiveMarkets.has(watchlist.market)) {
-    russianLiveMarket.value = watchlist.market;
-    russianLiveSymbol.value = symbol;
-    setMode("russian-live");
-    return;
-  }
   liveMarket.value = watchlist.market;
   liveSymbol.value = symbol;
   setMode("live");
@@ -1759,15 +1254,11 @@ async function loadProfile() {
 async function loadLiveSymbols() {
   if (!canUseFeatures.value) {
     liveSymbolsByMarket.value = {};
-    russianLiveSymbolsByMarket.value = {};
     return;
   }
   const payload = await requestJson<LiveSymbolsPayload>("/api/live-symbols");
   liveSymbolsByMarket.value = payload.symbols;
-  russianLiveSymbolsByMarket.value = payload.russian_symbols;
-  enforceLocaleAvailability();
   ensureLiveSymbolForMarket(liveMarket.value);
-  ensureRussianLiveSymbolForMarket(russianLiveMarket.value);
 }
 
 async function loadAdminUsers() {
@@ -1987,16 +1478,9 @@ async function logout() {
   authUser.value = null;
   stopLivePolling();
   livePayload.value = null;
-  russianLivePayload.value = null;
   quantPayload.value = null;
   quantStrategyIdeas.value = [];
   breadthPayload.value = null;
-  futoiRecords.value = [];
-  futoiChartRecords.value = [];
-  futoiDashboard.value = null;
-  futoiInstruments.value = [];
-  selectedFutoiTicker.value = "";
-  dailyReport.value = null;
   liveWatchlists.value = [];
   adminUsers.value = [];
   adminFeedback.value = [];
@@ -2060,47 +1544,6 @@ async function loadLiveChart({ showLoader = false }: ChartLoadOptions = {}) {
   }
 }
 
-async function loadRussianLiveChart({ showLoader = false }: ChartLoadOptions = {}) {
-  const requestId = ++russianLiveChartRequestId;
-  if (!canUseFeatures.value) {
-    setRussianLiveStatus(t("auth.inactive"), "error");
-    return;
-  }
-  if (showLoader) {
-    russianLiveChartLoading.value = true;
-    russianLiveChartLoadingRequestId = requestId;
-    setRussianLiveStatus(t("status.loadingChart"), "busy");
-  }
-  try {
-    const params = new URLSearchParams(toQuery({
-      ...settings,
-      market: russianLiveMarket.value,
-      symbol: russianLiveSymbol.value,
-      interval: russianLiveInterval.value,
-      limit: russianLiveLimit.value,
-    }));
-    params.set("strategy", russianLiveStrategyRequest.value);
-    params.set("algopack", russianLiveAlgoPackDatasets.value.join(","));
-    const chartPayload = await requestJson<LiveChartPayload>(`/api/live-chart?${params.toString()}`);
-    if (requestId !== russianLiveChartRequestId) {
-      return;
-    }
-    russianLivePayload.value = chartPayload;
-    setRussianLiveStatus(`${t("status.updated")} ${new Date().toLocaleTimeString()}`);
-  } catch (error) {
-    if (requestId !== russianLiveChartRequestId) {
-      return;
-    }
-    russianLivePayload.value = null;
-    setRussianLiveStatus(errorMessage(error), "error");
-  } finally {
-    if (showLoader && russianLiveChartLoadingRequestId === requestId) {
-      russianLiveChartLoading.value = false;
-      russianLiveChartLoadingRequestId = 0;
-    }
-  }
-}
-
 async function loadQuantStrategyIdeas() {
   if (!canUseFeatures.value) {
     setQuantStatus(t("auth.inactive"), "error");
@@ -2119,7 +1562,7 @@ async function loadQuantStrategyIdeas() {
     const payload = await requestJson<QuantStrategiesPayload>(`/api/quant-strategies?${query}`);
     quantPayload.value = payload;
     quantStrategyIdeas.value = payload.ideas;
-    setQuantStatus(`${t("status.updated")} ${payload.ideas.length}`);
+    setQuantStatus(`${t("status.updated")} ${new Date().toLocaleTimeString()}`);
   } catch (error) {
     quantPayload.value = null;
     quantStrategyIdeas.value = [];
@@ -2167,277 +1610,21 @@ function resetLiveStrategies() {
   liveSelectedStrategies.value = [strategies.value[0]?.name ?? "ema-rsi"];
 }
 
-function toggleRussianLiveStrategy(strategyName: string) {
-  if (russianLiveSelectedStrategies.value.includes(strategyName)) {
-    russianLiveSelectedStrategies.value = russianLiveSelectedStrategies.value.filter((name) => name !== strategyName);
-    return;
-  }
-  russianLiveSelectedStrategies.value = [...russianLiveSelectedStrategies.value, strategyName];
-  if (russianLiveSelectedStrategies.value.length > 1) {
-    liveSignalDisplayMode.value = "consensus";
-  }
-}
-
-function setRussianLiveStrategies(strategyNames: string[]) {
-  const availableNames = new Set(strategies.value.map((strategy) => strategy.name));
-  russianLiveSelectedStrategies.value = strategyNames.filter((strategyName) => availableNames.has(strategyName));
-  if (russianLiveSelectedStrategies.value.length > 1) {
-    liveSignalDisplayMode.value = "consensus";
-  }
-}
-
-function selectRussianLiveStrategyGroup(strategyNames: string[]) {
-  setRussianLiveStrategies(strategyNames);
-}
-
-function selectAllRussianLiveStrategies() {
-  setRussianLiveStrategies(strategies.value.map((strategy) => strategy.name));
-  closeLiveStrategyMenu();
-}
-
-function clearRussianLiveStrategies() {
-  russianLiveSelectedStrategies.value = [];
-}
-
 function localizedLiveSymbolOption(option: SelectOption): SelectOption {
-  if (locale.value === "ru") {
-    const russianLabel = russianLiveSymbolLabels[String(option.value).toUpperCase()];
-    if (russianLabel) {
-      return { ...option, label: russianLabel };
-    }
-  }
   return option;
 }
 
-function selectLiveSymbol(value: string | number) {
-  liveSymbol.value = String(value);
-  liveSymbolSearch.value = "";
-}
-
-function selectRussianLiveSymbol(value: string | number) {
-  russianLiveSymbol.value = String(value);
-  russianLiveSymbolSearch.value = "";
-}
-
-function toggleLiveIndicator(indicatorId: string) {
-  if (liveVisibleIndicators.value.includes(indicatorId)) {
-    liveVisibleIndicators.value = liveVisibleIndicators.value.filter((id) => id !== indicatorId);
-    return;
-  }
-  liveVisibleIndicators.value = [...liveVisibleIndicators.value, indicatorId];
-}
-
-function toggleRussianLiveIndicator(indicatorId: string) {
-  if (russianLiveVisibleIndicators.value.includes(indicatorId)) {
-    russianLiveVisibleIndicators.value = russianLiveVisibleIndicators.value.filter((id) => id !== indicatorId);
-    return;
-  }
-  russianLiveVisibleIndicators.value = [...russianLiveVisibleIndicators.value, indicatorId];
-}
-
-function isAlgoPackIndicator(indicatorId: string): boolean {
-  return indicatorId.startsWith("algopack-");
-}
-
-function startLivePolling(showLoader = false) {
-  void loadLiveChart({ showLoader });
-  const seconds = Math.max(2, Number(liveRefresh.value || 10));
-  liveTimer = window.setInterval(() => void loadLiveChart(), seconds * 1000);
-}
-
-function startRussianLivePolling(showLoader = false) {
-  void loadRussianLiveChart({ showLoader });
-  const seconds = Math.max(2, Number(liveRefresh.value || 10));
-  russianLiveTimer = window.setInterval(() => void loadRussianLiveChart(), seconds * 1000);
-}
-
-function stopLivePolling() {
-  if (liveTimer) {
-    window.clearInterval(liveTimer);
-    liveTimer = 0;
-  }
-  if (russianLiveTimer) {
-    window.clearInterval(russianLiveTimer);
-    russianLiveTimer = 0;
-  }
-}
-
-function refreshLiveChart() {
-  stopLivePolling();
-  if (activeMode.value === "live") {
-    startLivePolling(true);
-    return;
-  }
-  void loadLiveChart({ showLoader: true });
-}
-
-function refreshRussianLiveChart() {
-  stopLivePolling();
-  if (activeMode.value === "russian-live") {
-    startRussianLivePolling(true);
-    return;
-  }
-  void loadRussianLiveChart({ showLoader: true });
-}
-
-async function loadMarketBreadth() {
-  if (!canUseFeatures.value) {
-    setBreadthStatus(t("auth.inactive"), "error");
-    return;
-  }
-  setBreadthStatus(t("status.loadingBreadth"), "busy");
-  try {
-    breadthPayload.value = await requestJson<MarketBreadthPayload>("/api/market-breadth");
-    setBreadthStatus(`${t("status.updated")} ${breadthUpdatedAt.value}`);
-  } catch (error) {
-    breadthPayload.value = null;
-    setBreadthStatus(errorMessage(error), "error");
-  }
-}
-
-async function loadFutoiDashboard() {
-  const hasInstruments = await loadFutoiInstruments();
-  if (hasInstruments) {
-    await loadFutoi();
-  }
-}
-
-async function loadFutoiInstruments(): Promise<boolean> {
-  if (!canUseFeatures.value) {
-    setFutoiStatus(t("auth.inactive"), "error");
-    return false;
-  }
-  setFutoiStatus(t("status.loadingFutoi"), "busy");
-  try {
-    const payload = await requestJson<FutoiInstrumentsPayload>("/api/futoi/instruments");
-    futoiInstruments.value = payload.instruments;
-    const selectedExists = payload.instruments.some(
-      (instrument) => instrument.ticker === selectedFutoiTicker.value,
-    );
-    if (!selectedExists) {
-      selectedFutoiTicker.value = payload.instruments[0]?.ticker ?? "";
-    }
-    futoiForm.ticker = selectedFutoiTicker.value;
-    if (!payload.instruments.length) {
-      futoiRecords.value = [];
-      futoiChartRecords.value = [];
-      setFutoiStatus(`${t("status.updated")} 0`);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    futoiInstruments.value = [];
-    selectedFutoiTicker.value = "";
-    futoiRecords.value = [];
-    futoiChartRecords.value = [];
-    setFutoiStatus(errorMessage(error), "error");
-    return false;
-  }
-}
-
-async function loadFutoi() {
-  if (!canUseFeatures.value) {
-    setFutoiStatus(t("auth.inactive"), "error");
-    return;
-  }
-  setFutoiStatus(t("status.loadingFutoi"), "busy");
-  const params = new URLSearchParams();
-  if (futoiForm.date) {
-    params.set("date", futoiForm.date);
-  }
-  const selectedTicker = selectedFutoiTicker.value || futoiForm.ticker.trim().toUpperCase();
-  if (selectedTicker) {
-    params.set("ticker", selectedTicker);
-  }
-  if (futoiForm.limit) {
-    params.set("limit", futoiForm.limit);
-  }
-  params.set("history_days", "365");
-  try {
-    const payload = await requestJson<FutoiPayload>(`/api/futoi?${params.toString()}`);
-    futoiRecords.value = payload.records;
-    futoiChartRecords.value = payload.chart_records;
-    futoiDashboard.value = payload.dashboard;
-    setFutoiStatus(`${t("status.updated")} ${payload.records.length}`);
-  } catch (error) {
-    futoiRecords.value = [];
-    futoiChartRecords.value = [];
-    futoiDashboard.value = null;
-    setFutoiStatus(errorMessage(error), "error");
-  }
-}
-
-async function loadDailyMarketReport() {
-  if (!canUseFeatures.value) {
-    setReportStatus(t("auth.inactive"), "error");
-    return;
-  }
-  setReportStatus(t("status.loadingReport"), "busy");
-  const params = new URLSearchParams();
-  if (reportDate.value) {
-    params.set("date", reportDate.value);
-  }
-  try {
-    const payload = await requestJson<DailyMarketReportPayload>(`/api/reports/daily?${params.toString()}`);
-    dailyReport.value = payload.report;
-    setReportStatus(`${t("status.updated")} ${payload.report.date}`);
-  } catch (error) {
-    dailyReport.value = null;
-    setReportStatus(errorMessage(error), "error");
-  }
-}
-
-function selectFutoiInstrument(ticker: string) {
-  selectedFutoiTicker.value = ticker;
-  futoiForm.ticker = ticker;
-  void loadFutoi();
-}
-
-function buildFutoiChartPoints(records: FutoiRecord[]): FutoiChartPoint[] {
-  const pointsByTime = new Map<number, FutoiChartPoint>();
-  for (const record of records) {
-    const time = futoiRecordTime(record);
-    if (time === null) {
-      continue;
-    }
-    const point = pointsByTime.get(time) ?? {
-      time,
-      net_position: 0,
-      long_position: 0,
-      short_position: 0,
-      open_interest: 0,
-    };
-    point.net_position += Number(record.position);
-    point.long_position += Number(record.position_long);
-    point.short_position += Number(record.position_short);
-    point.open_interest += Math.abs(Number(record.position_long)) + Math.abs(Number(record.position_short));
-    pointsByTime.set(time, point);
-  }
-  return [...pointsByTime.values()].sort((left, right) => left.time - right.time);
-}
-
-function futoiRecordTime(record: FutoiRecord): number | null {
-  const timestamp = Date.parse(`${record.trade_date}T${record.trade_time}`);
-  if (Number.isFinite(timestamp)) {
-    return Math.floor(timestamp / 1000);
-  }
-  const fallback = Date.parse(record.trade_date);
-  return Number.isFinite(fallback) ? Math.floor(fallback / 1000) : null;
-}
-
-function strategyTitle(name: string): string {
-  return translateStrategyTitle(locale.value, name, name);
-}
-
-function strategyMatchesSearch(
-  strategy: StrategyOption,
-  group: StrategyGroup,
-  normalizedQuery: string,
-): boolean {
-  const searchableText = normalizeSearchText(
-    `${strategy.title} ${strategy.description} ${strategy.name} ${group.label}`,
+function strategyTitle(strategyName: string): string {
+  return (
+    liveStrategyOptions.value.find((strategy) => strategy.name === strategyName)?.title ??
+    translateStrategyTitle(locale.value, strategyName, strategyName)
   );
-  return searchableText.includes(normalizedQuery);
+}
+
+function strategyMatchesSearch(strategy: StrategyOption, group: StrategyGroup, query: string): boolean {
+  return [strategy.name, strategy.title, strategy.description, group.label].some((value) =>
+    normalizeSearchText(value).includes(query),
+  );
 }
 
 function formatNumber(value: unknown): string {
@@ -2474,6 +1661,56 @@ function formatFeedbackStatus(status: FeedbackStatus): string {
 function latestBreadthCandle(symbol: string): MarketBreadthBar | null {
   const candles = breadthPayload.value?.series[symbol]?.candles ?? [];
   return candles.length ? candles[candles.length - 1] : null;
+}
+
+function selectLiveSymbol(value: string | number) {
+  liveSymbol.value = String(value);
+  liveSymbolSearch.value = "";
+}
+
+function toggleLiveIndicator(indicatorId: string) {
+  if (liveVisibleIndicators.value.includes(indicatorId)) {
+    liveVisibleIndicators.value = liveVisibleIndicators.value.filter((id) => id !== indicatorId);
+    return;
+  }
+  liveVisibleIndicators.value = [...liveVisibleIndicators.value, indicatorId];
+}
+
+function startLivePolling(showLoader = false) {
+  void loadLiveChart({ showLoader });
+  const seconds = Math.max(2, Number(liveRefresh.value || 10));
+  liveTimer = window.setInterval(() => void loadLiveChart(), seconds * 1000);
+}
+
+function stopLivePolling() {
+  if (liveTimer) {
+    window.clearInterval(liveTimer);
+    liveTimer = 0;
+  }
+}
+
+function refreshLiveChart() {
+  stopLivePolling();
+  if (activeMode.value === "live") {
+    startLivePolling(true);
+    return;
+  }
+  void loadLiveChart({ showLoader: true });
+}
+
+async function loadMarketBreadth() {
+  if (!canUseFeatures.value) {
+    setBreadthStatus(t("auth.inactive"), "error");
+    return;
+  }
+  setBreadthStatus(t("status.loadingBreadth"), "busy");
+  try {
+    breadthPayload.value = await requestJson<MarketBreadthPayload>("/api/market-breadth");
+    setBreadthStatus(`${t("status.updated")} ${breadthUpdatedAt.value}`);
+  } catch (error) {
+    breadthPayload.value = null;
+    setBreadthStatus(errorMessage(error), "error");
+  }
 }
 
 function latestBreadthClose(symbol: string): string {
@@ -2601,17 +1838,6 @@ function localizedQuantReason(idea: QuantStrategyIdea, reason: string): string |
     }
   }
 
-  if (idea.id === "futoi-positioning") {
-    if (reason === "No FUTOI records are available for this symbol.") {
-      return localizedOrFallback("quant.reasons.futoi-positioning.no-data", reason);
-    }
-    const match = reason.match(/^Latest FUTOI net positioning is (positive|negative|balanced) for (.+)\.$/);
-    if (match) {
-      return translateTemplate(`quant.reasons.futoi-positioning.${match[1]}` as MessageKey, reason, {
-        symbol: match[2],
-      });
-    }
-  }
 
   return null;
 }
@@ -3208,7 +2434,7 @@ function errorMessage(error: unknown): string {
             <span>{{ t("labels.market") }}</span>
             <select v-model="watchlistForm.market">
               <option
-                v-for="option in [...liveMarketOptions, ...russianLiveMarketOptions]"
+                v-for="option in liveMarketOptions"
                 :key="`watchlist-market-${option.value}`"
                 :value="option.value"
               >
@@ -3312,273 +2538,6 @@ function errorMessage(error: unknown): string {
         </header>
         <article
           v-for="event in liveMarketEvents"
-          :key="event.id"
-          class="market-event-card"
-          :class="eventSeverityClass(event)"
-        >
-          <span>{{ eventTimeLabel(event) }}</span>
-          <h4>{{ event.title }}</h4>
-          <p>{{ event.details }}</p>
-          <dl>
-            <div v-for="[metric, value] in eventMetricEntries(event)" :key="`${event.id}:${metric}`">
-              <dt>{{ metric }}</dt>
-              <dd>{{ formatNumber(value) }}</dd>
-            </div>
-          </dl>
-        </article>
-      </div>
-    </section>
-
-    <section v-else-if="activeMode === 'russian-live'" class="panel live-panel russian-live-panel">
-      <div class="panel-heading">
-        <div>
-          <h2>{{ t("pages.russianLive") }}</h2>
-          <p>{{ t("pages.russianLiveSubtitle") }}</p>
-        </div>
-        <div class="status" :class="russianLiveStatusType ? `is-${russianLiveStatusType}` : ''">
-          {{ russianLiveStatus }}
-        </div>
-      </div>
-      <div class="live-market-strip">
-        <div class="ticker-pill">
-          <span>{{ t("labels.market") }}</span>
-          <b>{{ russianLivePayload?.symbol ?? russianLiveSymbol }}</b>
-        </div>
-        <div class="ticker-pill">
-          <span>{{ t("labels.interval") }}</span>
-          <b>{{ russianLivePayload?.interval ?? russianLiveInterval }}</b>
-        </div>
-        <div class="ticker-pill">
-          <span>{{ t("labels.candles") }}</span>
-          <b>{{ formatNumber(russianLiveCandleCount) }}</b>
-        </div>
-        <div class="ticker-pill">
-          <span>{{ t("labels.signals") }}</span>
-          <b>{{ formatNumber(russianLiveSignalCount) }}</b>
-        </div>
-      </div>
-      <div class="live-controls">
-        <div class="live-control-section market-controls">
-          <label>
-            <span>{{ t("labels.market") }}</span>
-            <select v-model="russianLiveMarket">
-              <option
-                v-for="option in russianLiveMarketOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label class="symbol-picker">
-            <span>{{ t("labels.symbol") }}</span>
-            <input
-              v-model.trim="russianLiveSymbolSearch"
-              autocomplete="off"
-              type="search"
-              :placeholder="t('labels.symbolSearch')"
-            >
-            <div
-              v-if="hasRussianLiveSymbolSearch"
-              class="symbol-results"
-              role="listbox"
-              :aria-label="t('labels.symbolSearch')"
-            >
-              <button
-                v-for="option in filteredRussianLiveSymbolOptions"
-                :key="`russian-symbol-search-${option.value}`"
-                class="symbol-result"
-                :class="{ 'is-active': String(option.value) === russianLiveSymbol }"
-                type="button"
-                @click="selectRussianLiveSymbol(option.value)"
-              >
-                <b>{{ option.value }}</b>
-                <small v-if="String(option.label) !== String(option.value)">
-                  {{ option.label }}
-                </small>
-              </button>
-              <div v-if="!filteredRussianLiveSymbolOptions.length" class="symbol-result-empty">
-                {{ t("empty.noMatchingSymbols") }}
-              </div>
-            </div>
-            <select v-model="russianLiveSymbol" @change="russianLiveSymbolSearch = ''">
-              <option
-                v-for="option in activeRussianLiveSymbolOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label>
-            <span>{{ t("labels.interval") }}</span>
-            <select v-model="russianLiveInterval">
-              <option
-                v-for="option in liveIntervalOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label>
-            <span>{{ t("labels.candles") }}</span>
-            <select v-model="russianLiveLimit">
-              <option
-                v-for="option in liveCandleOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <button class="primary" type="button" @click="refreshRussianLiveChart">
-            {{ t("actions.refreshChart") }}
-          </button>
-        </div>
-        <div class="live-control-section signal-controls">
-          <div class="strategy-picker live-strategy-field">
-            <strong class="strategy-picker-label">{{ t("labels.strategy") }}</strong>
-            <details ref="liveStrategyMenu" class="strategy-menu" :aria-label="t('labels.strategyPickerHint')">
-              <summary class="strategy-summary">
-                <span>
-                  <b>{{ activeRussianLiveStrategyLabel }}</b>
-                  <small>{{ selectedRussianLiveStrategyPreview }}</small>
-                </span>
-              </summary>
-              <div class="strategy-menu-body">
-                <input
-                  v-model.trim="liveStrategySearch"
-                  class="strategy-search"
-                  autocomplete="off"
-                  type="search"
-                  :placeholder="t('labels.strategySearch')"
-                >
-                <div class="strategy-actions">
-                  <button class="secondary" type="button" @click="selectAllRussianLiveStrategies">
-                    {{ t("actions.selectAll") }}
-                  </button>
-                  <button class="secondary" type="button" @click="clearRussianLiveStrategies">
-                    {{ t("actions.clear") }}
-                  </button>
-                </div>
-                <section
-                  v-for="group in filteredLiveStrategyGroups"
-                  :key="group.id"
-                  class="strategy-group"
-                >
-                  <div class="strategy-group-heading">
-                    <strong>{{ group.label }}</strong>
-                    <button
-                      class="secondary"
-                      type="button"
-                      @click="selectRussianLiveStrategyGroup(group.strategyNames)"
-                    >
-                      {{ t("actions.selectAll") }}
-                    </button>
-                  </div>
-                  <label
-                    v-for="strategy in group.strategies"
-                    :key="strategy.name"
-                    class="strategy-row"
-                    :class="{ 'is-active': russianLiveSelectedStrategies.includes(strategy.name) }"
-                  >
-                    <input
-                      type="checkbox"
-                      :checked="russianLiveSelectedStrategies.includes(strategy.name)"
-                      @change="toggleRussianLiveStrategy(strategy.name)"
-                    >
-                    <span class="strategy-row-copy">
-                      <b>{{ strategyTitle(strategy.name) }}</b>
-                      <small>{{ strategy.description }}</small>
-                    </span>
-                  </label>
-                </section>
-              </div>
-            </details>
-          </div>
-          <label v-if="isMultiStrategyRussianLive">
-            <span>{{ t("labels.signalView") }}</span>
-            <select v-model="liveSignalDisplayMode">
-              <option
-                v-for="option in liveSignalDisplayOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label v-if="isMultiStrategyRussianLive && liveSignalDisplayMode === 'consensus'">
-            <span>{{ t("labels.minConfirmations") }}</span>
-            <input v-model.number="liveConsensusMinConfirmations" type="number" min="1" max="20">
-          </label>
-          <label v-if="isMultiStrategyRussianLive">
-            <span>{{ t("labels.maxMarkers") }}</span>
-            <input v-model.number="liveMaxSignals" type="number" min="10" max="500">
-          </label>
-          <label class="toggle-row">
-            <input v-model="showSignals" type="checkbox">
-            <span>{{ t("labels.strategyMarkers") }}</span>
-          </label>
-        </div>
-      </div>
-      <div class="indicator-picker">
-        <span>{{ t("labels.indicators") }}</span>
-        <label
-          v-for="option in russianLiveIndicatorOptions"
-          :key="option.value"
-          class="check-chip"
-          :class="{
-            'is-active': russianLiveVisibleIndicators.includes(String(option.value)),
-            'is-algopack': isAlgoPackIndicator(String(option.value))
-          }"
-        >
-          <input
-            type="checkbox"
-            :checked="russianLiveVisibleIndicators.includes(String(option.value))"
-            @change="toggleRussianLiveIndicator(String(option.value))"
-          >
-          <span>{{ option.label }}</span>
-        </label>
-      </div>
-      <div class="chart-shell" :class="{ 'is-loading': russianLiveChartLoading }">
-        <div class="chart-legend">
-          <span><i class="legend-dot long"></i>{{ t("chart.longLegend") }}</span>
-          <span><i class="legend-dot short"></i>{{ t("chart.shortLegend") }}</span>
-          <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">{{ t("chart.tradingView") }}</a>
-        </div>
-        <div class="chart-stage">
-          <TradingViewChart
-            v-if="russianLivePayload"
-            :candles="russianLivePayload.candles"
-            :signals="displayedRussianLiveSignals"
-            :indicators="visibleRussianLiveIndicators"
-            :show-signals="showSignals"
-            :reset-key="russianLiveChartResetKey"
-            :aria-label="chartLabels.aria"
-            :empty-label="chartLabels.empty"
-            :long-signal-label="chartLabels.longSignal"
-            :short-signal-label="chartLabels.shortSignal"
-          />
-          <div v-else class="empty chart-empty">{{ t("empty.loadChart") }}</div>
-          <div v-if="russianLiveChartLoading" class="chart-loader" role="status" aria-live="polite">
-            <span class="chart-loader-spinner"></span>
-            <b>{{ t("status.loadingChart") }}</b>
-          </div>
-        </div>
-      </div>
-      <div class="market-event-feed">
-        <header>
-          <h3>{{ t("labels.marketEvents") }}</h3>
-          <span>{{ formatNumber(russianLiveMarketEvents.length) }}</span>
-        </header>
-        <article
-          v-for="event in russianLiveMarketEvents"
           :key="event.id"
           class="market-event-card"
           :class="eventSeverityClass(event)"
@@ -3874,206 +2833,6 @@ function errorMessage(error: unknown): string {
           </ul>
         </article>
       </div>
-    </section>
-
-    <section v-else-if='activeMode === "futoi"' class="panel futoi-panel">
-      <div class="panel-heading">
-        <div>
-          <h2>{{ t("pages.futoi") }}</h2>
-          <p>{{ t("pages.futoiSubtitle") }}</p>
-        </div>
-        <div class="actions">
-          <button class="primary" type="button" @click="loadFutoiDashboard">
-            {{ t("actions.refresh") }}
-          </button>
-          <div class="status" :class="futoiStatusType ? `is-${futoiStatusType}` : ''">
-            {{ futoiStatus }}
-          </div>
-        </div>
-      </div>
-      <div class="futoi-dashboard">
-        <aside class="futoi-instruments-panel">
-          <div class="futoi-section-heading">
-            <strong>{{ t("labels.futoiInstruments") }}</strong>
-            <span>{{ formatNumber(futoiInstruments.length) }}</span>
-          </div>
-          <label class="futoi-search">
-            <span>{{ t("labels.symbolSearch") }}</span>
-            <input
-              v-model.trim="futoiInstrumentSearch"
-              autocomplete="off"
-              type="search"
-              :placeholder="t('labels.symbolSearch')"
-            >
-          </label>
-          <div v-if="filteredFutoiInstruments.length" class="futoi-instrument-list">
-            <button
-              v-for="instrument in filteredFutoiInstruments"
-              :key="instrument.ticker"
-              type="button"
-              class="futoi-instrument-button"
-              :class="{ 'is-active': instrument.ticker === selectedFutoiTicker }"
-              @click="selectFutoiInstrument(instrument.ticker)"
-            >
-              <span>
-                <b>{{ instrument.ticker }}</b>
-                <small>{{ instrument.last_trade_date || "—" }} {{ instrument.last_trade_time || "" }}</small>
-              </span>
-              <strong>{{ formatNumber(instrument.gross_position) }}</strong>
-            </button>
-          </div>
-          <div v-else class="empty">{{ t("empty.noFutoiInstruments") }}</div>
-        </aside>
-
-        <div class="futoi-detail-panel">
-          <div class="futoi-detail-header">
-            <div>
-              <span>{{ t("labels.futoiTicker") }}</span>
-              <h3>{{ selectedFutoiTicker || "—" }}</h3>
-            </div>
-            <div>
-              <span>{{ t("labels.updated") }}</span>
-              <b>{{ formatDateTime(selectedFutoiInstrument?.system_time) }}</b>
-            </div>
-          </div>
-          <div class="futoi-detail-controls">
-            <label>
-              <span>{{ t("labels.futoiDate") }}</span>
-              <input v-model="futoiForm.date" type="date" @change="loadFutoi">
-            </label>
-            <label>
-              <span>{{ t("labels.limit") }}</span>
-              <input v-model="futoiForm.limit" type="number" min="1" max="5000" @change="loadFutoi">
-            </label>
-          </div>
-          <div class="futoi-metrics">
-            <div v-for="metric in futoiRecordMetrics" :key="metric.label" class="futoi-metric">
-              <span>{{ metric.label }}</span>
-              <b>{{ metric.value }}</b>
-            </div>
-          </div>
-          <section class="futoi-dashboard-grid" :aria-label="t('labels.futoiDashboard')">
-            <div
-              v-for="metric in futoiDashboardMetrics"
-              :key="`dashboard-${metric.label}`"
-              class="futoi-metric"
-            >
-              <span>{{ metric.label }}</span>
-              <b>{{ metric.value }}</b>
-            </div>
-          </section>
-          <div class="futoi-chart-shell">
-            <div class="futoi-chart-legend">
-              <span><i class="legend-dot net"></i>{{ futoiChartLabels.net }}</span>
-              <span><i class="legend-dot long"></i>{{ futoiChartLabels.long }}</span>
-              <span><i class="legend-dot short"></i>{{ futoiChartLabels.short }}</span>
-              <span><i class="legend-dot open-interest"></i>{{ futoiChartLabels.openInterest }}</span>
-            </div>
-            <FutoiPositionChart
-              :points="futoiChartPoints"
-              :labels="futoiChartLabels"
-            />
-          </div>
-          <div class="market-event-feed futoi-event-feed">
-            <header>
-              <h3>{{ t("labels.unusualActivity") }}</h3>
-              <span>{{ formatNumber(futoiDashboardEvents.length) }}</span>
-            </header>
-            <article
-              v-for="event in futoiDashboardEvents"
-              :key="event.id"
-              class="market-event-card"
-              :class="eventSeverityClass(event)"
-            >
-              <span>{{ eventTimeLabel(event) }}</span>
-              <h4>{{ event.title }}</h4>
-              <p>{{ event.details }}</p>
-              <dl>
-                <div v-for="[metric, value] in eventMetricEntries(event)" :key="`${event.id}:${metric}`">
-                  <dt>{{ metric }}</dt>
-                  <dd>{{ formatNumber(value) }}</dd>
-                </div>
-              </dl>
-            </article>
-          </div>
-          <div v-if="!futoiRecords.length" class="empty">{{ t("empty.noFutoi") }}</div>
-          <div v-else class="futoi-table-wrapper">
-            <table class="futoi-table">
-              <thead>
-                <tr>
-                  <th>{{ t("labels.futoiDate") }}</th>
-                  <th>{{ t("labels.tradeTime") }}</th>
-                  <th>{{ t("labels.futoiTicker") }}</th>
-                  <th>{{ t("labels.clientGroup") }}</th>
-                  <th>{{ t("labels.position") }}</th>
-                  <th>{{ t("labels.longPosition") }}</th>
-                  <th>{{ t("labels.shortPosition") }}</th>
-                  <th>{{ t("labels.longCount") }}</th>
-                  <th>{{ t("labels.shortCount") }}</th>
-                  <th>{{ t("labels.updated") }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="record in futoiRecords"
-                  :key="`${record.trade_date}:${record.trade_time}:${record.ticker}:${record.client_group}`"
-                >
-                  <td>{{ record.trade_date }}</td>
-                  <td>{{ record.trade_time }}</td>
-                  <td>{{ record.ticker }}</td>
-                  <td>{{ record.client_group }}</td>
-                  <td>{{ formatNumber(record.position) }}</td>
-                  <td>{{ formatNumber(record.position_long) }}</td>
-                  <td>{{ formatNumber(record.position_short) }}</td>
-                  <td>{{ formatNumber(record.position_long_count) }}</td>
-                  <td>{{ formatNumber(record.position_short_count) }}</td>
-                  <td>{{ formatDateTime(record.system_time) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section v-else-if='activeMode === "reports"' class="report-panel" :class="'panel'">
-      <div class="panel-heading">
-        <div>
-          <h2>{{ t("pages.dailyReport") }}</h2>
-          <p>{{ t("pages.dailyReportSubtitle") }}</p>
-        </div>
-        <div class="actions">
-          <label>
-            <span>{{ t("labels.reportDate") }}</span>
-            <input v-model="reportDate" type="date" @change="loadDailyMarketReport">
-          </label>
-          <button class="primary" type="button" @click="loadDailyMarketReport">
-            {{ t("actions.refresh") }}
-          </button>
-          <div class="status" :class="reportStatusType ? `is-${reportStatusType}` : ''">
-            {{ reportStatus }}
-          </div>
-        </div>
-      </div>
-      <div v-if="dailyReport" class="report-layout">
-        <header class="report-header">
-          <span>{{ dailyReport.date }}</span>
-          <h3>{{ dailyReport.title }}</h3>
-          <p>{{ dailyReport.triggered_symbols.join(", ") || "—" }}</p>
-        </header>
-        <section
-          v-for="section in dailyReportSections"
-          :key="section.title"
-          class="report-section"
-        >
-          <h4>{{ section.title }}</h4>
-          <ul>
-            <li v-for="line in section.lines" :key="`${section.title}:${line}`">{{ line }}</li>
-          </ul>
-        </section>
-        <textarea readonly :value="dailyReport.text" rows="12"></textarea>
-      </div>
-      <div v-else class="empty">{{ t("empty.noReport") }}</div>
     </section>
 
     <section v-else-if='activeMode === "profile"' class="panel profile-panel">

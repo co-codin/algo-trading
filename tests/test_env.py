@@ -8,26 +8,20 @@ from algo_trading.env import load_env_file
 
 
 class EnvTests(unittest.TestCase):
-    def test_load_env_file_reads_plain_and_quoted_values_without_overriding(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            env_path = Path(tmp) / ".env"
-            env_path.write_text(
+    def test_load_env_file_sets_missing_values_without_overriding_existing_env(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            env_file = Path(tempdir) / ".env"
+            env_file.write_text(
                 "\n".join(
                     [
-                        "MOEX_API_KEY=fake-token",
-                        "ADMIN_EMAIL='admin@example.com'",
-                        "ADMIN_PASSWORD=from-file",
+                        "DATABASE_URL=postgresql://example",
+                        "REDIS_URL=redis://example",
                     ]
                 ),
                 encoding="utf-8",
             )
-            with patch.dict(os.environ, {"ADMIN_PASSWORD": "from-shell"}, clear=True):
-                load_env_file(env_path)
+            with patch.dict(os.environ, {"REDIS_URL": "redis://existing"}, clear=True):
+                load_env_file(env_file)
 
-                self.assertEqual(os.environ["MOEX_API_KEY"], "fake-token")
-                self.assertEqual(os.environ["ADMIN_EMAIL"], "admin@example.com")
-                self.assertEqual(os.environ["ADMIN_PASSWORD"], "from-shell")
-
-
-if __name__ == "__main__":
-    unittest.main()
+                self.assertEqual(os.environ["DATABASE_URL"], "postgresql://example")
+                self.assertEqual(os.environ["REDIS_URL"], "redis://existing")

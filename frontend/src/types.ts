@@ -1,4 +1,4 @@
-export type Mode = "landing" | "live" | "russian-live" | "breadth" | "quant" | "futoi" | "reports" | "feedback" | "profile" | "admin";
+export type Mode = "landing" | "live" | "breadth" | "quant" | "feedback" | "profile" | "admin";
 
 export type AuthUser = {
   id: number;
@@ -169,7 +169,6 @@ export type LiveChartPayload = {
 export type LiveSymbolsPayload = {
   ok: true;
   symbols: Record<string, Array<{ value: string; label: string }>>;
-  russian_symbols: Record<string, Array<{ value: string; label: string }>>;
 };
 
 export type MarketBreadthItem = {
@@ -203,101 +202,6 @@ export type MarketBreadthPayload = {
   series: Record<string, MarketBreadthSeries>;
   put_call_symbol: string;
   updated_at: string;
-};
-
-export type FutoiRecord = {
-  trade_date: string;
-  trade_time: string;
-  ticker: string;
-  client_group: string;
-  position: number;
-  position_long: number;
-  position_short: number;
-  position_long_count: number;
-  position_short_count: number;
-  session_id: number | null;
-  sequence_number: number | null;
-  system_time: string | null;
-  trade_session_date: string | null;
-};
-
-export type FutoiChartPoint = {
-  time: number;
-  net_position: number;
-  long_position: number;
-  short_position: number;
-  open_interest: number;
-};
-
-export type FutoiInstrument = {
-  ticker: string;
-  last_trade_date: string | null;
-  last_trade_time: string | null;
-  system_time: string | null;
-  trade_session_date: string | null;
-  client_groups: string[];
-  net_position: number;
-  gross_position: number;
-  long_position: number;
-  short_position: number;
-  long_count: number;
-  short_count: number;
-  row_count: number;
-  updated_at: string | null;
-};
-
-export type FutoiSnapshot = {
-  ticker: string;
-  trade_date: string;
-  trade_time: string;
-  net_position: number;
-  gross_position: number;
-  long_position: number;
-  short_position: number;
-  row_count: number;
-};
-
-export type FutoiDashboard = {
-  ticker: string;
-  summary: Record<string, string | number | null>;
-  snapshots: FutoiSnapshot[];
-  events: MarketEvent[];
-  latest: FutoiSnapshot[];
-  unusual_events: MarketEvent[];
-  instrument_count: number;
-  snapshot_count: number;
-};
-
-export type FutoiPayload = {
-  ok: true;
-  records: FutoiRecord[];
-  chart_records: FutoiRecord[];
-  dashboard: FutoiDashboard;
-};
-
-export type FutoiInstrumentsPayload = {
-  ok: true;
-  instruments: FutoiInstrument[];
-};
-
-export type DailyMarketReportSection = {
-  title: string;
-  lines: string[];
-};
-
-export type DailyMarketReport = {
-  title: string;
-  date: string;
-  language: "ru";
-  sections: DailyMarketReportSection[];
-  triggered_symbols: string[];
-  text: string;
-  generated_at: string;
-};
-
-export type DailyMarketReportPayload = {
-  ok: true;
-  report: DailyMarketReport;
 };
 
 export type SavedWorkspace = {

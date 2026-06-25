@@ -2,7 +2,7 @@
 
 Local market charting, breadth monitoring, and simulated strategy research.
 
-Safety boundary: this project uses read-only market data only. It can read optional data-provider tokens such as `MOEX_API_KEY`, but it does not accept trading credentials and cannot place real orders.
+Safety boundary: this project uses read-only market data only. It does not accept trading credentials and cannot place real orders.
 
 ## Usage
 
@@ -41,7 +41,7 @@ The frontend is a Vue 3 control panel with direct URLs:
 - `http://127.0.0.1:8765/profile`
 - `http://127.0.0.1:8765/admin`
 
-The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST, the S&P 500 futures option uses delayed Yahoo Finance CME futures candles for `ES=F`, and MOEX instruments are split into Russian stocks, Russian indices, and Russian futures. MOEX candles use APIM when `MOEX_API_KEY` or `MOEXALGO_API_KEY` is configured, falling back to delayed public MOEX ISS candles without a token. Choose `All strategies` to show consensus or capped individual strategy markers instead of flooding the chart with every raw marker. The page also supports saved local workspaces, data-health badges, browser alerts for new visible signals, and JSON snapshot export for the current chart state.
+The `Live` / `Chart` view uses a TradingView-style dark control panel with TradingView Lightweight Charts. Crypto spot candles come from Binance public REST, US futures and ETFs use delayed Yahoo Finance data, and Hong Kong stocks plus commodities use the same read-only market-data path. Choose `All strategies` to show consensus or capped individual strategy markers instead of flooding the chart with every raw marker. The page also supports saved local workspaces, data-health badges, browser alerts for new visible signals, and JSON snapshot export for the current chart state.
 
 The `Breadth` page shows cached market-breadth history, including the official Cboe total put/call ratio at the top. `Profile` is available for signed-in users. `Admin` is visible only when the signed-in user's `is_admin` flag is true.
 
@@ -112,11 +112,9 @@ Both Docker paths mount local `runs/` for command-line simulation outputs and `l
 
 FastAPI unhandled exceptions are appended to `logs/app.log`, and RQ worker errors are appended to `logs/worker.log`. Docker stdout/stderr remains available through `docker compose logs`; generated `logs/` files are ignored by git.
 
-Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template and set `MOEX_API_KEY` or `MOEXALGO_API_KEY` there when MOEX authenticated data is needed. FUTOI uses the same key unless `MOEX_FUTOI_API_KEY` is set as a more specific override. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker. Leave `REDIS_URL` unset for local in-process background maintenance unless you are also running Redis and `python -m algo_trading.worker`.
+Runtime secrets belong in local `.env`, which is ignored by git. Use `.env.example` as the tracked template. Leave `DATABASE_URL` unset for local in-memory auth unless you are intentionally running Postgres outside Docker. Leave `REDIS_URL` unset for local in-process background maintenance unless you are also running Redis and `python -m algo_trading.worker`.
 
 Live candle CSVs are retained for the latest 1095 days. The web app schedules refresh jobs for existing candle CSVs in `historical_data/` every hour (`HISTORICAL_CSV_REFRESH_SECONDS=3600`) and schedules a daily prune (`HISTORICAL_CSV_PRUNE_SECONDS=86400`) so rows older than three years are removed. With Docker Compose, those jobs are stored in Redis and executed by the `worker` service. Without `REDIS_URL`, local runs execute the same maintenance in the FastAPI process.
-
-MOEX FUTOI historical data is refreshed daily (`MOEX_FUTOI_REFRESH_SECONDS=86400`) from MOEX APIM using the local `.env` key and saved as deduped CSV rows under `historical_data/futoi/futoi.csv` (`MOEX_FUTOI_DATA_DIR`). A weekly cleanup (`MOEX_FUTOI_PRUNE_SECONDS=604800`) keeps only the latest two years (`MOEX_FUTOI_RETENTION_DAYS=730`). Docker Compose also writes those rows into Postgres through the same refresh job. Active users can read stored rows through `/api/futoi?date=YYYY-MM-DD&ticker=IMOEXF`.
 
 The `US Market Breadth` page saves Barchart market-breadth history under `historical_data/breadth/<symbol>.csv`. Saved CSVs are reused for one hour before the app refreshes that symbol from Barchart and rewrites a deduped, date-sorted file containing only the latest 365 days. The exception is `historical_data/breadth/CPC.csv`: it stores the full official Cboe total put/call ratio history from Cboe's ratio archives plus the post-2019 daily market-statistics page, and it is not pruned to one year.
 
@@ -152,14 +150,6 @@ Export delayed Yahoo Finance Hong Kong stock candles:
 ```bash
 python3 -m algo_trading.cli candles --market hong_kong_stocks --symbol 9988.HK --interval 1d --days 365 --limit 1000 --output historical_data/hong_kong_stocks/9988.HK-1d-365d.csv
 python3 -m algo_trading.cli candles --market hong_kong_stocks --symbol 9888.HK --interval 1d --days 365 --limit 1000 --output historical_data/hong_kong_stocks/9888.HK-1d-365d.csv
-```
-
-Export the last 365 days of MOEX Russian stock candles. With `MOEX_API_KEY` set, this uses MOEX APIM:
-
-```bash
-python3 -m algo_trading.cli candles --market russian_bluechips --symbol TATN --interval 1d --days 365 --limit 1000 --output historical_data/russian_bluechips/TATN-1d-365d.csv
-python3 -m algo_trading.cli candles --market russian_indices --symbol IMOEX --interval 1d --days 365 --limit 1000 --output historical_data/russian_indices/IMOEX-1d-365d.csv
-python3 -m algo_trading.cli candles --market russian_futures --symbol IMOEXF --interval 1d --days 365 --limit 1000 --output historical_data/russian_futures/IMOEXF-1d-365d.csv
 ```
 
 The candle CSV columns are `open_time,open,high,low,close,volume`. The same file can be reused as a backtest fixture with `--fixture`.

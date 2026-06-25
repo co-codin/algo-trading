@@ -3,7 +3,7 @@
 ## Source of truth
 - Status: Active
 - Last refreshed: 2026-06-18
-- Primary product surfaces: Vue control panel, `/live` chart, `/breadth` breadth dashboard, `/futoi` MOEX open interest, `/profile`, `/feedback`, `/admin`.
+- Primary product surfaces: Vue control panel, `/live` chart, `/breadth` breadth dashboard, `/profile`, `/feedback`, `/admin`.
 - Evidence reviewed: `README.md`, `frontend/src/App.vue`, `frontend/src/style.css`, `frontend/src/components/TradingViewChart.vue`.
 
 ## Brand
@@ -12,19 +12,19 @@
 - Avoid: Marketing hero layouts, decorative illustrations, oversized cards, profit promises, and controls hidden behind command-line workflows.
 
 ## Product goals
-- Goals: Let a user inspect public market candles, overlay simulated strategy markers, monitor breadth history, review MOEX futures open interest, and manage local user access.
+- Goals: Let a user inspect public market candles, overlay simulated strategy markers, monitor breadth history, and manage local user access.
 - Non-goals: Real order placement, portfolio allocation, or guaranteed profitability.
-- Success signals: `/live` is chart-first, key controls are grouped by market, signal, and refresh intent, marker meaning is clear, breadth charts are easy to inspect, FUTOI instruments are refreshed from MOEX and selectable from a compact catalog, CSV history retention is explicit, and all trading actions remain simulated.
+- Success signals: `/live` is chart-first, key controls are grouped by market, signal, and refresh intent, marker meaning is clear, breadth charts are easy to inspect, CSV history retention is explicit, and all trading actions remain simulated.
 
 ## Personas and jobs
-- Primary personas: Crypto trader, index trader, Russian equities watcher, developer evaluating signal logic.
-- User jobs: Pick market/timeframe/candle depth, compare strategy signals, inspect breadth history, inspect MOEX FUTOI history, and manage account activation.
+- Primary personas: Crypto trader, index trader, Hong Kong equities watcher, developer evaluating signal logic.
+- User jobs: Pick market/timeframe/candle depth, compare strategy signals, inspect breadth history, and manage account activation.
 - Key contexts of use: Local desktop browser, repeated chart refreshes, quick switching between symbols and strategies.
 
 ## Information architecture
-- Primary navigation: Live, Breadth, and FUTOI stay in the main tab rail; Profile and Feedback live in the account dropdown; Admin remains a main tab for admins.
-- Core routes/screens: `/live`, `/chart`, `/breadth`, `/futoi`, `/profile`, `/feedback`, `/admin`.
-- Content hierarchy: Live market chart first; controls remain compact above the chart; breadth charts prioritize large inspection surfaces; FUTOI prioritizes the instrument catalog, selected ticker metrics, and a dense records table; admin prioritizes user status and activation actions.
+- Primary navigation: Live, Breadth, and Quant stay in the main tab rail; Profile and Feedback live in the account dropdown; Admin remains a main tab for admins.
+- Core routes/screens: `/live`, `/chart`, `/breadth`, `/quant`, `/profile`, `/feedback`, `/admin`.
+- Content hierarchy: Live market chart first; controls remain compact above the chart; breadth charts prioritize large inspection surfaces; quant prioritizes ranked strategy ideas and supporting reasons; admin prioritizes user status and activation actions.
 
 ## Design principles
 - Principle 1: Chart-first density. Trading decisions start from the candle chart, not explanatory copy.
@@ -41,7 +41,7 @@
 
 ## Components
 - Existing components to reuse: `TradingViewChart`, tab navigation, account dropdown, panel, status pill, control inputs, metric rows, tables.
-- New/changed components: Live market strip, grouped live controls, searchable strategy picker, all-strategies marker controls, breadth chart grid, FUTOI instrument rail and detail table, locale-aware Russian live symbol labels, admin user table, profile form, standalone feedback form.
+- New/changed components: Live market strip, grouped live controls, searchable strategy picker, all-strategies marker controls, breadth chart grid, quant strategy cards, admin user table, profile form, standalone feedback form.
 - Variants and states: Busy/error status colors, selected tab, marker toggles, empty chart state.
 - Token/component ownership: CSS variables in `frontend/src/style.css`; chart palette in `TradingViewChart.vue`.
 
@@ -54,7 +54,7 @@
 
 ## Responsive behavior
 - Supported breakpoints/devices: Desktop-first, usable down to mobile width.
-- Layout adaptations: Live controls collapse to one column below tablet width; FUTOI instrument rail stacks above detail on narrower screens; panels remain full width.
+- Layout adaptations: Live controls collapse to one column below tablet width; breadth and quant grids become horizontally scannable or single-column on narrower screens; panels remain full width.
 - Touch/hover differences: Do not rely on hover-only controls for core actions.
 
 ## Interaction states

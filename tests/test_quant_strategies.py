@@ -1,7 +1,6 @@
 import unittest
 from datetime import date
 
-from algo_trading.futoi import FutoiRecord
 from algo_trading.market_breadth import MarketBreadthBar
 from algo_trading.models import Candle
 from algo_trading.quant_strategies import build_quant_strategy_ideas
@@ -77,45 +76,3 @@ class QuantStrategyTests(unittest.TestCase):
         self.assertEqual(breadth.metrics["average_breadth"], 59.0)
         self.assertEqual(breadth.metrics["series_count"], 2)
 
-    def test_futoi_positioning_uses_latest_net_position(self):
-        futoi_records = [
-            FutoiRecord(
-                trade_date=date(2026, 1, 2),
-                trade_time="18:45:00",
-                ticker="IMOEXF",
-                client_group="YUR",
-                position=250,
-                position_long=800,
-                position_short=550,
-                position_long_count=10,
-                position_short_count=8,
-            ),
-            FutoiRecord(
-                trade_date=date(2026, 1, 2),
-                trade_time="18:45:00",
-                ticker="IMOEXF",
-                client_group="FIZ",
-                position=100,
-                position_long=300,
-                position_short=200,
-                position_long_count=9,
-                position_short_count=7,
-            ),
-        ]
-
-        ideas = build_quant_strategy_ideas(
-            candles([100 + index for index in range(30)]),
-            market="russian_indices_futures",
-            symbol="IMOEXF",
-            futoi_records=futoi_records,
-        )
-
-        futoi = self.idea_by_id("futoi-positioning", ideas)
-
-        self.assertEqual(futoi.action, "bullish")
-        self.assertEqual(futoi.metrics["net_position"], 350.0)
-        self.assertGreater(futoi.metrics["net_position_ratio"], 0.1)
-
-
-if __name__ == "__main__":
-    unittest.main()

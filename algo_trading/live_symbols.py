@@ -94,101 +94,6 @@ HONG_KONG_SYMBOLS = (
     ("2628.HK", "2628.HK · China Life"),
 )
 
-MOEX_BLUECHIP_SYMBOLS = (
-    "AFKS",
-    "AFLT",
-    "ALRS",
-    "ASTR",
-    "BANEP",
-    "BELU",
-    "BSPB",
-    "CBOM",
-    "CHMF",
-    "CNRU",
-    "DATA",
-    "DIAS",
-    "DOMRF",
-    "ENPG",
-    "ETLN",
-    "EUTR",
-    "FEES",
-    "FESH",
-    "FIXR",
-    "FLOT",
-    "GAZP",
-    "GMKN",
-    "HEAD",
-    "IRAO",
-    "IVAT",
-    "LENT",
-    "LKOH",
-    "LSNGP",
-    "LSRG",
-    "MAGN",
-    "MGNT",
-    "MOEX",
-    "MRKC",
-    "MRKV",
-    "MSNG",
-    "MTLR",
-    "MTLRP",
-    "MTSS",
-    "MVID",
-    "NLMK",
-    "NMTP",
-    "NVTK",
-    "OZON",
-    "PHOR",
-    "PIKK",
-    "PLZL",
-    "POSI",
-    "RAGR",
-    "RASP",
-    "RENI",
-    "RNFT",
-    "ROSN",
-    "RTKM",
-    "RUAL",
-    "SBER",
-    "SBERP",
-    "SELG",
-    "SFIN",
-    "SGZH",
-    "SIBN",
-    "SMLT",
-    "SNGS",
-    "SNGSP",
-    "SPBE",
-    "SVCB",
-    "T",
-    "TATN",
-    "TATNP",
-    "TRMK",
-    "TRNFP",
-    "UGLD",
-    "UPRO",
-    "VKCO",
-    "VTBR",
-    "WUSH",
-    "X5",
-    "YDEX",
-)
-
-MOEX_INDEX_FUTURE_SYMBOLS = (
-    ("IMOEX", "IMOEX · MOEX Russia Index"),
-    ("RTSI", "RTSI · RTS Index"),
-    ("IMOEXF", "IMOEXF · IMOEX Futures"),
-    ("MXM6", "MXM6 · MOEX Index Futures"),
-    ("MXU6", "MXU6 · MOEX Index Futures"),
-    ("MXZ6", "MXZ6 · MOEX Index Futures"),
-    ("RIM6", "RIM6 · RTS Index Futures"),
-    ("RIU6", "RIU6 · RTS Index Futures"),
-    ("RIZ6", "RIZ6 · RTS Index Futures"),
-)
-
-RUSSIAN_LIVE_MARKETS = frozenset({"russian_bluechips", "russian_indices_futures"})
-
-
 def default_live_symbols() -> list[LiveSymbol]:
     symbols: list[LiveSymbol] = []
     symbols.extend(_symbols_for_market("crypto_spot", CRYPTO_SYMBOLS))
@@ -196,16 +101,6 @@ def default_live_symbols() -> list[LiveSymbol]:
     symbols.extend(_symbols_for_market("commodities", COMMODITY_SYMBOLS))
     symbols.extend(_symbols_for_market("mag7_stocks", MAG7_SYMBOLS))
     symbols.extend(_symbols_for_market("hong_kong_stocks", HONG_KONG_SYMBOLS))
-    symbols.extend(
-        LiveSymbol(
-            market="russian_bluechips",
-            symbol=symbol,
-            label=symbol,
-            sort_order=index,
-        )
-        for index, symbol in enumerate(MOEX_BLUECHIP_SYMBOLS)
-    )
-    symbols.extend(_symbols_for_market("russian_indices_futures", MOEX_INDEX_FUTURE_SYMBOLS))
     return symbols
 
 
@@ -352,16 +247,14 @@ def live_symbol_from_row(row: Sequence[object]) -> LiveSymbol:
 
 def live_symbols_payload(store: LiveSymbolStore) -> dict[str, object]:
     grouped: dict[str, list[dict[str, str]]] = {}
-    russian_grouped: dict[str, list[dict[str, str]]] = {}
     for symbol in store.list_symbols():
-        target_group = russian_grouped if symbol.market in RUSSIAN_LIVE_MARKETS else grouped
-        target_group.setdefault(symbol.market, []).append(
+        grouped.setdefault(symbol.market, []).append(
             {
                 "value": symbol.symbol,
                 "label": symbol.label,
             }
         )
-    return {"ok": True, "symbols": grouped, "russian_symbols": russian_grouped}
+    return {"ok": True, "symbols": grouped}
 
 
 def live_symbol_store_from_env() -> LiveSymbolStore:
