@@ -49,6 +49,10 @@ class StrategyName(str, Enum):
     MFI_REVERSAL = "mfi-reversal"
     PARABOLIC_SAR = "parabolic-sar"
     ZSCORE_REVERSION = "zscore-reversion"
+    TIME_SERIES_MOMENTUM = "time-series-momentum"
+    VOLATILITY_BREAKOUT = "volatility-breakout"
+    RSI_MEAN_REVERSION = "rsi-mean-reversion"
+    BREADTH_CONFIRMATION = "breadth-confirmation"
     COMBINED_SIGNALS = "combined-signals"
 
 
@@ -123,6 +127,24 @@ class StrategyConfig:
     combo_entry_confirmations: int = 2
     combo_exit_confirmations: int = 2
     combo_lookback: int = 3
+    combo_regime_filter: bool = True
+    combo_regime_metric: str = "atr_pct"
+    combo_regime_lookback: int = 50
+    combo_regime_low_percentile: float = 33.0
+    combo_regime_high_percentile: float = 67.0
+    combo_regime_mismatch_weight: float = 0.0
+    combo_mtf_filter: bool = True
+    combo_mtf_mode: str = "hard"
+    combo_mtf_soft_weight: float = 0.5
+    combo_mtf_interval_multiple: int = 4
+    combo_rs_filter: bool = True
+    combo_rs_soft_weight: float = 0.5
+    combo_rs_lookback: int = 20
+    combo_session_filter: bool = False
+    combo_session_timezone: str = "America/New_York"
+    combo_session_preferred: str = "us-cash,europe"
+    combo_session_off_weight: float = 0.5
+    combo_min_vote_weight: float = 1.0
     stop_loss_pct: float = 0.03
     take_profit_pct: float = 0.06
     trailing_stop_pct: float = 0.0

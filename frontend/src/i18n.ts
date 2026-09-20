@@ -633,6 +633,10 @@ export const strategyTitles: Record<Locale, Record<string, string>> = {
     "mfi-reversal": "MFI reversal",
     "parabolic-sar": "Parabolic SAR",
     "zscore-reversion": "Z-score reversion",
+    "time-series-momentum": "Time-series momentum",
+    "volatility-breakout": "Volatility breakout",
+    "rsi-mean-reversion": "RSI mean reversion",
+    "breadth-confirmation": "Breadth confirmation",
     "combined-signals": "Combined signals",
   },
   zh: {
@@ -661,6 +665,10 @@ export const strategyTitles: Record<Locale, Record<string, string>> = {
     "mfi-reversal": "MFI反转",
     "parabolic-sar": "Parabolic SAR",
     "zscore-reversion": "Z-score回归",
+    "time-series-momentum": "时间序列动量",
+    "volatility-breakout": "波动率突破",
+    "rsi-mean-reversion": "RSI均值回归",
+    "breadth-confirmation": "宽度确认",
     "combined-signals": "组合信号",
   },
 };
@@ -692,6 +700,10 @@ export const strategyDescriptions: Record<Locale, Record<string, string>> = {
     "mfi-reversal": "Money Flow Index reversal after leaving extreme levels",
     "parabolic-sar": "Parabolic SAR trend flip",
     "zscore-reversion": "Rolling z-score mean reversion from statistical extremes",
+    "time-series-momentum": "Lookback-return trend following from the quant idea generator",
+    "volatility-breakout": "Quant-style close versus the prior Donchian range",
+    "rsi-mean-reversion": "RSI level mean reversion while oversold or overbought",
+    "breadth-confirmation": "Average breadth confirmation; flat when breadth is unavailable",
     "combined-signals": "Configurable strategy confirmation ensemble",
   },
   zh: {
@@ -720,6 +732,10 @@ export const strategyDescriptions: Record<Locale, Record<string, string>> = {
     "mfi-reversal": "资金流量指数离开极端区间后的反转",
     "parabolic-sar": "Parabolic SAR 趋势翻转",
     "zscore-reversion": "从统计极端值回归的滚动 z-score 均值回归",
+    "time-series-momentum": "来自量化想法生成器的回看收益趋势跟随",
+    "volatility-breakout": "量化风格的收盘价对比前一唐奇安区间",
+    "rsi-mean-reversion": "RSI处于超卖或超买时的水平均值回归",
+    "breadth-confirmation": "平均市场宽度确认；无宽度数据时保持中性",
     "combined-signals": "可配置的策略确认组合",
   },
 };

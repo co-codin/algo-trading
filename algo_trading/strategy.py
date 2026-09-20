@@ -1,8 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Protocol
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from typing import Any, Protocol
 
+from algo_trading.combo_ensemble import (
+    ComboEnsembleSnapshot,
+    aligned_breadth_values,
+    aligned_directional_bias,
+    aligned_relative_strength_bias,
+    atr_pct_values,
+    combo_member_vote_weight,
+    session_name,
+    vote_counts,
+    volatility_regime_series,
+)
 from algo_trading.indicators import (
     atr,
     bollinger_width,
@@ -35,6 +47,12 @@ from algo_trading.models import (
     StrategyConfig,
     StrategyName,
     StrategyPreset,
+)
+from algo_trading.quant_strategies import (
+    breadth_confirmation_state,
+    rsi_mean_reversion_state,
+    time_series_momentum_state,
+    volatility_breakout_state,
 )
 
 
@@ -84,6 +102,10 @@ class StrategyContext:
     parabolic_sar_values: list[float]
     parabolic_sar_trend: list[int]
     zscore_values: list[float]
+    volatility_regime: list[str] = field(default_factory=list)
+    higher_tf_bias_values: list[int] = field(default_factory=list)
+    relative_strength_bias_values: list[int] = field(default_factory=list)
+    breadth_values: list[float | None] = field(default_factory=list)
 
 
 class TradingStrategy(Protocol):
@@ -265,7 +287,16 @@ def apply_strategy_preset(config: StrategyConfig) -> StrategyConfig:
     raise ValueError(f"unsupported preset: {config.preset}")
 
 
-def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> StrategyContext:
+def build_strategy_context(
+    candles: list[Candle],
+    config: StrategyConfig,
+    *,
+    higher_tf_candles: list[Candle] | None = None,
+    higher_tf_bias: int | None = None,
+    relative_strength_candles: list[Candle] | None = None,
+    relative_strength_bias: int | None = None,
+    breadth_bars_by_symbol: Mapping[str, Sequence[Any]] | None = None,
+) -> StrategyContext:
     closes = [candle.close for candle in candles]
     highs = [candle.high for candle in candles]
     lows = [candle.low for candle in candles]
@@ -298,6 +329,12 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
     )
     ichimoku_conversion, ichimoku_base, ichimoku_span_a, ichimoku_span_b = ichimoku_cloud(candles)
     parabolic_sar_values, parabolic_sar_trend = parabolic_sar(candles)
+    atr_values = atr(candles, config.atr_period)
+    bollinger_width_values = bollinger_width(
+        bollinger_upper,
+        bollinger_lower,
+        bollinger_mid,
+    )
     return StrategyContext(
         candles=candles,
         closes=closes,
@@ -315,7 +352,7 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         bollinger_lower=bollinger_lower,
         donchian_high=previous_rolling_high(highs, config.donchian_period),
         donchian_low=previous_rolling_low(lows, config.donchian_period),
-        atr_values=atr(candles, config.atr_period),
+        atr_values=atr_values,
         supertrend_direction=_supertrend_direction(candles, config),
         vwap=rolling_vwap(candles, config.vwap_period),
         stoch_rsi_values=stochastic_rsi(rsi_values, config.stoch_rsi_period),
@@ -328,11 +365,7 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         keltner_lower=keltner_lower,
         cci_values=commodity_channel_index(candles, config.cci_period),
         williams_r_values=williams_r(candles, config.williams_period),
-        bollinger_width_values=bollinger_width(
-            bollinger_upper,
-            bollinger_lower,
-            bollinger_mid,
-        ),
+        bollinger_width_values=bollinger_width_values,
         obv_values=obv_values,
         obv_signal_values=rolling_mean(obv_values, config.volume_period),
         volume_mean=rolling_volume_mean(candles, config.volume_period),
@@ -347,6 +380,24 @@ def build_strategy_context(candles: list[Candle], config: StrategyConfig) -> Str
         parabolic_sar_values=parabolic_sar_values,
         parabolic_sar_trend=parabolic_sar_trend,
         zscore_values=rolling_zscore(closes, config.bollinger_period),
+        volatility_regime=_volatility_regime_for_context(
+            config,
+            atr_values=atr_values,
+            closes=closes,
+            width_values=bollinger_width_values,
+        ),
+        higher_tf_bias_values=aligned_directional_bias(
+            candles,
+            higher_tf_candles,
+            explicit_bias=higher_tf_bias,
+        ),
+        relative_strength_bias_values=aligned_relative_strength_bias(
+            candles,
+            relative_strength_candles,
+            explicit_bias=relative_strength_bias,
+            lookback=config.combo_rs_lookback,
+        ),
+        breadth_values=aligned_breadth_values(candles, breadth_bars_by_symbol),
     )
 
 
@@ -1442,6 +1493,176 @@ class ZscoreReversionStrategy:
         return Signal(SignalType.HOLD, "no_signal")
 
 
+class TimeSeriesMomentumStrategy:
+    name = StrategyName.TIME_SERIES_MOMENTUM
+    description = "Lookback-return trend following from the quant time-series momentum idea"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index < config.momentum_period:
+            return Signal(SignalType.HOLD, "insufficient_data")
+        state = time_series_momentum_state(
+            context.candles[: index + 1],
+            lookback=config.momentum_period,
+        )
+        if state.action == "bullish" and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "time_series_momentum_long")
+        if state.action == "bearish" and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "time_series_momentum_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index < 1:
+            return Signal(SignalType.HOLD, "insufficient_data")
+        state = time_series_momentum_state(
+            context.candles[: index + 1],
+            lookback=config.momentum_period,
+        )
+        if side is PositionSide.LONG and state.action != "bullish":
+            return Signal(SignalType.EXIT_LONG, "time_series_momentum_flat")
+        if side is PositionSide.SHORT and state.action != "bearish":
+            return Signal(SignalType.EXIT_SHORT, "time_series_momentum_flat")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class VolatilityBreakoutStrategy:
+    name = StrategyName.VOLATILITY_BREAKOUT
+    description = (
+        "Quant-style close versus the prior Donchian range (level hold). "
+        "Overlaps donchian-breakout on the same period; registered so the "
+        "quant idea and combo share one implementation"
+    )
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index < config.donchian_period:
+            return Signal(SignalType.HOLD, "insufficient_data")
+        state = volatility_breakout_state(
+            context.candles[: index + 1],
+            period=config.donchian_period,
+        )
+        if state.action == "bullish" and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "volatility_breakout_long")
+        if state.action == "bearish" and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "volatility_breakout_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index < config.donchian_period:
+            return Signal(SignalType.HOLD, "insufficient_data")
+        state = volatility_breakout_state(
+            context.candles[: index + 1],
+            period=config.donchian_period,
+        )
+        if side is PositionSide.LONG and state.action != "bullish":
+            return Signal(SignalType.EXIT_LONG, "volatility_breakout_inside")
+        if side is PositionSide.SHORT and state.action != "bearish":
+            return Signal(SignalType.EXIT_SHORT, "volatility_breakout_inside")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class RsiMeanReversionStrategy:
+    name = StrategyName.RSI_MEAN_REVERSION
+    description = (
+        "RSI level mean reversion while oversold or overbought. Distinct from "
+        "rsi-reversal, which waits for RSI to leave those extremes"
+    )
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index < config.rsi_period or index >= len(context.rsi_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        state = rsi_mean_reversion_state(
+            context.rsi_values[index],
+            period=config.rsi_period,
+            oversold=config.rsi_oversold,
+            overbought=config.rsi_overbought,
+        )
+        if state.action == "bullish" and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "rsi_mean_reversion_long")
+        if state.action == "bearish" and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "rsi_mean_reversion_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        if index >= len(context.rsi_values):
+            return Signal(SignalType.HOLD, "insufficient_data")
+        current = context.rsi_values[index]
+        if side is PositionSide.LONG and current >= config.rsi_midline:
+            return Signal(SignalType.EXIT_LONG, "rsi_mean_reversion_midline")
+        if side is PositionSide.SHORT and current <= config.rsi_midline:
+            return Signal(SignalType.EXIT_SHORT, "rsi_mean_reversion_midline")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
+class BreadthConfirmationStrategy:
+    name = StrategyName.BREADTH_CONFIRMATION
+    description = "Average breadth confirmation; stays flat when breadth bars are unavailable"
+
+    def entry_signal(
+        self,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        breadth = _breadth_value_at(context, index)
+        if breadth is None:
+            return Signal(SignalType.HOLD, "no_signal")
+        state = breadth_confirmation_state([breadth])
+        if state.action == "bullish" and _side_allowed(config, PositionSide.LONG):
+            return Signal(SignalType.ENTER_LONG, "breadth_confirmation_long")
+        if state.action == "bearish" and _side_allowed(config, PositionSide.SHORT):
+            return Signal(SignalType.ENTER_SHORT, "breadth_confirmation_short")
+        return Signal(SignalType.HOLD, "no_signal")
+
+    def exit_signal(
+        self,
+        side: PositionSide,
+        config: StrategyConfig,
+        context: StrategyContext,
+        index: int,
+    ) -> Signal:
+        breadth = _breadth_value_at(context, index)
+        if breadth is None:
+            return Signal(SignalType.HOLD, "no_signal")
+        state = breadth_confirmation_state([breadth])
+        if side is PositionSide.LONG and state.action != "bullish":
+            return Signal(SignalType.EXIT_LONG, "breadth_confirmation_mixed")
+        if side is PositionSide.SHORT and state.action != "bearish":
+            return Signal(SignalType.EXIT_SHORT, "breadth_confirmation_mixed")
+        return Signal(SignalType.HOLD, "no_signal")
+
+
 class CombinedSignalsStrategy:
     name = StrategyName.COMBINED_SIGNALS
     description = "Configurable strategy confirmation ensemble"
@@ -1528,21 +1749,55 @@ def _parse_combo_strategy_names(value: str) -> list[str]:
     return [name.strip().lower() for name in value.split(",") if name.strip()]
 
 
+def combo_ensemble_snapshot(
+    config: StrategyConfig,
+    context: StrategyContext,
+    index: int,
+) -> ComboEnsembleSnapshot:
+    members = combo_member_strategy_names(config)
+    long_names, short_names, weights = _combo_entry_vote_details(config, context, index, members)
+    return ComboEnsembleSnapshot(
+        regime=_regime_at(context, index),
+        session=_session_at(config, context, index),
+        higher_tf_bias=_bias_at(context.higher_tf_bias_values, index),
+        relative_strength_bias=_bias_at(context.relative_strength_bias_values, index),
+        member_count=len(members),
+        long_votes=long_names,
+        short_votes=short_names,
+        vote_weights=weights,
+    )
+
+
 def _combo_entry_vote_names(
     config: StrategyConfig,
     context: StrategyContext,
     index: int,
     members: list[StrategyName],
 ) -> tuple[list[str], list[str]]:
+    long_names, short_names, _weights = _combo_entry_vote_details(config, context, index, members)
+    return long_names, short_names
+
+
+def _combo_entry_vote_details(
+    config: StrategyConfig,
+    context: StrategyContext,
+    index: int,
+    members: list[StrategyName],
+) -> tuple[list[str], list[str], dict[str, float]]:
     long_names: list[str] = []
     short_names: list[str] = []
+    weights: dict[str, float] = {}
     for member in members:
         signal = _latest_entry_signal(replace(config, strategy=member), context, index)
+        weight = _combo_weight_for_signal(member, signal.type, config, context, index)
+        weights[member.value] = weight
+        if not vote_counts(weight, config.combo_min_vote_weight):
+            continue
         if signal.type is SignalType.ENTER_LONG:
             long_names.append(member.value)
         elif signal.type is SignalType.ENTER_SHORT:
             short_names.append(member.value)
-    return long_names, short_names
+    return long_names, short_names, weights
 
 
 def _combo_exit_vote_names(
@@ -1557,13 +1812,24 @@ def _combo_exit_vote_names(
     for member in members:
         member_config = replace(config, strategy=member)
         exit_signal = _latest_exit_signal(member_config, context, index, side)
-        if side is PositionSide.LONG and exit_signal.type is SignalType.EXIT_LONG:
-            exit_names.append(member.value)
-        elif side is PositionSide.SHORT and exit_signal.type is SignalType.EXIT_SHORT:
-            exit_names.append(member.value)
+        exit_weight = _combo_weight_for_signal(member, exit_signal.type, config, context, index)
+        if vote_counts(exit_weight, config.combo_min_vote_weight):
+            if side is PositionSide.LONG and exit_signal.type is SignalType.EXIT_LONG:
+                exit_names.append(member.value)
+            elif side is PositionSide.SHORT and exit_signal.type is SignalType.EXIT_SHORT:
+                exit_names.append(member.value)
 
         opposite_config = replace(member_config, allowed_side=AllowedSide.BOTH)
         entry_signal = _latest_entry_signal(opposite_config, context, index)
+        opposite_weight = _combo_weight_for_signal(
+            member,
+            entry_signal.type,
+            config,
+            context,
+            index,
+        )
+        if not vote_counts(opposite_weight, config.combo_min_vote_weight):
+            continue
         if side is PositionSide.LONG and entry_signal.type is SignalType.ENTER_SHORT:
             opposite_names.append(member.value)
         elif side is PositionSide.SHORT and entry_signal.type is SignalType.ENTER_LONG:
@@ -1608,6 +1874,68 @@ def _combo_lookback_indexes(config: StrategyConfig, index: int) -> range:
 
 def _combo_reason(prefix: str, names: list[str], members: list[StrategyName]) -> str:
     return f"{prefix}:{len(names)}/{len(members)}:{','.join(names)}"
+
+
+def _combo_weight_for_signal(
+    strategy_name: StrategyName,
+    signal_type: SignalType,
+    config: StrategyConfig,
+    context: StrategyContext,
+    index: int,
+) -> float:
+    return combo_member_vote_weight(
+        strategy_name,
+        signal_type,
+        config,
+        regime=_regime_at(context, index),
+        higher_tf_bias=_bias_at(context.higher_tf_bias_values, index),
+        relative_strength_bias=_bias_at(context.relative_strength_bias_values, index),
+        session=_session_at(config, context, index),
+    )
+
+
+def _volatility_regime_for_context(
+    config: StrategyConfig,
+    *,
+    atr_values: list[float],
+    closes: list[float],
+    width_values: list[float],
+) -> list[str]:
+    metric_values = (
+        atr_pct_values(atr_values, closes)
+        if config.combo_regime_metric == "atr_pct"
+        else width_values
+    )
+    return volatility_regime_series(
+        metric_values,
+        lookback=config.combo_regime_lookback,
+        low_percentile=config.combo_regime_low_percentile,
+        high_percentile=config.combo_regime_high_percentile,
+    )
+
+
+def _regime_at(context: StrategyContext, index: int) -> str:
+    if 0 <= index < len(context.volatility_regime):
+        return context.volatility_regime[index]
+    return "mid"
+
+
+def _bias_at(values: list[int], index: int) -> int:
+    if 0 <= index < len(values):
+        return values[index]
+    return 0
+
+
+def _session_at(config: StrategyConfig, context: StrategyContext, index: int) -> str:
+    if index < 0 or index >= len(context.candles):
+        return "overnight"
+    return session_name(context.candles[index].open_time, config.combo_session_timezone)
+
+
+def _breadth_value_at(context: StrategyContext, index: int) -> float | None:
+    if 0 <= index < len(context.breadth_values):
+        return context.breadth_values[index]
+    return None
 
 
 def _ribbon_bullish(context: StrategyContext, index: int) -> bool:
@@ -1742,5 +2070,9 @@ _STRATEGIES: dict[StrategyName, TradingStrategy] = {
     StrategyName.MFI_REVERSAL: MfiReversalStrategy(),
     StrategyName.PARABOLIC_SAR: ParabolicSarStrategy(),
     StrategyName.ZSCORE_REVERSION: ZscoreReversionStrategy(),
+    StrategyName.TIME_SERIES_MOMENTUM: TimeSeriesMomentumStrategy(),
+    StrategyName.VOLATILITY_BREAKOUT: VolatilityBreakoutStrategy(),
+    StrategyName.RSI_MEAN_REVERSION: RsiMeanReversionStrategy(),
+    StrategyName.BREADTH_CONFIRMATION: BreadthConfirmationStrategy(),
     StrategyName.COMBINED_SIGNALS: CombinedSignalsStrategy(),
 }

@@ -368,8 +368,27 @@ def _validate_config(config: StrategyConfig) -> None:
         config.combo_entry_confirmations <= 0
         or config.combo_exit_confirmations <= 0
         or config.combo_lookback <= 0
+        or config.combo_regime_lookback <= 0
+        or config.combo_rs_lookback <= 0
+        or config.combo_mtf_interval_multiple <= 0
     ):
         raise ValueError("strategy combo confirmations and lookback must be positive")
+    if config.combo_regime_metric not in {"atr_pct", "bb_width"}:
+        raise ValueError("strategy combo_regime_metric must be atr_pct or bb_width")
+    if config.combo_mtf_mode not in {"hard", "soft"}:
+        raise ValueError("strategy combo_mtf_mode must be hard or soft")
+    if not 0 <= config.combo_regime_low_percentile < config.combo_regime_high_percentile <= 100:
+        raise ValueError("strategy combo regime percentiles must satisfy 0 <= low < high <= 100")
+    for name, value in [
+        ("combo_regime_mismatch_weight", config.combo_regime_mismatch_weight),
+        ("combo_mtf_soft_weight", config.combo_mtf_soft_weight),
+        ("combo_rs_soft_weight", config.combo_rs_soft_weight),
+        ("combo_session_off_weight", config.combo_session_off_weight),
+    ]:
+        if not 0 <= value <= 1:
+            raise ValueError(f"{name} must be between 0 and 1")
+    if config.combo_min_vote_weight <= 0:
+        raise ValueError("strategy combo_min_vote_weight must be positive")
     try:
         combo_members = combo_member_strategy_names(config)
     except ValueError as exc:
@@ -445,6 +464,14 @@ def _required_candles(config: StrategyConfig) -> int:
         return 3
     if strategy is StrategyName.ZSCORE_REVERSION:
         return config.bollinger_period + 2
+    if strategy is StrategyName.TIME_SERIES_MOMENTUM:
+        return config.momentum_period + 1
+    if strategy is StrategyName.VOLATILITY_BREAKOUT:
+        return config.donchian_period + 1
+    if strategy is StrategyName.RSI_MEAN_REVERSION:
+        return config.rsi_period + 1
+    if strategy is StrategyName.BREADTH_CONFIRMATION:
+        return 1
     if strategy is StrategyName.COMBINED_SIGNALS:
         return max(
             _required_candles(replace(config, strategy=member))

@@ -555,6 +555,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(config["combo_entry_confirmations"], 2)
             self.assertEqual(config["combo_exit_confirmations"], 2)
             self.assertEqual(config["combo_lookback"], 2)
+            self.assertTrue(config["combo_regime_filter"])
+            self.assertTrue(config["combo_mtf_filter"])
+            self.assertFalse(config["combo_session_filter"])
 
 
 if __name__ == "__main__":

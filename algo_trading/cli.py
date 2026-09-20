@@ -313,6 +313,24 @@ def _config_from_args(args: argparse.Namespace, symbol: str | None = None) -> St
         combo_entry_confirmations=args.combo_entry_confirmations,
         combo_exit_confirmations=args.combo_exit_confirmations,
         combo_lookback=args.combo_lookback,
+        combo_regime_filter=args.combo_regime_filter,
+        combo_regime_metric=args.combo_regime_metric,
+        combo_regime_lookback=args.combo_regime_lookback,
+        combo_regime_low_percentile=args.combo_regime_low_percentile,
+        combo_regime_high_percentile=args.combo_regime_high_percentile,
+        combo_regime_mismatch_weight=args.combo_regime_mismatch_weight,
+        combo_mtf_filter=args.combo_mtf_filter,
+        combo_mtf_mode=args.combo_mtf_mode,
+        combo_mtf_soft_weight=args.combo_mtf_soft_weight,
+        combo_mtf_interval_multiple=args.combo_mtf_interval_multiple,
+        combo_rs_filter=args.combo_rs_filter,
+        combo_rs_soft_weight=args.combo_rs_soft_weight,
+        combo_rs_lookback=args.combo_rs_lookback,
+        combo_session_filter=args.combo_session_filter,
+        combo_session_timezone=args.combo_session_timezone,
+        combo_session_preferred=args.combo_session_preferred,
+        combo_session_off_weight=args.combo_session_off_weight,
+        combo_min_vote_weight=args.combo_min_vote_weight,
         stop_loss_pct=args.stop_loss_pct,
         take_profit_pct=args.take_profit_pct,
         trailing_stop_pct=args.trailing_stop_pct,
@@ -469,9 +487,36 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--combo-entry-confirmations", type=int, default=2)
     parser.add_argument("--combo-exit-confirmations", type=int, default=2)
     parser.add_argument("--combo-lookback", type=int, default=3)
+    parser.add_argument("--combo-regime-filter", type=_parse_bool, default=True)
+    parser.add_argument("--combo-regime-metric", choices=["atr_pct", "bb_width"], default="atr_pct")
+    parser.add_argument("--combo-regime-lookback", type=int, default=50)
+    parser.add_argument("--combo-regime-low-percentile", type=float, default=33.0)
+    parser.add_argument("--combo-regime-high-percentile", type=float, default=67.0)
+    parser.add_argument("--combo-regime-mismatch-weight", type=float, default=0.0)
+    parser.add_argument("--combo-mtf-filter", type=_parse_bool, default=True)
+    parser.add_argument("--combo-mtf-mode", choices=["hard", "soft"], default="hard")
+    parser.add_argument("--combo-mtf-soft-weight", type=float, default=0.5)
+    parser.add_argument("--combo-mtf-interval-multiple", type=int, default=4)
+    parser.add_argument("--combo-rs-filter", type=_parse_bool, default=True)
+    parser.add_argument("--combo-rs-soft-weight", type=float, default=0.5)
+    parser.add_argument("--combo-rs-lookback", type=int, default=20)
+    parser.add_argument("--combo-session-filter", type=_parse_bool, default=False)
+    parser.add_argument("--combo-session-timezone", default="America/New_York")
+    parser.add_argument("--combo-session-preferred", default="us-cash,europe")
+    parser.add_argument("--combo-session-off-weight", type=float, default=0.5)
+    parser.add_argument("--combo-min-vote-weight", type=float, default=1.0)
     parser.add_argument("--stop-loss-pct", type=float, default=0.03)
     parser.add_argument("--take-profit-pct", type=float, default=0.06)
     parser.add_argument("--trailing-stop-pct", type=float, default=0.0)
+
+
+def _parse_bool(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("expected a boolean value")
 
 
 if __name__ == "__main__":
