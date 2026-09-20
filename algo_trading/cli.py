@@ -313,6 +313,23 @@ def _config_from_args(args: argparse.Namespace, symbol: str | None = None) -> St
         combo_entry_confirmations=args.combo_entry_confirmations,
         combo_exit_confirmations=args.combo_exit_confirmations,
         combo_lookback=args.combo_lookback,
+        combo_regime_filter=_on_off(args.combo_regime_filter),
+        combo_regime_lookback=args.combo_regime_lookback,
+        combo_regime_low_pct=args.combo_regime_low_pct,
+        combo_regime_high_pct=args.combo_regime_high_pct,
+        combo_regime_damp_weight=args.combo_regime_damp_weight,
+        combo_regime_metric=args.combo_regime_metric,
+        combo_mtf_mode=args.combo_mtf_mode,
+        combo_mtf_disagree_weight=args.combo_mtf_disagree_weight,
+        combo_session_filter=_on_off(args.combo_session_filter),
+        combo_session_us_cash_weight=args.combo_session_us_cash_weight,
+        combo_session_europe_weight=args.combo_session_europe_weight,
+        combo_session_asia_weight=args.combo_session_asia_weight,
+        combo_session_overnight_weight=args.combo_session_overnight_weight,
+        combo_rs_enabled=_on_off(args.combo_rs_enabled),
+        combo_rs_lookback=args.combo_rs_lookback,
+        combo_rs_disagree_weight=args.combo_rs_disagree_weight,
+        combo_vote_weight_threshold=args.combo_vote_weight_threshold,
         stop_loss_pct=args.stop_loss_pct,
         take_profit_pct=args.take_profit_pct,
         trailing_stop_pct=args.trailing_stop_pct,
@@ -469,9 +486,34 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--combo-entry-confirmations", type=int, default=2)
     parser.add_argument("--combo-exit-confirmations", type=int, default=2)
     parser.add_argument("--combo-lookback", type=int, default=3)
+    parser.add_argument("--combo-regime-filter", choices=("on", "off"), default="on")
+    parser.add_argument("--combo-regime-lookback", type=int, default=50)
+    parser.add_argument("--combo-regime-low-pct", type=float, default=30.0)
+    parser.add_argument("--combo-regime-high-pct", type=float, default=70.0)
+    parser.add_argument("--combo-regime-damp-weight", type=float, default=0.25)
+    parser.add_argument(
+        "--combo-regime-metric",
+        choices=("atr_pct", "bb_width"),
+        default="atr_pct",
+    )
+    parser.add_argument("--combo-mtf-mode", choices=("off", "soft", "hard"), default="off")
+    parser.add_argument("--combo-mtf-disagree-weight", type=float, default=0.25)
+    parser.add_argument("--combo-session-filter", choices=("on", "off"), default="off")
+    parser.add_argument("--combo-session-us-cash-weight", type=float, default=1.0)
+    parser.add_argument("--combo-session-europe-weight", type=float, default=0.75)
+    parser.add_argument("--combo-session-asia-weight", type=float, default=0.5)
+    parser.add_argument("--combo-session-overnight-weight", type=float, default=0.5)
+    parser.add_argument("--combo-rs-enabled", choices=("on", "off"), default="off")
+    parser.add_argument("--combo-rs-lookback", type=int, default=20)
+    parser.add_argument("--combo-rs-disagree-weight", type=float, default=0.25)
+    parser.add_argument("--combo-vote-weight-threshold", type=float, default=0.5)
     parser.add_argument("--stop-loss-pct", type=float, default=0.03)
     parser.add_argument("--take-profit-pct", type=float, default=0.06)
     parser.add_argument("--trailing-stop-pct", type=float, default=0.0)
+
+
+def _on_off(value: str) -> bool:
+    return str(value).strip().lower() == "on"
 
 
 if __name__ == "__main__":

@@ -517,6 +517,32 @@ class SimulatorTests(unittest.TestCase):
                 candles([10, 9, 8, 9, 11, 13, 15]),
                 "combined_long:2/2:ema-rsi,macd",
             ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("time-series-momentum"),
+                ),
+                candles([100.0 + index for index in range(12)]),
+                "time_series_momentum_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("rsi-mean-reversion"),
+                    rsi_period=14,
+                    rsi_oversold=30.0,
+                    rsi_overbought=70.0,
+                ),
+                candles([100, 99, 98, 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85]),
+                "rsi_mean_reversion_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("volatility-breakout"),
+                    donchian_period=3,
+                    atr_period=3,
+                ),
+                candles([10.0, 10.1, 10.0, 10.05, 14.0, 14.2]),
+                "volatility_breakout_long",
+            ),
         ]
 
         for config, sample_candles, entry_reason in cases:

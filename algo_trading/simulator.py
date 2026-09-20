@@ -380,6 +380,26 @@ def _validate_config(config: StrategyConfig) -> None:
         raise ValueError("strategy combo_entry_confirmations cannot exceed combo member count")
     if config.combo_exit_confirmations > len(combo_members):
         raise ValueError("strategy combo_exit_confirmations cannot exceed combo member count")
+    if config.combo_regime_lookback <= 0 or config.combo_rs_lookback <= 0:
+        raise ValueError("strategy combo lookbacks must be positive")
+    if not 0 <= config.combo_regime_low_pct < config.combo_regime_high_pct <= 100:
+        raise ValueError("strategy combo regime percentiles must satisfy 0 <= low < high <= 100")
+    if str(config.combo_mtf_mode).strip().lower() not in {"off", "soft", "hard"}:
+        raise ValueError("strategy combo_mtf_mode must be off, soft, or hard")
+    if str(config.combo_regime_metric).strip().lower() not in {"atr_pct", "bb_width"}:
+        raise ValueError("strategy combo_regime_metric must be atr_pct or bb_width")
+    for name, value in [
+        ("combo_regime_damp_weight", config.combo_regime_damp_weight),
+        ("combo_mtf_disagree_weight", config.combo_mtf_disagree_weight),
+        ("combo_session_us_cash_weight", config.combo_session_us_cash_weight),
+        ("combo_session_europe_weight", config.combo_session_europe_weight),
+        ("combo_session_asia_weight", config.combo_session_asia_weight),
+        ("combo_session_overnight_weight", config.combo_session_overnight_weight),
+        ("combo_rs_disagree_weight", config.combo_rs_disagree_weight),
+        ("combo_vote_weight_threshold", config.combo_vote_weight_threshold),
+    ]:
+        if not 0 <= value <= 1:
+            raise ValueError(f"{name} must be between 0 and 1")
     for name, value in [
         ("stop_loss_pct", config.stop_loss_pct),
         ("take_profit_pct", config.take_profit_pct),
@@ -445,6 +465,14 @@ def _required_candles(config: StrategyConfig) -> int:
         return 3
     if strategy is StrategyName.ZSCORE_REVERSION:
         return config.bollinger_period + 2
+    if strategy is StrategyName.TIME_SERIES_MOMENTUM:
+        return 3
+    if strategy is StrategyName.VOLATILITY_BREAKOUT:
+        return max(config.donchian_period, config.atr_period) + 2
+    if strategy is StrategyName.RSI_MEAN_REVERSION:
+        return config.rsi_period + 1
+    if strategy is StrategyName.BREADTH_CONFIRMATION:
+        return 1
     if strategy is StrategyName.COMBINED_SIGNALS:
         return max(
             _required_candles(replace(config, strategy=member))
