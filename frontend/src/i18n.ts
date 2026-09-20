@@ -633,6 +633,10 @@ export const strategyTitles: Record<Locale, Record<string, string>> = {
     "mfi-reversal": "MFI reversal",
     "parabolic-sar": "Parabolic SAR",
     "zscore-reversion": "Z-score reversion",
+    "time-series-momentum": "Time-series momentum",
+    "volatility-breakout": "Volatility breakout",
+    "rsi-mean-reversion": "RSI mean reversion",
+    "breadth-confirmation": "Breadth confirmation",
     "combined-signals": "Combined signals",
   },
   zh: {
@@ -661,6 +665,10 @@ export const strategyTitles: Record<Locale, Record<string, string>> = {
     "mfi-reversal": "MFI反转",
     "parabolic-sar": "Parabolic SAR",
     "zscore-reversion": "Z-score回归",
+    "time-series-momentum": "时间序列动量",
+    "volatility-breakout": "波动率突破",
+    "rsi-mean-reversion": "RSI均值回归",
+    "breadth-confirmation": "广度确认",
     "combined-signals": "组合信号",
   },
 };
@@ -692,6 +700,10 @@ export const strategyDescriptions: Record<Locale, Record<string, string>> = {
     "mfi-reversal": "Money Flow Index reversal after leaving extreme levels",
     "parabolic-sar": "Parabolic SAR trend flip",
     "zscore-reversion": "Rolling z-score mean reversion from statistical extremes",
+    "time-series-momentum": "Lookback return trend vote from the quant time-series momentum idea",
+    "volatility-breakout": "Donchian breakout that also requires ATR expansion",
+    "rsi-mean-reversion": "Votes while RSI stays extreme; distinct from the leave-extreme RSI reversal",
+    "breadth-confirmation": "Average breadth tilt; flat when breadth series are unavailable",
     "combined-signals": "Configurable strategy confirmation ensemble",
   },
   zh: {
@@ -720,6 +732,10 @@ export const strategyDescriptions: Record<Locale, Record<string, string>> = {
     "mfi-reversal": "资金流量指数离开极端区间后的反转",
     "parabolic-sar": "Parabolic SAR 趋势翻转",
     "zscore-reversion": "从统计极端值回归的滚动 z-score 均值回归",
+    "time-series-momentum": "来自量化时间序列动量想法的回看收益趋势投票",
+    "volatility-breakout": "需要 ATR 扩张确认的唐奇安突破",
+    "rsi-mean-reversion": "RSI 仍在极端区间时投票；与离开极端区间的 RSI 反转不同",
+    "breadth-confirmation": "平均市场广度倾向；缺少广度序列时保持中性",
     "combined-signals": "可配置的策略确认组合",
   },
 };

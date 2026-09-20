@@ -12,6 +12,8 @@ from algo_trading.models import (
 from algo_trading.strategy import (
     apply_strategy_preset,
     build_strategy_context,
+    combo_member_strategy_names,
+    combo_vote_telemetry,
     entry_signal_for_index,
     exit_signal_for_position,
     get_strategy,
@@ -81,6 +83,10 @@ class StrategyTests(unittest.TestCase):
                 "mfi-reversal",
                 "parabolic-sar",
                 "zscore-reversion",
+                "time-series-momentum",
+                "volatility-breakout",
+                "rsi-mean-reversion",
+                "breadth-confirmation",
                 "combined-signals",
             ],
         )
@@ -463,6 +469,105 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(signal.type, SignalType.ENTER_LONG)
         self.assertEqual(signal.reason, "zscore_reversion_long")
 
+    def test_combo_all_includes_registered_quant_members(self):
+        members = combo_member_strategy_names(
+            StrategyConfig(strategy=StrategyName.COMBINED_SIGNALS)
+        )
+        member_values = [name.value for name in members]
+
+        self.assertGreater(len(members), 25)
+        self.assertNotIn(StrategyName.COMBINED_SIGNALS, members)
+        for name in (
+            "time-series-momentum",
+            "volatility-breakout",
+            "rsi-mean-reversion",
+            "breadth-confirmation",
+        ):
+            self.assertIn(name, member_values)
+
+    def test_time_series_momentum_enters_long_on_lookback_return(self):
+        config = StrategyConfig(
+            strategy=StrategyName("time-series-momentum"),
+            allowed_side=AllowedSide.LONG_ONLY,
+        )
+        prices = [100.0 + index for index in range(61)]
+
+        signal = first_entry_signal(config, prices)
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "time_series_momentum_long")
+
+    def test_rsi_mean_reversion_is_state_based_not_a_leave_extreme_cross(self):
+        falling = [100, 99, 98, 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86]
+        mean_reversion = StrategyConfig(
+            strategy=StrategyName("rsi-mean-reversion"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            rsi_period=14,
+            rsi_oversold=30.0,
+            rsi_overbought=70.0,
+        )
+        reversal = StrategyConfig(
+            strategy=StrategyName.RSI_REVERSAL,
+            allowed_side=AllowedSide.LONG_ONLY,
+            rsi_period=14,
+            rsi_oversold=30.0,
+            rsi_overbought=70.0,
+        )
+
+        oversold_vote = first_entry_signal(mean_reversion, falling)
+        reversal_vote = first_entry_signal(reversal, falling)
+
+        self.assertIsNotNone(oversold_vote)
+        self.assertEqual(oversold_vote.type, SignalType.ENTER_LONG)
+        self.assertEqual(oversold_vote.reason, "rsi_mean_reversion_long")
+        self.assertIsNone(reversal_vote)
+
+    def test_volatility_breakout_requires_atr_expansion(self):
+        config = StrategyConfig(
+            strategy=StrategyName("volatility-breakout"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            donchian_period=3,
+            atr_period=3,
+        )
+        donchian = StrategyConfig(
+            strategy=StrategyName.DONCHIAN_BREAKOUT,
+            allowed_side=AllowedSide.LONG_ONLY,
+            donchian_period=3,
+        )
+        tight_then_inside = [10.0, 10.1, 10.0, 10.05, 10.02]
+        expanding_breakout = [10.0, 10.1, 10.0, 10.05, 14.0]
+
+        self.assertIsNone(first_entry_signal(config, tight_then_inside))
+        donchian_signal = first_entry_signal(donchian, expanding_breakout)
+        signal = first_entry_signal(config, expanding_breakout)
+
+        self.assertEqual(donchian_signal.type, SignalType.ENTER_LONG)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "volatility_breakout_long")
+
+    def test_breadth_confirmation_is_flat_without_breadth_and_votes_when_present(self):
+        config = StrategyConfig(
+            strategy=StrategyName("breadth-confirmation"),
+            allowed_side=AllowedSide.LONG_ONLY,
+        )
+        prices = [10.0, 11.0, 12.0]
+        empty_context = build_strategy_context(candles(prices), config)
+        filled_context = build_strategy_context(
+            candles(prices),
+            config,
+            breadth_values=[60.0, 58.0],
+        )
+
+        self.assertEqual(
+            entry_signal_for_index(config, empty_context, 2).type,
+            SignalType.HOLD,
+        )
+        filled = entry_signal_for_index(config, filled_context, 2)
+        self.assertEqual(filled.type, SignalType.ENTER_LONG)
+        self.assertEqual(filled.reason, "breadth_confirmation_long")
+
     def test_combined_signals_enters_when_members_confirm_within_lookback(self):
         config = StrategyConfig(
             strategy=StrategyName("combined-signals"),
@@ -527,6 +632,101 @@ class StrategyTests(unittest.TestCase):
 
         self.assertEqual(signal.type, SignalType.EXIT_LONG)
         self.assertEqual(signal.reason, "combined_exit_long:2/2:ema-rsi,macd")
+
+    def test_combined_signals_hard_mtf_requires_higher_tf_agreement(self):
+        prices = [10, 9, 8, 9, 11, 13, 15]
+        config = StrategyConfig(
+            strategy=StrategyName("combined-signals"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=5,
+            rsi_period=2,
+            rsi_overbought=100.0,
+            macd_signal=2,
+            combo_strategies="ema-rsi,macd",
+            combo_entry_confirmations=2,
+            combo_exit_confirmations=2,
+            combo_lookback=2,
+            combo_mtf_mode="hard",
+        )
+        disagreed = build_strategy_context(
+            candles(prices),
+            config,
+            higher_tf_bias=-1,
+        )
+        agreed = build_strategy_context(
+            candles(prices),
+            config,
+            higher_tf_bias=1,
+        )
+
+        self.assertEqual(
+            entry_signal_for_index(config, disagreed, 4).type,
+            SignalType.HOLD,
+        )
+        self.assertEqual(
+            entry_signal_for_index(config, agreed, 4).type,
+            SignalType.ENTER_LONG,
+        )
+
+    def test_combined_signals_rs_soft_veto_skips_missing_pair(self):
+        prices = [10, 9, 8, 9, 11, 13, 15]
+        config = StrategyConfig(
+            strategy=StrategyName("combined-signals"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=5,
+            rsi_period=2,
+            rsi_overbought=100.0,
+            macd_signal=2,
+            combo_strategies="ema-rsi,macd",
+            combo_entry_confirmations=2,
+            combo_exit_confirmations=2,
+            combo_lookback=2,
+            combo_rs_enabled=True,
+            combo_rs_lookback=4,
+            combo_rs_disagree_weight=0.0,
+        )
+        missing_pair = build_strategy_context(candles(prices), config)
+        stronger_pair = build_strategy_context(
+            candles(prices),
+            config,
+            pair_candles=candles([10, 14, 18, 22, 26, 30, 34]),
+        )
+
+        self.assertEqual(
+            entry_signal_for_index(config, missing_pair, 4).type,
+            SignalType.ENTER_LONG,
+        )
+        self.assertEqual(
+            entry_signal_for_index(config, stronger_pair, 4).type,
+            SignalType.HOLD,
+        )
+
+    def test_combo_telemetry_exposes_regime_without_changing_conf_reason(self):
+        config = StrategyConfig(
+            strategy=StrategyName("combined-signals"),
+            allowed_side=AllowedSide.LONG_ONLY,
+            fast_ema=2,
+            slow_ema=5,
+            rsi_period=2,
+            rsi_overbought=100.0,
+            macd_signal=2,
+            combo_strategies="ema-rsi,macd",
+            combo_entry_confirmations=2,
+            combo_exit_confirmations=2,
+            combo_lookback=2,
+        )
+        context = build_strategy_context(candles([10, 9, 8, 9, 11, 13, 15]), config)
+
+        signal = entry_signal_for_index(config, context, 4)
+        telemetry = combo_vote_telemetry(config, context, 4)
+
+        self.assertEqual(signal.reason, "combined_long:2/2:ema-rsi,macd")
+        self.assertEqual(telemetry["regime"], "unknown")
+        self.assertEqual(telemetry["long_agree"], 2)
+        self.assertEqual(telemetry["member_count"], 2)
+        self.assertEqual(telemetry["session"], None)
 
     def test_allowed_side_blocks_disallowed_entries(self):
         config = StrategyConfig(

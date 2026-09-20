@@ -76,7 +76,16 @@ The UI strategy dropdown supports:
 - `volume-breakout`: Donchian breakout confirmed by above-average volume.
 - `vwap-trend-continuation`: VWAP reclaim with EMA trend confirmation.
 - `sma-crossover`: simple moving average crossover baseline using the fast/slow period settings.
-- `combined-signals`: configurable confirmation ensemble over selected member strategies.
+- `adx-trend`: ADX trend strength with directional movement confirmation.
+- `ichimoku-breakout`: Ichimoku cloud breakout with conversion/base confirmation.
+- `mfi-reversal`: Money Flow Index reversal after leaving extreme levels.
+- `parabolic-sar`: Parabolic SAR trend flip.
+- `zscore-reversion`: rolling z-score mean reversion from statistical extremes.
+- `time-series-momentum`: lookback-return trend vote from the quant idea of the same name.
+- `volatility-breakout`: Donchian breakout that also requires ATR expansion, unlike plain `donchian-breakout`.
+- `rsi-mean-reversion`: votes while RSI stays extreme; `rsi-reversal` waits for RSI to leave the band.
+- `breadth-confirmation`: average breadth tilt; stays flat when breadth series are unavailable.
+- `combined-signals`: configurable confirmation ensemble over selected member strategies. Vol-regime weighting is on by default (mid/unknown is a no-op). Optional multi-timeframe, session, and relative-strength filters are off unless configured.
 
 Presets are `custom`, `conservative`, `balanced`, and `aggressive`. Presets replace the related risk and indicator values with deterministic settings that are written into each run's `config.json`.
 
@@ -194,6 +203,6 @@ Paper trading is intentionally single-symbol in v1. Use separate bounded session
 
 Use `--allowed-side long-only` or `--allowed-side short-only` to focus a run on one side. The default is `both`.
 
-Strategy-specific CLI options include the shared EMA/RSI knobs plus MACD, Bollinger, Donchian, ATR/SuperTrend, VWAP, stochastic RSI, EMA ribbon, momentum, Keltner, CCI, Williams %R, volume, squeeze-threshold, and combination-signal settings. For `combined-signals`, use `--combo-strategies`, `--combo-entry-confirmations`, `--combo-exit-confirmations`, and `--combo-lookback`. All strategies still use read-only public market data and only write simulated backtest or paper-trading outputs.
+Strategy-specific CLI options include the shared EMA/RSI knobs plus MACD, Bollinger, Donchian, ATR/SuperTrend, VWAP, stochastic RSI, EMA ribbon, momentum, Keltner, CCI, Williams %R, volume, squeeze-threshold, and combination-signal settings. For `combined-signals`, use `--combo-strategies`, `--combo-entry-confirmations`, `--combo-exit-confirmations`, `--combo-lookback`, and the optional `--combo-regime-*`, `--combo-mtf-*`, `--combo-session-*`, and `--combo-rs-*` knobs. Confidence remains agreeing members over N members; damped votes stay in N but drop out of the agree count. All strategies still use read-only public market data and only write simulated backtest or paper-trading outputs.
 
 Outputs are written under `runs/backtests/<timestamp>/` or `runs/paper/<timestamp>/` and include `config.json`, `trades.csv`, `equity.csv`, and `summary.json`.

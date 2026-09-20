@@ -559,6 +559,27 @@ def _strategy_config_from_payload(
         combo_entry_confirmations=_int_value(payload, "combo_entry_confirmations", 2),
         combo_exit_confirmations=_int_value(payload, "combo_exit_confirmations", 2),
         combo_lookback=_int_value(payload, "combo_lookback", 3),
+        combo_regime_filter=_bool_value(payload, "combo_regime_filter", True),
+        combo_regime_lookback=_int_value(payload, "combo_regime_lookback", 50),
+        combo_regime_low_pct=_float_value(payload, "combo_regime_low_pct", 30.0),
+        combo_regime_high_pct=_float_value(payload, "combo_regime_high_pct", 70.0),
+        combo_regime_damp_weight=_float_value(payload, "combo_regime_damp_weight", 0.25),
+        combo_regime_metric=str(payload.get("combo_regime_metric") or "atr_pct"),
+        combo_mtf_mode=str(payload.get("combo_mtf_mode") or "off"),
+        combo_mtf_disagree_weight=_float_value(payload, "combo_mtf_disagree_weight", 0.25),
+        combo_session_filter=_bool_value(payload, "combo_session_filter", False),
+        combo_session_us_cash_weight=_float_value(payload, "combo_session_us_cash_weight", 1.0),
+        combo_session_europe_weight=_float_value(payload, "combo_session_europe_weight", 0.75),
+        combo_session_asia_weight=_float_value(payload, "combo_session_asia_weight", 0.5),
+        combo_session_overnight_weight=_float_value(
+            payload,
+            "combo_session_overnight_weight",
+            0.5,
+        ),
+        combo_rs_enabled=_bool_value(payload, "combo_rs_enabled", False),
+        combo_rs_lookback=_int_value(payload, "combo_rs_lookback", 20),
+        combo_rs_disagree_weight=_float_value(payload, "combo_rs_disagree_weight", 0.25),
+        combo_vote_weight_threshold=_float_value(payload, "combo_vote_weight_threshold", 0.5),
         stop_loss_pct=_float_value(payload, "stop_loss_pct", 0.03),
         take_profit_pct=_float_value(payload, "take_profit_pct", 0.06),
         trailing_stop_pct=_float_value(payload, "trailing_stop_pct", 0.0),
@@ -923,6 +944,22 @@ def _float_value(payload: dict[str, Any], key: str, default: float) -> float:
         return float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{key} must be a number") from exc
+
+
+def _bool_value(payload: dict[str, Any], key: str, default: bool) -> bool:
+    if key not in payload or payload[key] is None:
+        return default
+    value = payload[key]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{key} must be a boolean")
 
 
 if __name__ == "__main__":

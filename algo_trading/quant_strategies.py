@@ -8,6 +8,10 @@ from algo_trading.indicators import rsi
 from algo_trading.models import Candle
 
 QuantAction = str
+TIME_SERIES_MOMENTUM_LOOKBACK = 60
+TIME_SERIES_MOMENTUM_THRESHOLD_PCT = 2.0
+BREADTH_STRONG = 55.0
+BREADTH_WEAK = 45.0
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,72 @@ def public_quant_strategy_idea(idea: QuantStrategyIdea) -> dict[str, Any]:
     }
 
 
+def time_series_momentum_return_pct(
+    candles: Sequence[Candle],
+    *,
+    lookback: int = TIME_SERIES_MOMENTUM_LOOKBACK,
+    index: int | None = None,
+) -> float | None:
+    if not candles:
+        return None
+    end_index = len(candles) - 1 if index is None else index
+    if end_index <= 0 or end_index >= len(candles):
+        return None
+    used_lookback = min(lookback, end_index)
+    start = candles[end_index - used_lookback].close
+    end = candles[end_index].close
+    return _percent_change(start, end)
+
+
+def rsi_mean_reversion_side(
+    rsi_value: float,
+    *,
+    oversold: float = 30.0,
+    overbought: float = 70.0,
+) -> int:
+    if rsi_value <= oversold:
+        return 1
+    if rsi_value >= overbought:
+        return -1
+    return 0
+
+
+def donchian_breakout_side(close: float, previous_high: float, previous_low: float) -> int:
+    if close > previous_high:
+        return 1
+    if close < previous_low:
+        return -1
+    return 0
+
+
+def latest_breadth_closes(
+    breadth_bars_by_symbol: Mapping[str, Sequence[Any]] | None,
+) -> list[float]:
+    if not breadth_bars_by_symbol:
+        return []
+    return [
+        float(bars[-1].close)
+        for bars in breadth_bars_by_symbol.values()
+        if bars
+    ]
+
+
+def breadth_confirmation_side(
+    values: Sequence[float],
+    *,
+    strong: float = BREADTH_STRONG,
+    weak: float = BREADTH_WEAK,
+) -> int:
+    if not values:
+        return 0
+    average = sum(values) / len(values)
+    if average >= strong:
+        return 1
+    if average <= weak:
+        return -1
+    return 0
+
+
 def _time_series_momentum_idea(candles: list[Candle]) -> QuantStrategyIdea:
     if len(candles) < 2:
         return _neutral_idea(
@@ -61,10 +131,16 @@ def _time_series_momentum_idea(candles: list[Candle]) -> QuantStrategyIdea:
             "Need at least two candles for momentum.",
         )
 
-    lookback = min(60, len(candles) - 1)
-    start = candles[-lookback - 1].close
+    lookback = min(TIME_SERIES_MOMENTUM_LOOKBACK, len(candles) - 1)
+    return_pct = time_series_momentum_return_pct(candles, lookback=lookback)
+    if return_pct is None:
+        return _neutral_idea(
+            "time-series-momentum",
+            "Time-series momentum",
+            "trend",
+            "Need at least two candles for momentum.",
+        )
     end = candles[-1].close
-    return_pct = _percent_change(start, end)
     score = _clamp(return_pct, -100.0, 100.0)
     if return_pct >= 2.0:
         action = "bullish"
@@ -103,11 +179,12 @@ def _rsi_mean_reversion_idea(candles: list[Candle]) -> QuantStrategyIdea:
 
     values = rsi([candle.close for candle in candles], period=14)
     latest = values[-1]
-    if latest <= 30.0:
+    side = rsi_mean_reversion_side(latest)
+    if side > 0:
         action = "bullish"
         score = 30.0 - latest
         reasons = [f"RSI is oversold at {latest:.2f}."]
-    elif latest >= 70.0:
+    elif side < 0:
         action = "bearish"
         score = -(latest - 70.0)
         reasons = [f"RSI is overbought at {latest:.2f}."]
@@ -142,12 +219,13 @@ def _donchian_breakout_idea(candles: list[Candle]) -> QuantStrategyIdea:
     high = max(candle.high for candle in previous)
     low = min(candle.low for candle in previous)
     close = candles[-1].close
-    if close > high:
+    side = donchian_breakout_side(close, high, low)
+    if side > 0:
         action = "bullish"
         distance_pct = _percent_change(high, close)
         score = min(100.0, distance_pct * 10.0)
         reasons = [f"Close is {distance_pct:.2f}% above the previous {period}-candle high."]
-    elif close < low:
+    elif side < 0:
         action = "bearish"
         distance_pct = _percent_change(low, close)
         score = max(-100.0, distance_pct * 10.0)
@@ -177,11 +255,7 @@ def _donchian_breakout_idea(candles: list[Candle]) -> QuantStrategyIdea:
 def _breadth_confirmation_idea(
     breadth_bars_by_symbol: Mapping[str, Sequence[Any]],
 ) -> QuantStrategyIdea:
-    latest_values = [
-        float(bars[-1].close)
-        for bars in breadth_bars_by_symbol.values()
-        if bars
-    ]
+    latest_values = latest_breadth_closes(breadth_bars_by_symbol)
     if not latest_values:
         return _neutral_idea(
             "breadth-confirmation",
@@ -192,11 +266,12 @@ def _breadth_confirmation_idea(
         )
 
     average = sum(latest_values) / len(latest_values)
-    if average >= 55.0:
+    side = breadth_confirmation_side(latest_values)
+    if side > 0:
         action = "bullish"
         score = min(100.0, (average - 50.0) * 2.0)
         reasons = [f"Average breadth is constructive at {average:.2f}%."]
-    elif average <= 45.0:
+    elif side < 0:
         action = "bearish"
         score = max(-100.0, (average - 50.0) * 2.0)
         reasons = [f"Average breadth is weak at {average:.2f}%."]
