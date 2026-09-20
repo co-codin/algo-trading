@@ -12,6 +12,7 @@ from algo_trading.models import (
 from algo_trading.strategy import (
     apply_strategy_preset,
     build_strategy_context,
+    combo_member_strategy_names,
     entry_signal_for_index,
     exit_signal_for_position,
     get_strategy,
@@ -81,9 +82,23 @@ class StrategyTests(unittest.TestCase):
                 "mfi-reversal",
                 "parabolic-sar",
                 "zscore-reversion",
+                "time-series-momentum",
+                "volatility-breakout",
+                "rsi-mean-reversion",
+                "breadth-confirmation",
                 "combined-signals",
             ],
         )
+
+    def test_combo_all_includes_new_quant_members(self):
+        members = combo_member_strategy_names(StrategyConfig(combo_strategies="all"))
+
+        self.assertGreater(len(members), 25)
+        self.assertNotIn(StrategyName.COMBINED_SIGNALS, members)
+        self.assertIn(StrategyName.TIME_SERIES_MOMENTUM, members)
+        self.assertIn(StrategyName.VOLATILITY_BREAKOUT, members)
+        self.assertIn(StrategyName.RSI_MEAN_REVERSION, members)
+        self.assertIn(StrategyName.BREADTH_CONFIRMATION, members)
 
     def test_registry_rejects_unknown_strategy(self):
         with self.assertRaisesRegex(ValueError, "strategy"):
@@ -462,6 +477,56 @@ class StrategyTests(unittest.TestCase):
         self.assertIsNotNone(signal)
         self.assertEqual(signal.type, SignalType.ENTER_LONG)
         self.assertEqual(signal.reason, "zscore_reversion_long")
+
+    def test_time_series_momentum_enters_long_on_lookback_return(self):
+        config = StrategyConfig(
+            strategy=StrategyName.TIME_SERIES_MOMENTUM,
+            allowed_side=AllowedSide.LONG_ONLY,
+            momentum_period=2,
+        )
+
+        signal = first_entry_signal(config, [10, 10.2, 11])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "time_series_momentum_long")
+
+    def test_volatility_breakout_enters_long_above_prior_range(self):
+        config = StrategyConfig(
+            strategy=StrategyName.VOLATILITY_BREAKOUT,
+            allowed_side=AllowedSide.LONG_ONLY,
+            donchian_period=3,
+        )
+
+        signal = first_entry_signal(config, [10, 10, 10, 14])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "volatility_breakout_long")
+
+    def test_rsi_mean_reversion_enters_while_rsi_is_oversold(self):
+        config = StrategyConfig(
+            strategy=StrategyName.RSI_MEAN_REVERSION,
+            allowed_side=AllowedSide.LONG_ONLY,
+            rsi_period=2,
+            rsi_oversold=30.0,
+            rsi_overbought=70.0,
+        )
+
+        signal = first_entry_signal(config, [10, 9, 8, 7])
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.type, SignalType.ENTER_LONG)
+        self.assertEqual(signal.reason, "rsi_mean_reversion_long")
+
+    def test_breadth_confirmation_is_flat_when_breadth_is_unavailable(self):
+        config = StrategyConfig(strategy=StrategyName.BREADTH_CONFIRMATION)
+        context = build_strategy_context(candles([10, 11, 12]), config)
+
+        signal = entry_signal_for_index(config, context, 2)
+
+        self.assertEqual(signal.type, SignalType.HOLD)
+        self.assertEqual(signal.reason, "no_signal")
 
     def test_combined_signals_enters_when_members_confirm_within_lookback(self):
         config = StrategyConfig(

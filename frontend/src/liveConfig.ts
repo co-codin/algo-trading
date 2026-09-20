@@ -58,6 +58,7 @@ export const strategyGroupCatalog: StrategyGroupDefinition[] = [
       "sma-crossover",
       "ichimoku-breakout",
       "parabolic-sar",
+      "time-series-momentum",
     ],
   },
   {
@@ -72,6 +73,7 @@ export const strategyGroupCatalog: StrategyGroupDefinition[] = [
       "williams-r-reversal",
       "mfi-reversal",
       "zscore-reversion",
+      "rsi-mean-reversion",
     ],
   },
   {
@@ -82,12 +84,13 @@ export const strategyGroupCatalog: StrategyGroupDefinition[] = [
       "keltner-breakout",
       "bollinger-squeeze-release",
       "momentum-scalping",
+      "volatility-breakout",
     ],
   },
   {
     id: "volume",
     labelKey: "strategyGroups.volume",
-    strategyNames: ["obv-trend", "volume-breakout"],
+    strategyNames: ["obv-trend", "volume-breakout", "breadth-confirmation"],
   },
   {
     id: "ensemble",

@@ -559,6 +559,24 @@ def _strategy_config_from_payload(
         combo_entry_confirmations=_int_value(payload, "combo_entry_confirmations", 2),
         combo_exit_confirmations=_int_value(payload, "combo_exit_confirmations", 2),
         combo_lookback=_int_value(payload, "combo_lookback", 3),
+        combo_regime_filter=_bool_value(payload, "combo_regime_filter", True),
+        combo_regime_metric=str(payload.get("combo_regime_metric") or "atr_pct"),
+        combo_regime_lookback=_int_value(payload, "combo_regime_lookback", 50),
+        combo_regime_low_percentile=_float_value(payload, "combo_regime_low_percentile", 33.0),
+        combo_regime_high_percentile=_float_value(payload, "combo_regime_high_percentile", 67.0),
+        combo_regime_mismatch_weight=_float_value(payload, "combo_regime_mismatch_weight", 0.0),
+        combo_mtf_filter=_bool_value(payload, "combo_mtf_filter", True),
+        combo_mtf_mode=str(payload.get("combo_mtf_mode") or "hard"),
+        combo_mtf_soft_weight=_float_value(payload, "combo_mtf_soft_weight", 0.5),
+        combo_mtf_interval_multiple=_int_value(payload, "combo_mtf_interval_multiple", 4),
+        combo_rs_filter=_bool_value(payload, "combo_rs_filter", True),
+        combo_rs_soft_weight=_float_value(payload, "combo_rs_soft_weight", 0.5),
+        combo_rs_lookback=_int_value(payload, "combo_rs_lookback", 20),
+        combo_session_filter=_bool_value(payload, "combo_session_filter", False),
+        combo_session_timezone=str(payload.get("combo_session_timezone") or "America/New_York"),
+        combo_session_preferred=str(payload.get("combo_session_preferred") or "us-cash,europe"),
+        combo_session_off_weight=_float_value(payload, "combo_session_off_weight", 0.5),
+        combo_min_vote_weight=_float_value(payload, "combo_min_vote_weight", 1.0),
         stop_loss_pct=_float_value(payload, "stop_loss_pct", 0.03),
         take_profit_pct=_float_value(payload, "take_profit_pct", 0.06),
         trailing_stop_pct=_float_value(payload, "trailing_stop_pct", 0.0),
@@ -923,6 +941,20 @@ def _float_value(payload: dict[str, Any], key: str, default: float) -> float:
         return float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{key} must be a number") from exc
+
+
+def _bool_value(payload: dict[str, Any], key: str, default: bool) -> bool:
+    if key not in payload or payload.get(key) is None:
+        return default
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{key} must be a boolean")
 
 
 if __name__ == "__main__":

@@ -398,6 +398,13 @@ class SimulatorTests(unittest.TestCase):
                 ),
                 candles([10, 11, 12, 13, 14]),
             ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("time-series-momentum"),
+                    momentum_period=6,
+                ),
+                candles([10, 11, 12, 13, 14]),
+            ),
         ]:
             with self.subTest(config=config):
                 with self.assertRaisesRegex(ValueError, "not enough candles"):
@@ -516,6 +523,35 @@ class SimulatorTests(unittest.TestCase):
                 ),
                 candles([10, 9, 8, 9, 11, 13, 15]),
                 "combined_long:2/2:ema-rsi,macd",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("time-series-momentum"),
+                    momentum_period=2,
+                ),
+                candles([10, 10.2, 11, 12, 13]),
+                "time_series_momentum_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("volatility-breakout"),
+                    donchian_period=3,
+                ),
+                candles([10, 10, 10, 14, 15]),
+                "volatility_breakout_long",
+            ),
+            (
+                StrategyConfig(
+                    strategy=StrategyName("rsi-mean-reversion"),
+                    rsi_period=2,
+                    rsi_oversold=30.0,
+                    rsi_overbought=70.0,
+                    rsi_midline=50.0,
+                    take_profit_pct=1.0,
+                    stop_loss_pct=1.0,
+                ),
+                candles([10, 9, 8, 7, 7.2, 9, 11]),
+                "rsi_mean_reversion_long",
             ),
         ]
 

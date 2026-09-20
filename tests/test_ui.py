@@ -344,6 +344,10 @@ class UiTests(unittest.TestCase):
             "mfi-reversal",
             "parabolic-sar",
             "zscore-reversion",
+            "time-series-momentum",
+            "volatility-breakout",
+            "rsi-mean-reversion",
+            "breadth-confirmation",
         ):
             self.assertIn(f'"{strategy_name}"', i18n_source)
 
